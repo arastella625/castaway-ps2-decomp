@@ -11,7 +11,7 @@ void cXObject::TagGraphicsField()
 
 u32 cXObject::GetSpriteSlot()
 {
-    return mSpriteSlots;
+    return (u32)mSpriteSlots.mpBegin;
 }
 
 void cXObject::ForceLocation()

@@ -17,6 +17,7 @@ public:
     s16 mPersonData[0x31];  // 0x6c  scopes 0x34 to 0x39
 
     Family *GetFamily();
+    s16 CountRelationshipsOfType(int type, bool a) const;
     s16 *GetPersonDataArray() { return mPersonData; }
 
     // The game has this as a function (0x250DE8) and also inlines it in InterpValue. An inline

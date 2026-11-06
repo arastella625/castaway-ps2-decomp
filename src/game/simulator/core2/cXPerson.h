@@ -82,6 +82,7 @@ public:
 
     s16 *GetPersonDataArray() { return mPersonData; }
     Neighbor *GetNeighbor() const { return mNeighbor; }
+    s16 GetNeighborID() const { return mPersonData[12]; }
     void *GetSimDescription() { return mSelector->mSimDescription; }
     f32 GetMotive(int index);
     f32 *GetMotiveRef(int index);

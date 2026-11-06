@@ -59,6 +59,17 @@ struct ParticleEffectParam {
     u32 field_0x4;
 };
 
+// Wii: SpriteSlot, 0x6c bytes. IsActive reads the word at +0x10.
+class SpriteSlot {
+public:
+    u32 pad_0x0[4];  // 0x00
+    void *mSprite;   // 0x10
+    u32 pad_0x14[0x16]; // 0x14
+
+    bool IsActive() const { return mSprite != 0; }
+};
+STATIC_ASSERT(SpriteSlot_size, sizeof(SpriteSlot) == 0x6c);
+
 // Wii: ObjectSlot. Slot 0 is the object's own; the slots a tree sees start at 1.
 class ObjectSlot {
 public:
@@ -97,8 +108,7 @@ public:
     ObjSelector *mSelector;    // 0xec
     eastl::vector<ObjectSlot, eastl::allocator> mObjectSlots; // 0xf0
     u8 mRoutingSlots[0x10];    // 0x100 eastl::vector<RoutingSlot>
-    u32 mSpriteSlots;          // 0x110 eastl::vector<SpriteSlot>, its first word
-    u8 pad_0x114[0xc];         // 0x114
+    eastl::vector<SpriteSlot, eastl::allocator> mSpriteSlots; // 0x110
     u8 field_0x120;            // 0x120
     u32 field_0x124;           // 0x124
     f32 field_0x128;           // 0x128
@@ -147,6 +157,9 @@ public:
     virtual u32 ReconType();
 
     void HandleError();
+    int GetIdleStatus() { return mModule->GetIdleStatus(mID); }
+    void SetIdleStatus(int status) { mModule->SetIdleStatus(mID, status); }
+    inline bool AllowIdleOptimization();
     s16 GetType() const { return mDef[9]; }
     int CountObjectSlots() { return mObjectSlots.size() - 1; }
     ObjectSlot *GetObjectSlot(int index)
@@ -220,5 +233,21 @@ public:
     long TryNotifyPlans(StackElem *, XPrimParam *);
     long TryManageClothing(StackElem *, XPrimParam *);
 };
+
+// Whether this object can sleep through an Idle: it isn't a Sim, variable 0x19 is clear, and
+// none of its sprites is active.
+inline bool cXObject::AllowIdleOptimization()
+{
+    bool active = false;
+    for (SpriteSlot *slot = mSpriteSlots.begin(); slot != mSpriteSlots.end(); ++slot) {
+        if (slot->IsActive()) {
+            active = true;
+            break;
+        }
+    }
+    if (GetType() != 2 && mVars[0x19] == 0 && !active)
+        return true;
+    return false;
+}
 
 #endif

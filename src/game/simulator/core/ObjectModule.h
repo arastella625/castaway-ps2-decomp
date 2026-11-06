@@ -25,6 +25,8 @@ public:
         return mObjects[id - 1];
     }
     void ClearIdleStatus(int id);
+    int GetIdleStatus(int id);
+    void SetIdleStatus(int id, int status);
 
     cXObject *GetTutorialObject() { return mTutorialObject; }
 

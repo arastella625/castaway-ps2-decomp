@@ -1,32 +1,27 @@
 #include "game/simulator/core/cXObject.h"
 
+#include "common/EGlobal.h"
+#include "game/animation/SAnimator2.h"
+
 #include "game/simulator/core/Lot.h"
 #include "game/simulator/core2/cXPerson.h"
 #include "game/simulator/objectdata/XObjLang.h"
 
-// Primitive 0x2c. Which behaviour it asks for comes from two bytes.
-class AnimateNewParam {
-public:
-    u8 field_0x0[3];
-    u8 mAnimType; // 0x03  bit 7 mirrored, the rest an animation group
-    u8 field_0x4;
-    u8 mFlags;    // 0x05
+#define OBJECT_ERROR_CHECK(condition, code) TREE_CHECK(this, condition, code, return -1)
 
-    int GetBehavior() const
-    {
-        int behavior = 0;
-        int group = mAnimType & 0x7f;
-        if (group) {
-            behavior = group + 3;
-        } else {
-            if (mFlags & 1)
-                behavior |= 1;
-            if (mFlags & 0x10)
-                behavior |= 2;
-        }
-        return behavior;
-    }
+namespace InteractorModule {
+class DirectInteractor {
+public:
+    u32 pad_0x0[0x23];
+    int mAutonomous; // 0x8c  Wii: IsAutonomous
 };
+
+class InteractorManager {
+public:
+    static InteractorManager *GetSingleton();
+    DirectInteractor *GetPlayerInteractor(int a, int type);
+};
+}
 
 // Primitive 0xf, TreeBreak.
 struct TreeBreakParam {
@@ -43,6 +38,170 @@ public:
     TreeBreakValue() {}
     TreeBreakValue(const TreeBreakValue &other);
 };
+
+// Primitive 0: wait. The counter is a parameter of this tree, numbered by the first operand.
+struct IdleParam {
+    s16 mParam; // 0x00
+};
+
+long cXObject::TryIdle(StackElem *elem, XPrimParam *primParam)
+{
+    IdleParam *param = (IdleParam *)primParam;
+    TREE_CHECK(this, param->mParam >= 0 && param->mParam < elem->mNumParams, 8, return -1);
+    s16 *params = elem->GetParams();
+    s16 *counter = &params[param->mParam];
+    if (GetIdleStatus() == 0) {
+        *counter = 0;
+        SetIdleStatus(-1);
+    }
+    if (*counter < 0)
+        *counter = 0;
+    if (*counter == 0)
+        return 1;
+    if (!AllowIdleOptimization()) {
+        --*counter;
+        return 2;
+    }
+    SetIdleStatus(*counter - 1);
+    return 2;
+}
+
+#ifdef NON_MATCHING
+// The logic of these two is complete. TryRandom has 108 of 118 words lined up: the game tests the
+// limit with lh and reloads it with lhu, which this doesn't reproduce. TryCheckObject has 131 of
+// 189: the gotos give the game's shared return blocks, but the hoisted locals change registers.
+// Wii: GetNextRandomNumber, and SRand, which the PS2 build inlines.
+u32 GetNextRandomNumber();
+
+inline u32 SRand(u32 limit)
+{
+    if (limit != 0)
+        return GetNextRandomNumber() % limit;
+    return 0;
+}
+
+// Primitive 8: a random number below a limit, into an operand.
+struct RandomParam {
+    s16 mData;       // 0x00
+    u16 mScope;      // 0x02
+    u16 mLimitData;  // 0x04
+    u16 mLimitScope; // 0x06
+};
+
+long cXObject::TryRandom(StackElem *elem, XPrimParam *primParam)
+{
+    RandomParam param = *(RandomParam *)primParam;
+    const s16 *ref;
+    f32 *floatRef;
+    u16 limit;
+
+    if (InterpValue((s16)param.mScope, param.mData, &ref, &floatRef, 0, 0) == -1)
+        return -1;
+    if (InterpValue((s16)param.mLimitScope, (s16)param.mLimitData, 0, 0, (s16 *)&limit, 0) == -1)
+        return -1;
+    TREE_CHECK(this, (s16)limit, 4, return -1);
+    if (ref) {
+        InterpWriteValue((s16)param.mScope, param.mData, &ref, SRand((s16)limit));
+        return 1;
+    }
+    if (floatRef) {
+        *floatRef = (int)SRand((s16)limit);
+        return 1;
+    }
+    TREE_ERROR(0x13);
+    return -1;
+}
+
+// Primitive 0x35: questions about the object in an operand.
+struct CheckObjectParam {
+    s16 mData;  // 0x00
+    s16 mScope; // 0x02
+    s16 mTest;  // 0x04
+};
+
+long cXObject::TryCheckObject(StackElem *elem, XPrimParam *primParam)
+{
+    CheckObjectParam *param = (CheckObjectParam *)primParam;
+    s16 id = -1;
+    int value;
+    void *found;
+    cXObject *object;
+    cXPerson *person;
+    InteractorModule::InteractorManager *manager;
+    InteractorModule::DirectInteractor *interactor;
+
+    if (InterpValue(param->mScope, param->mData, 0, 0, &id, 0) == -1)
+        return -1;
+    switch (param->mTest) {
+    case 0: {
+        // The player's Sim, under direct control.
+        object = GetObjectFromID(id);
+        if (!object)
+            return 0;
+        person = object->GetPerson();
+        if (!person)
+            return 0;
+        manager = InteractorModule::InteractorManager::GetSingleton();
+        if (_globals.mPlayerPerson != person)
+            return 0;
+        interactor = manager->GetPlayerInteractor(0, 0);
+        if (!interactor)
+            return 0;
+        value = interactor->mAutonomous;
+        goto isZero;
+    }
+    case 1:
+        found = GetObjectFromID(id);
+        goto isNonZero;
+    case 2: {
+        object = GetObjectFromID(id);
+        if (!object)
+            return 0;
+        value = object->GetType() ^ 2;
+    isZero:
+        if (value)
+            return 0;
+        return 1;
+    }
+    case 3:
+        found = GetNeighborhood()->FindNeighborByIDInline(id);
+    isNonZero:
+        if (found)
+            return 1;
+        break;
+    case 4: {
+        // How many relationships of the type in temp 0 the Sim has, back into temp 0.
+        s16 count = 0;
+        OBJECT_ERROR_CHECK(mTemps[0] > 0 && mTemps[0] < 10, 0x14);
+        s16 type = mTemps[0];
+        object = GetObjectFromID(id);
+        if (object) {
+            person = object->GetPerson();
+            if (person)
+                count = GetNeighborhood()->FindNeighborByIDInline(person->GetNeighborID())->CountRelationshipsOfType(type, false);
+        }
+        mTemps[0] = count;
+        return 1;
+    }
+    case 5: {
+        // The player's Sim with no interactor.
+        object = GetObjectFromID(id);
+        if (!object)
+            return 0;
+        person = object->GetPerson();
+        if (!person)
+            return 0;
+        manager = InteractorModule::InteractorManager::GetSingleton();
+        if (_globals.mPlayerPerson != person)
+            return 0;
+        if (manager->GetPlayerInteractor(0, 0) == 0)
+            return 1;
+        return 0;
+    }
+    }
+    return 0;
+}
+#endif
 
 #ifdef NON_MATCHING
 // The logic is all here, and 69 of the 121 words line up. Still different: the registers of the
