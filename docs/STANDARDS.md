@@ -1,10 +1,13 @@
 # Project standards
 
-These rules keep the decompilation trustworthy and the repo safe to publish. Two scripts
+These rules keep the decompilation trustworthy and the repo safe to publish. Three scripts
 enforce the parts a machine can check:
 
 - `tools/verify.py` builds `src/` with the game's compiler and fails unless every function
   is byte-identical to the game.
+- `rebuild/rebuild.py` links `src/` into a complete executable and fails unless its SHA-1
+  is the game's. It catches what `verify.py` can't: a wrong address in `config/symbols.txt`,
+  or a function whose size or neighbours are wrong.
 - `tools/check_repo.py` fails when a commit holds game data, binaries or secrets. It runs
   as a pre-commit hook and in CI.
 
@@ -16,6 +19,8 @@ enforce the parts a machine can check:
 | `src/game/...` | Mirrors the original source paths known from the Wii symbols (`game/cas/unity.cpp` becomes `src/game/cas/`). |
 | `src/common/` | Shared types whose original location isn't known yet. |
 | `config/symbols.txt` | The PS2 address of each function, by mangled name. The only place addresses live. |
+| `config/splat/` | The splat config that splits the executable for the rebuild. |
+| `rebuild/` | The full rebuild: `rebuild.py` and its notes. |
 | `tools/` | Scripts for the decompilation: build, compare, repo checks. |
 | `pkg/` | The naming kit: name lists, struct layouts and the scripts that produce them. |
 | `docs/` | Standards and notes. |
@@ -84,7 +89,8 @@ functions, LF line endings.
 3. Run `tools/verify.py`. It reports the mangled name of anything not yet in
    `config/symbols.txt`; add that name with the function's PS2 address.
 4. Read the differing words, adjust the source, and repeat until it matches.
-5. Update `pkg/cas_layouts.csv` if you learned a field, and the count in `README.md`.
+5. Run `rebuild/rebuild.py` before committing. It must still report `MATCH`.
+6. Update `pkg/cas_layouts.csv` if you learned a field, and the count in `README.md`.
 
 Run it from WSL:
 
@@ -144,7 +150,8 @@ CASTAWAY_COMPILERS=/mnt/d/tools/castaway_work/compilers CASTAWAY_SLUS=/mnt/d/too
 
 ## Git
 
-- `main` always passes `tools/verify.py` and `tools/check_repo.py`.
+- `main` always passes `tools/verify.py`, `rebuild/rebuild.py` and `tools/check_repo.py`.
+  CI can only run the last one, because it has no game file, so run the first two locally.
 - One topic per commit. The subject line says what changed, in the imperative.
 - A commit that adds matched functions says how many and in which class.
 - Commit or push only with the owner's go-ahead while the repo's publication status is open.

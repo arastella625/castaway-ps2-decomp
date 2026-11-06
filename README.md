@@ -10,6 +10,7 @@ A hobby reverse-engineering project for the US PS2 build, `SLUS_216.64`. The goa
 - Structs are recovered for `CasSimDescription`, `SimBodyPart` and its subclasses.
 - 70 functions are matched byte for byte (3,336 bytes, 0.09% of the code), all in `SimBodyPart` and `CasSimDescription`. Nearly everything else is still undecompiled.
 - The compiler for the Create-a-Sim code is SN Systems ee-gcc 2.95.3 build 1.36 at `-O2 -G0 -fno-rtti`.
+- A full rebuild links 66 of those functions in place of their assembly and reproduces the game's checksum. The data sections are still raw binary.
 
 ## Where to start
 
@@ -20,6 +21,8 @@ A hobby reverse-engineering project for the US PS2 build, `SLUS_216.64`. The goa
 ## Checking the decompiled code
 
 `tools/verify.py` builds `src/` with the game's compiler and compares each function with your copy of the game. It needs WSL with Wine, the compiler from decompme/compilers, and the game executable; [docs/STANDARDS.md](docs/STANDARDS.md) has the command.
+
+`rebuild/rebuild.py` goes further: it links the C++ into a complete executable and checks its SHA-1. [rebuild/README.md](rebuild/README.md) has the setup.
 
 ## Credits
 
