@@ -1,11 +1,11 @@
 class,offset,type,name,comment
 SimBodyPart,size,0x24,,
 SimBodyPart,0x0,uint,field_0x0,Unknown. GetCharacterFlag reads 16 bits here on PS2 but 32 on Wii
-SimBodyPart,0x4,uint,field_0x4,Unknown
+SimBodyPart,0x4,uint,flags,BitFlags; SetClothingSetIndex copies the clothing set's flags here
 SimBodyPart,0x8,ptr,geometryVector,Wii IsGeneric passes this to VECTOR<Sim::BodyPartGeometryTSC6>::size
 SimBodyPart,0xc,ptr,bodyPartTypeInfo,Direct getter GetBodyPartTypeInfo
 SimBodyPart,0x10,ptr,clothingSetData,Direct getter GetClothingSetData
-SimBodyPart,0x14,uint,field_0x14,Unknown
+SimBodyPart,0x14,ptr,damageState,Null-checked by GetIsDamaged and GetCurrentHitPoints; +0x8 hit points and +0x1c damaged flag
 SimBodyPart,0x18,byte,clothingSetIndex,SetClothingSetIndex and IsValidClothingSetIndex
 SimBodyPart,0x19,byte,modelCodeIndex,IsValidModelCodeIndex
 SimBodyPart,0x1a,byte,modelIndex,IsValidModelIndex
@@ -52,7 +52,7 @@ CasSimDescription,0x84,ushort,field_0x84,Unknown
 CasSimDescription,0x86,byte,field_0x86,Unknown
 CasSimDescription,0x88,uint,flags,Wii constructor builds a BitFlags<uint> here
 CasSimDescription,0x8c,uint,field_0x8c,Unknown
-CasSimDescription,0x90,uint,field_0x90,Unknown
+CasSimDescription,0x90,ptr,typeInfo,GetBodyPartName indexes a table at +0x0; GetTypeCode reads through +0x4
 CasSimDescription,0x94,SimBodyPart*[15],bodyParts,GetBodyPartByIndex; GetNumBodyParts returns 15
 CasSimDescription,0xd0,float[4],latticeMorphValues,GetLatticeMorphValue
 CasSimDescription,0xe0,float[4],morphTargetValues,GetMorphTargetValue and SetMorphTargetValue

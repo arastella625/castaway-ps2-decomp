@@ -45,9 +45,11 @@ The owner chose PS2 over Wii on purpose. As far as we know nobody has decompiled
 
 **Compiler (step 5, done for `game/cas`):** SN Systems ee-gcc 2.95.3 build 1.36 at `-O2` (`ee-gcc2.95.3-136` in decompme/compilers). Three `SimBodyPart` methods compiled and assembled with its own `as.exe` are byte-identical to the game: 115 of 115 comparable words, with 3 relocated words excluded. SN 2.95.3 v1.14 and 2.95.2 v2.73a do not match. Sony 2.96 was not fairly tested, because my flags didn't target the R5900.
 
-Still open: `-O2` and `-O3` gave the same code here, and `-G`, `-fno-exceptions` and `-fno-rtti` made no difference on these functions, so those flags need more varied functions. Only one source module has been tested; other modules may use other flags, and EA and Sony libraries may have been built separately.
+Flags, from 70 matched functions: `-O2 -G0 -fno-rtti`. `-G0` is proven: float constants assemble to `lui`/`ori`/`mtc1` only when `as` gets `-G0`, and string addresses are `lui`/`addiu`, not gp-relative. `-fno-rtti` is likely, because slot 0 of every vtable is null. Still open: `-O2` and `-O3` gave the same code, and `-fno-exceptions` made no difference. Only one source module has been tested; other modules may use other flags, and EA and Sony libraries may have been built separately.
 
-To run it: the harness is in `pkg/tools/matching`. Set `COMPILERS` to the folder holding the compilers (here `/mnt/d/tools/castaway_work/compilers`). Run the SN `.exe` files under Wine in WSL with `unshare -rn` so they have no network. `cc1plus` has no preprocessor, so feed it preprocessed `.ii` input. `Ps2EeAs.exe` crashes under Wine, and `as.exe` works. Never commit the compilers.
+**Matching workflow:** decompiled code is in `src/`, addresses in `config/symbols.txt`, and `tools/verify.py` builds and byte-compares every function. `docs/STANDARDS.md` has the rules and the command. `pkg/tools/matching` is the older harness that compared four compilers and twelve flag sets; keep it for testing other modules.
+
+To run the older harness: it is in `pkg/tools/matching`. Set `COMPILERS` to the folder holding the compilers (here `/mnt/d/tools/castaway_work/compilers`). Run the SN `.exe` files under Wine in WSL with `unshare -rn` so they have no network. `cc1plus` has no preprocessor, so feed it preprocessed `.ii` input. `Ps2EeAs.exe` crashes under Wine, and `as.exe` works. Never commit the compilers.
 
 Rebuild from scratch (export `ghidra_functions.csv` first with `tools/ExportGhidraFunctions.java`):
 ```
@@ -71,6 +73,16 @@ Step 4 is partly done. `CasSimDescription` (0x334 bytes), `SimBodyPart` (0x24) a
 Creating functions at all vtable slot targets (`tools/CreateFunctionsAt.java`) added 2,105 functions, bringing the total to 13,231. `tools/FixSwitchTables.java` recovered one switch; 44 functions with computed jumps stay unresolved.
 
 Names now total 2,173 of 13,231 functions (16.4%), including 650 in `game/simulator/core` and `core2`. The jump came from `tools/vtable_order.py`, which pairs tables by order and slot counts (940 names). To rebuild, loop `vtable_order.py`, `vtables.py --all-tiers`, `order_fill.py` and `match.py`, feeding each `castaway_ps2_names.csv` back in, until nothing new appears (5 rounds here). Still open: 2,955 of 4,538 vtable slot targets are unnamed, and Wii seems to combine multiple-inheritance tables that PS2 keeps separate, so those don't match on length.
+
+**Status, 2026-11-05, matching:** 70 functions match (33 in `SimBodyPart`, 37 in `CasSimDescription`). Both classes have their full virtual tables declared in order: the Wii vtables in ts2c `asm/data.s` list every slot by name, and the PS2 tables have the same slots in the same order (72 for `SimBodyPart`, 67 for `CasSimDescription`), so any class's virtual layout can be read off the Wii data.
+
+What the compiler does with source shape, learned while matching:
+- `if (ok) return a; return b;` puts `a` at the branch target. Swap the two when the branch sense is reversed.
+- `x == false` on a `bool` gives `sltiu`; `!x` gives `xori`.
+- Indexing through an inline accessor (`VECTOR::operator[]`) picks different registers from indexing a raw pointer.
+- A callee declared to return `bool` avoids an extra `sltu` at the call site.
+
+Next targets in `game/cas`: `CasSimDescription::GetBodyPartIndex` (calls a switch helper at `0x129E30`), the texture-name functions (they need the string class at `0x3DE498`–`0x3DED30`), then the 15 `SimBodyPart` subclasses, whose small overrides sit at `0x141DC0`–`0x142450`.
 
 ## Known weaknesses
 
