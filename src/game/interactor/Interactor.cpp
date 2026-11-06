@@ -1,5 +1,10 @@
 #include "game/interactor/Interactor.h"
 
+void InteractorModule::Interactor::ResetIdleTime()
+{
+    field_0x58 = 0;
+}
+
 void InteractorModule::Interactor::ExecuteObjectActionMenu(cXObject *a)
 {
 }

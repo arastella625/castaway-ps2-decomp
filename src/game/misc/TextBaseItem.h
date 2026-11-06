@@ -10,7 +10,9 @@
 // vtable pairing tiers; a one-instruction body cannot confirm that a name is right.
 class TextBaseItem {
 public:
-    u8 pad_0x0[0x24];
+    u8 pad_0x0[0x4];
+    s32 field_0x4; // 0x04
+    u8 pad_0x8[0x1c];
     f32 field_0x24; // 0x24
     f32 field_0x28; // 0x28
     u8 pad_0x2c[0x18];
@@ -18,6 +20,7 @@ public:
     f32 field_0x48; // 0x48
     f32 field_0x4c; // 0x4c
 
+    void Reset();
     u32 GetColor();
     void SetShadowAlpha(f32 value);
     f32 GetShadowAlpha();

@@ -18,16 +18,35 @@ public:
     u8 pad_0x8[0x100];
     u32 field_0x108; // 0x108
     f32 field_0x10c; // 0x10c
-    s16 field_0x110; // 0x110
+    u16 field_0x110; // 0x110
     s16 field_0x112; // 0x112
     s16 field_0x114; // 0x114
     s16 field_0x116; // 0x116
+    s32 field_0x118; // 0x118
 
     s16 GetIndex() const;
+    int GetAvailableToVisitors() const;
+    int GetCanJoin() const;
+    int GetImmediate() const;
+    int GetAllowConsecutive() const;
+    int GetAvailableToGhosts() const;
+    int GetAvailableToCats() const;
+    int GetAvailableToLargeDogs() const;
+    int GetAvailableToSmallDogs() const;
+    int GetAvailableToChimps() const;
     void SetAvailableToChimps(bool a);
+    int GetAvailableToBoars() const;
     void SetAvailableToBoars(bool a);
+    int GetAvailableInDemo() const;
+    int GetAllowOnSelf() const;
     void SetAllowOnSelf(bool a);
     s16 GetJoinIndex() const;
+    int GetDebugOnly() const;
+    int GetAutoFirstSelect() const;
+    int GetAvailableToVisitingPlayers() const;
+    int GetIgnorePrefixTree() const;
+    int GetMustRun() const;
+    int GetAllowDynamicAds() const;
     void SetAllowDynamicAds(bool a);
     int CountAds() const;
     s16 GetActionTreeID() const;
@@ -39,7 +58,6 @@ public:
     s16 GetAutonomyThreshold() const;
     void SetAutonomyThreshold(s16 value);
     void SetName(const BString2 &a);
-    s16 GetFlags() const;
     int GetOrderIndex() const;
     void SetOrderIndex(int a);
     int GetUseCustomActivation() const;
@@ -48,6 +66,7 @@ public:
     void SetActivationSubtile(u8 a, u8 b);
     void GetActivationExtents(u8 &a, u8 &b, u8 &c, u8 &d) const;
     void SetActivationExtents(u8 a, u8 b, u8 c, u8 d);
+    void AddRef();
 };
 
 #endif

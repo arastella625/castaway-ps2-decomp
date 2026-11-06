@@ -10,7 +10,11 @@
 // vtable pairing tiers; a one-instruction body cannot confirm that a name is right.
 class IFFBehaviorTree {
 public:
+    u8 pad_0x0[0x60];
+    s32 field_0x60; // 0x60
+
     int GetDataSourceType() const;
+    void AddRef();
 };
 
 #endif

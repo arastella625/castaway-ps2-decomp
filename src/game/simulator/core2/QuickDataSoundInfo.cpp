@@ -19,3 +19,8 @@ int QuickDataSoundInfo::LoadOnlyNameAndIDFromIndex(u32 a, int b)
 {
     return 0;
 }
+
+void QuickDataSoundInfo::AddRef()
+{
+    field_0x58++;
+}

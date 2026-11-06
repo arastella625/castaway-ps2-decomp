@@ -13,3 +13,8 @@ int IFFSlotDescList::GetDataSourceType() const
 {
     return 2;
 }
+
+void IFFSlotDescList::AddRef()
+{
+    field_0x64++;
+}

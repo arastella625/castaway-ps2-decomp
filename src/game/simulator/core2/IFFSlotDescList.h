@@ -10,9 +10,13 @@
 // vtable pairing tiers; a one-instruction body cannot confirm that a name is right.
 class IFFSlotDescList {
 public:
+    u8 pad_0x0[0x64];
+    s32 field_0x64; // 0x64
+
     int GetStringSetID() const;
     void SetStringSetID(int a);
     int GetDataSourceType() const;
+    void AddRef();
 };
 
 #endif

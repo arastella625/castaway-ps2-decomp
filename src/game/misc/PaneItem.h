@@ -12,11 +12,14 @@ class ERC;
 // vtable pairing tiers; a one-instruction body cannot confirm that a name is right.
 class PaneItem {
 public:
-    u8 pad_0x0[0xc];
+    u8 pad_0x0[0x4];
+    s32 field_0x4; // 0x04
+    u8 pad_0x8[0x4];
     f32 field_0xc; // 0x0c
     f32 field_0x10; // 0x10
 
     void Shutdown();
+    void Reset();
     void CalculateSize();
     void SetPosX(f32 value);
     f32 GetPosX() const;

@@ -4,3 +4,8 @@ int IFFBehaviorTree::GetDataSourceType() const
 {
     return 2;
 }
+
+void IFFBehaviorTree::AddRef()
+{
+    field_0x60++;
+}

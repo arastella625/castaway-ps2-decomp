@@ -80,3 +80,8 @@ int TreeTableQuickData::GetDataSourceType() const
 {
     return 1;
 }
+
+void TreeTableQuickData::AddRef()
+{
+    field_0x20++;
+}

@@ -12,10 +12,14 @@ class cXObject {
 public:
     u8 pad_0x0[0x110];
     u32 field_0x110; // 0x110
+    u8 pad_0x114[0x20];
+    s32 field_0x134; // 0x134
 
     void PreSave();
+    void TagGraphicsField();
     u32 GetSpriteSlot();
     void ForceLocation();
+    u32 ReconType();
 };
 
 #endif

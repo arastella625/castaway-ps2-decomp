@@ -12,8 +12,12 @@ class ObjectDataID;
 // vtable pairing tiers; a one-instruction body cannot confirm that a name is right.
 class ResourceBehaviorTree {
 public:
+    u8 pad_0x0[0x64];
+    s32 field_0x64; // 0x64
+
     int GetDataSourceType() const;
     int SaveDataByID(const ObjectDataID &a);
+    void AddRef();
 };
 
 #endif

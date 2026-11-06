@@ -1,8 +1,53 @@
 #include "game/simulator/objectdata/TreeTableEntryQuickData.h"
 
+s16 TreeTableEntryQuickData::GetIndex() const
+{
+    return field_0x4->field_0x14;
+}
+
+s16 TreeTableEntryQuickData::GetOrderIndex() const
+{
+    return field_0x4->field_0x1a;
+}
+
+s16 TreeTableEntryQuickData::GetJoinIndex() const
+{
+    return field_0x4->field_0x18;
+}
+
 int TreeTableEntryQuickData::CountAds() const
 {
     return 0x10;
+}
+
+s16 TreeTableEntryQuickData::GetActionTreeID() const
+{
+    return field_0x4->field_0x2;
+}
+
+s16 TreeTableEntryQuickData::GetCheckTreeID() const
+{
+    return field_0x4->field_0x0;
+}
+
+u16 TreeTableEntryQuickData::GetAttenuation() const
+{
+    return field_0x4->field_0xc;
+}
+
+f32 TreeTableEntryQuickData::GetCustomAttenuationValue() const
+{
+    return field_0x4->field_0x8;
+}
+
+s16 TreeTableEntryQuickData::GetAutonomyThreshold() const
+{
+    return field_0x4->field_0x16;
+}
+
+u32 TreeTableEntryQuickData::GetFlags() const
+{
+    return field_0x4->field_0x10;
 }
 
 void TreeTableEntryQuickData::SetOrderIndex(int a)
@@ -128,4 +173,9 @@ void TreeTableEntryQuickData::SetActivationSubtile(u8 a, u8 b)
 
 void TreeTableEntryQuickData::SetActivationExtents(u8 a, u8 b, u8 c, u8 d)
 {
+}
+
+void TreeTableEntryQuickData::AddRef()
+{
+    field_0x18++;
 }

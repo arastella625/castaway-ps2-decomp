@@ -13,6 +13,9 @@ class SlotDescriptor;
 // vtable pairing tiers; a one-instruction body cannot confirm that a name is right.
 class QuickDataSlotDescList {
 public:
+    u8 pad_0x0[0x5c];
+    s32 field_0x5c; // 0x5c
+
     int AddSlot(SlotDescriptor &a);
     int RemoveSlot(int a);
     int GetStringSetID() const;
@@ -20,6 +23,7 @@ public:
     int SaveDataByID(const ObjectDataID &a);
     int GetDataSourceType() const;
     int LoadOnlyNameAndIDFromIndex(u32 a, int b);
+    void AddRef();
 };
 
 #endif

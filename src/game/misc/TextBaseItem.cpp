@@ -1,5 +1,10 @@
 #include "game/misc/TextBaseItem.h"
 
+void TextBaseItem::Reset()
+{
+    field_0x4 = 1;
+}
+
 u32 TextBaseItem::GetColor()
 {
     return field_0x44;

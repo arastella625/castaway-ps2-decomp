@@ -14,3 +14,8 @@ s16 TreeTableAdScratch::GetRange() const
 {
     return field_0x8;
 }
+
+void TreeTableAdScratch::AddRef()
+{
+    field_0xc++;
+}

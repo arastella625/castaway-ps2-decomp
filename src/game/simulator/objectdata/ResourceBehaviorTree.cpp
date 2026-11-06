@@ -9,3 +9,8 @@ int ResourceBehaviorTree::SaveDataByID(const ObjectDataID &a)
 {
     return 0;
 }
+
+void ResourceBehaviorTree::AddRef()
+{
+    field_0x64++;
+}

@@ -14,6 +14,9 @@ class StringBuffer;
 // vtable pairing tiers; a one-instruction body cannot confirm that a name is right.
 class TreeTableQuickData {
 public:
+    u8 pad_0x0[0x20];
+    s32 field_0x20; // 0x20
+
     int LoadFromIndex(u32 a, int b);
     int GetResourceName(StringBuffer &a) const;
     int SetResourceName(const StringBuffer &a);
@@ -31,6 +34,7 @@ public:
     void SetPrefixCheckTreeID(s16 a);
     int SaveDataByID(const ObjectDataID &a);
     int GetDataSourceType() const;
+    void AddRef();
 };
 
 #endif

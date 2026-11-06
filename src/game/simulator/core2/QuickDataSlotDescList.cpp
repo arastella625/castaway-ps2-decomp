@@ -33,3 +33,8 @@ int QuickDataSlotDescList::LoadOnlyNameAndIDFromIndex(u32 a, int b)
 {
     return 0;
 }
+
+void QuickDataSlotDescList::AddRef()
+{
+    field_0x5c++;
+}

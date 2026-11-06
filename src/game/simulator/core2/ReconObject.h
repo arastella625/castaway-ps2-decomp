@@ -13,6 +13,7 @@ class ReconBuffer;
 class ReconObject {
 public:
     void DoStream(ReconBuffer *a, int b);
+    u32 GetType();
 };
 
 #endif

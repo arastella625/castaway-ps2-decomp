@@ -12,10 +12,14 @@ class ObjectDataID;
 // vtable pairing tiers; a one-instruction body cannot confirm that a name is right.
 class QuickDataSoundInfo {
 public:
+    u8 pad_0x0[0x58];
+    s32 field_0x58; // 0x58
+
     int LoadFromIndex(u32 a, int b);
     int SaveDataByID(const ObjectDataID &a);
     int GetDataSourceType() const;
     int LoadOnlyNameAndIDFromIndex(u32 a, int b);
+    void AddRef();
 };
 
 #endif

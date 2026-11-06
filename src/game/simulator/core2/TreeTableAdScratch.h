@@ -14,10 +14,13 @@ public:
     s16 field_0x4; // 0x04
     s16 field_0x6; // 0x06
     s16 field_0x8; // 0x08
+    u8 pad_0xa[0x2];
+    s32 field_0xc; // 0x0c
 
     s16 GetPersonalityAd() const;
     s16 GetMin() const;
     s16 GetRange() const;
+    void AddRef();
 };
 
 #endif

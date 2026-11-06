@@ -4,6 +4,11 @@ void PaneItem::Shutdown()
 {
 }
 
+void PaneItem::Reset()
+{
+    field_0x4 = 1;
+}
+
 void PaneItem::CalculateSize()
 {
 }

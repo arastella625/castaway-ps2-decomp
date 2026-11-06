@@ -12,6 +12,10 @@ class ERC;
 // vtable pairing tiers; a one-instruction body cannot confirm that a name is right.
 class MUStatesLoadHouse {
 public:
+    u8 pad_0x0[0x1c];
+    u32 field_0x1c; // 0x1c
+
+    void Reset();
     void Draw(ERC *a);
 };
 
