@@ -12,6 +12,9 @@
 // Wii: tempDataPrim. What a check-tree ad scope points at when ads aren't allowed.
 extern s16 tempDataPrim;
 
+// Wii: OnEdithSetFlagField1 sets this. What reads it isn't worked out yet.
+extern int sEdithFlagFieldChanged;
+
 #define OBJECT_CHECK(condition, code) TREE_CHECK(this, condition, code, return -1)
 
 // The operand is the s16 at this address: hand back both the address and the value.
@@ -53,7 +56,7 @@ inline int fround(f32 value)
 // Reads one operand. scope picks where it lives and data says which one (bhav.md has the list).
 // value gets the number. ref gets its address when it can be written through, and floatRef the
 // address of a motive, which is a float underneath.
-int cXObject::InterpValue(s16 scope, s16 data, const s16 **ref, f32 **floatRef, s16 *valueOut, s16 **unused)
+long cXObject::InterpValue(s16 scope, s16 data, const s16 **ref, f32 **floatRef, s16 *valueOut, s16 **unused)
 {
     const s16 *nothing = 0;
     s16 value = 0;
@@ -981,3 +984,232 @@ int cXObject::InterpWriteValue(s16 scope, s16 data, const s16 **ref, s16 value)
     }
     return 1;
 }
+
+// Wii: OnEdithSetFlagField1, inlined. Bit 0x2000 of an object's flag word changing is noticed.
+inline void OnEdithSetFlagField1(int mask, bool wasSet, bool isSet)
+{
+    if (mask == 0x2000 && wasSet != isSet)
+        sEdithFlagFieldChanged = 1;
+}
+
+#ifdef NON_MATCHING
+// The size is exact and about 575 of 628 words line up; the rest is alignment that follows
+// from these. What differs:
+// - Where the left operand might be a motive, the game tests the float pointer in a0 and takes
+//   a branch-likely with its delay slot from the target. OBJECT_CHECK gets a0 but not the
+//   branch-likely; a plain if gets the branch-likely but puts the pointer in v0.
+// - The order of result = 1 and wrote = true among the arguments of the write calls.
+// Primitive 2. Reads two operands and compares or changes the left one. Motives are floats
+// underneath, so where the left operand has no s16 to write through it uses the float.
+long cXObject::TryExpression(ExpressionParam *param)
+{
+    s16 rightValue;
+    u16 leftValue;
+    const s16 *leftRef;
+    f32 *leftFloat;
+    s16 *unused = 0;
+    long result = -1;
+    bool wrote = false;
+
+    if (param->mRightScope != 7) {
+        if (InterpValue(param->mRightScope, param->mRight, 0, 0, &rightValue, 0) == -1)
+            return -1;
+    } else {
+        int right = param->mRight;
+        rightValue = right;
+    }
+
+    if (param->mLeftScope != 7) {
+        if (InterpValue(param->mLeftScope, param->mLeft, &leftRef, &leftFloat, (s16 *)&leftValue, &unused) == -1)
+            return -1;
+    } else {
+        int left = param->mLeft;
+        leftValue = left;
+        leftRef = 0;
+        leftFloat = 0;
+    }
+
+    switch (param->mOperator) {
+    case 0x11:
+        // --left, then left > right.
+        if (leftRef) {
+            InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef - 1);
+            leftValue = *leftRef;
+        } else {
+            OBJECT_CHECK(leftFloat, 0x13);
+            *leftFloat -= 1.0f;
+            leftValue = *leftRef;
+        }
+        wrote = true;
+        result = (s16)leftValue > rightValue;
+        break;
+    case 0x0e:
+        result = (s16)leftValue >= rightValue;
+        break;
+    case 0x0f:
+        result = (s16)leftValue <= rightValue;
+        break;
+    case 0x10:
+        result = 1;
+        if ((s16)leftValue == rightValue)
+            result = 0;
+        break;
+    case 0x0d:
+        OBJECT_CHECK(leftRef, 0x13);
+        result = 1;
+        wrote = true;
+        InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef & rightValue);
+        break;
+    case 0x12:
+        OBJECT_CHECK(leftRef, 0x13);
+        result = 1;
+        wrote = true;
+        InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef | rightValue);
+        break;
+    case 0x0c:
+        // left %= right, with both made positive first.
+        OBJECT_CHECK(leftRef, 0x13);
+        OBJECT_CHECK(rightValue != 0, 0x26);
+        if (*leftRef < 0)
+            InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, -*leftRef);
+        if (rightValue < 0)
+            rightValue = -rightValue;
+        result = 1;
+        wrote = true;
+        InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef % rightValue);
+        break;
+    case 0x0b:
+        // ++left, then left < right.
+        if (leftRef) {
+            InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef + 1);
+            leftValue = *leftRef;
+        } else {
+            OBJECT_CHECK(leftFloat, 0x13);
+            *leftFloat += 1.0f;
+            leftValue = *leftRef;
+        }
+        wrote = true;
+        result = (s16)leftValue < rightValue;
+        break;
+    case 0x01:
+        result = (s16)leftValue < rightValue;
+        break;
+    case 0x00:
+        result = (s16)leftValue > rightValue;
+        break;
+    case 0x02:
+        result = 1;
+        if ((s16)leftValue != rightValue)
+            result = 0;
+        break;
+    case 0x05:
+        if (leftRef) {
+            InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, rightValue);
+        } else {
+            OBJECT_CHECK(leftFloat, 0x13);
+            *leftFloat = rightValue;
+        }
+        result = 1;
+        wrote = true;
+        break;
+    case 0x03:
+        if (leftRef) {
+            InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef + rightValue);
+        } else {
+            OBJECT_CHECK(leftFloat, 0x13);
+            *leftFloat += rightValue;
+        }
+        result = 1;
+        wrote = true;
+        break;
+    case 0x04:
+        if (leftRef) {
+            InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef - rightValue);
+        } else {
+            OBJECT_CHECK(leftFloat, 0x13);
+            *leftFloat -= rightValue;
+        }
+        result = 1;
+        wrote = true;
+        break;
+    case 0x06:
+        if (leftRef) {
+            InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef * rightValue);
+        } else {
+            OBJECT_CHECK(leftFloat, 0x13);
+            *leftFloat *= rightValue;
+        }
+        result = 1;
+        wrote = true;
+        break;
+    case 0x07:
+        OBJECT_CHECK(rightValue != 0, 0x26);
+        if (leftRef) {
+            InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef / rightValue);
+        } else {
+            OBJECT_CHECK(leftFloat, 0x13);
+            *leftFloat /= rightValue;
+        }
+        result = 1;
+        wrote = true;
+        break;
+    case 0x09: {
+        // Set bit right of left. Bits count from 1.
+        OBJECT_CHECK(rightValue < 0x11, 13);
+        OBJECT_CHECK(leftRef, 0x13);
+        wrote = true;
+        s16 before = *leftRef;
+        int mask = 1 << (rightValue - 1);
+        InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef | mask);
+        if (param->mLeft == 8)
+            OnEdithSetFlagField1(mask, (before & mask) != 0, (*leftRef & mask) != 0);
+        result = 1;
+        wrote = true;
+        break;
+    }
+    case 0x0a: {
+        // Clear bit right of left. This one doesn't count as a write below.
+        OBJECT_CHECK(rightValue < 0x11, 13);
+        OBJECT_CHECK(leftRef, 0x13);
+        s16 before = *leftRef;
+        int mask = 1 << (rightValue - 1);
+        InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef & ~mask);
+        if (param->mLeft == 8)
+            OnEdithSetFlagField1(mask, (before & mask) != 0, (*leftRef & mask) != 0);
+        result = 1;
+        break;
+    }
+    case 0x08:
+        OBJECT_CHECK(rightValue < 0x11, 13);
+        result = ((s16)leftValue >> (rightValue - 1)) & 1;
+        break;
+    default:
+        TREE_ERROR(1);
+        return -1;
+    }
+
+    if (wrote) {
+        // Motives stay between -100 and 100.
+        switch (param->mLeftScope) {
+        case 0x0e:
+        case 0x0f:
+        case 0x11:
+            if (leftFloat) {
+                if (*leftFloat < -100.0f)
+                    *leftFloat = -100.0f;
+                else if (*leftFloat > 100.0f)
+                    *leftFloat = 100.0f;
+            }
+            break;
+        }
+        if (EdithVariableSet::s_bTaggedGraphicField == 1) {
+            if (param->mLeftScope == 4)
+                GetObjectFromID(GetCurElem()->mStackObject)->TagGraphicsField();
+            else if (param->mLeftScope == 3)
+                TagGraphicsField();
+            EdithVariableSet::s_bTaggedGraphicField = 0;
+        }
+    }
+    return result;
+}
+#endif

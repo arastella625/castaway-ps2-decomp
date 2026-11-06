@@ -24,6 +24,44 @@ public:
     }
 };
 
+// What a Sim's +0x5f0 points at: only the slot ParticleEffect calls.
+class PersonSimInstance {
+public:
+    virtual void Slot0();
+    virtual void Slot1();
+    virtual void Slot2();
+    virtual void Slot3();
+    virtual void Slot4();
+    virtual void Slot5();
+    virtual void Slot6();
+    virtual void Slot7();
+    virtual void Slot8();
+    virtual void Slot9();
+    virtual void Slot10();
+    virtual void Slot11();
+    virtual void Slot12();
+    virtual void Slot13();
+    virtual void Slot14();
+    virtual void Slot15();
+    virtual void Slot16();
+    virtual void Slot17();
+    virtual void Slot18();
+    virtual void Slot19();
+    virtual void Slot20();
+    virtual void Slot21();
+    virtual void Slot22();
+    virtual void Slot23();
+    virtual void Slot24();
+    virtual void Slot25();
+    virtual void Slot26();
+    virtual void Slot27();
+    virtual void Slot28();
+    virtual void Slot29();
+    virtual void Slot30();
+    virtual void Slot31();
+    virtual int PlayEffect(u32 a, u32 b);
+};
+
 // A Sim. The fields are the ones InterpValue reads.
 class cXPerson : public cXObject {
 public:
@@ -34,6 +72,8 @@ public:
     u32 pad_0x524[9];         // 0x524
     s16 mPersonData[0x24];    // 0x548  scopes 0x12, 0x13 and 0x30 to 0x33
     Neighbor *mNeighbor;      // 0x590
+    u32 pad_0x594[0x17];      // 0x594
+    PersonSimInstance *mSimInstance; // 0x5f0
 
     static int sbAllowingCheckTreeAds;
 

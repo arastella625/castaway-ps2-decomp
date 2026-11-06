@@ -11,8 +11,11 @@
 #include "game/simulator/core/ObjectModule.h"
 #include "game/simulator/core2/TreeSim.h"
 
-class FTilePt;
 class FTileRect;
+class AnimateNewParam;
+class CompleteGoalParam;
+class KillSoundsParam;
+class PlaySoundParam;
 class ObjSelector;
 class ReconBuffer;
 class RelMatrix;
@@ -21,6 +24,40 @@ namespace Weather {
 class DamageEvent;
 class Armor;
 }
+
+// Wii: FTilePt, a tile position, two FInts. The real class is probably 8 bytes: it is declared
+// as 4 here because only pointers to it are used, and at 4 the local in TryElement leaves the
+// stack slot sharing as it is in the game. The copy constructor keeps it in memory.
+class FTilePt {
+public:
+    u32 field_0x0;
+
+    FTilePt() {}
+    FTilePt(const FTilePt &other);
+};
+
+enum TFGL_ACTIONS { };
+
+// The operands of primitive 2, Expression.
+struct ExpressionParam {
+    s16 mLeft;      // 0x00
+    s16 mRight;     // 0x02
+    u8 field_0x4;   // 0x04  no code reads it
+    s8 mOperator;   // 0x05
+    s8 mLeftScope;  // 0x06
+    s8 mRightScope; // 0x07
+};
+
+// Primitive 0xa, Tutorial.
+struct TutorialParam {
+    u8 mMode; // 0x00  0 claim, 1 release
+};
+
+// The operands of primitive 0x3d, ParticleEffect, passed along whole.
+struct ParticleEffectParam {
+    u32 field_0x0;
+    u32 field_0x4;
+};
 
 // Wii: ObjectSlot. Slot 0 is the object's own; the slots a tree sees start at 1.
 class ObjectSlot {
@@ -122,8 +159,66 @@ public:
 
     // Reads and writes one operand of an instruction: bhav.md lists the scopes. InterpValue
     // returns 1, or -1 once it has stopped the tree with an error.
-    int InterpValue(s16 scope, s16 data, const s16 **ref, f32 **floatRef, s16 *value, s16 **a);
+    long InterpValue(s16 scope, s16 data, const s16 **ref, f32 **floatRef, s16 *value, s16 **a);
     int InterpWriteValue(s16 scope, s16 data, const s16 **ref, s16 value);
+    long TryExpression(ExpressionParam *param);
+    inline void TryParticleEffect(ParticleEffectParam effect, long &result);
+
+    // The primitives. They return what TryElement does: see TreeSim::TryElement.
+    long TryTestObjectType(StackElem *, XPrimParam *);
+    long TryIsPersonInArea(StackElem *, XPrimParam *);
+    long TryFindGoodLocation(StackElem *, XPrimParam *, TFGL_ACTIONS *, FTilePt *, int *, s16 *);
+    long TryRelationship2(StackElem *, XPrimParam *);
+    long TrySetBalloon(StackElem *, XPrimParam *);
+    long TryCallNamedTree(StackElem *, XPrimParam *);
+    long TryMakeActionString(StackElem *, XPrimParam *);
+    long TryGenericSimCall(StackElem *, XPrimParam *);
+    long TryDialog(StackElem *, XPrimParam *, bool);
+    long TrySnap(StackElem *, XPrimParam *);
+    long TryNotifyStackObject(StackElem *, XPrimParam *);
+    long TryFindFunctionalObject(StackElem *, XPrimParam *);
+    long TryCallFunctionalTree(StackElem *, XPrimParam *);
+    long TryPushAction(StackElem *, XPrimParam *);
+    long TryDropOnto(StackElem *, XPrimParam *);
+    long TrySnapObject(StackElem *, XPrimParam *);
+    long TryBudget(StackElem *, XPrimParam *);
+    long TryRelationship(StackElem *, XPrimParam *);
+    long TryCreateObject(StackElem *, XPrimParam *);
+    long TryPreloadObject(StackElem *, XPrimParam *);
+    long TryKillObject(StackElem *, XPrimParam *, s16 *);
+    long TryFind5WorstMotives(StackElem *, XPrimParam *);
+    long TryIdle(StackElem *, XPrimParam *);
+    long TryUpdate(StackElem *, XPrimParam *);
+    long TryDrop();
+    long TryGrab(StackElem *, XPrimParam *);
+    long TryRandom(StackElem *, XPrimParam *);
+    long TryDistanceTo(StackElem *, XPrimParam *);
+    long TryDirectionTo(StackElem *, XPrimParam *);
+    long TryPlaySound(StackElem *, PlaySoundParam *);
+    long TryKillSounds(StackElem *, KillSoundsParam *);
+    long TrySetToNext(StackElem *, XPrimParam *);
+    long TryBurn(StackElem *, XPrimParam *);
+    long TryUserEvent(StackElem *, XPrimParam *);
+    long TryRoomEffect(StackElem *, XPrimParam *);
+    long TryCheckObject(StackElem *, XPrimParam *);
+    long TryAnimateObject(StackElem *, XPrimParam *);
+    long TryCompleteGoal(StackElem *, CompleteGoalParam &);
+    long TryListenForInput(StackElem *, XPrimParam *);
+    long TryCameraControl(StackElem *, XPrimParam *);
+    long TryHUDCreate(StackElem *, XPrimParam *);
+    long TryHUDAddItem(StackElem *, XPrimParam *);
+    long TryHUDManage(StackElem *, XPrimParam *);
+    long TryHUDData(StackElem *, XPrimParam *);
+    long TryMemory(StackElem *, XPrimParam *);
+    long TryPassiveInfluence(StackElem *, XPrimParam *);
+    long TrySetMotiveDelta(StackElem *, XPrimParam *);
+    long TryAnimate(StackElem *, const AnimateNewParam *);
+    long TryCustomUI(StackElem *, XPrimParam *);
+    long TryLotTransition(StackElem *, XPrimParam *);
+    long TryFamilyInventory(StackElem *, XPrimParam *);
+    long TrySyncAudio(StackElem *, XPrimParam *);
+    long TryNotifyPlans(StackElem *, XPrimParam *);
+    long TryManageClothing(StackElem *, XPrimParam *);
 };
 
 #endif
