@@ -8,13 +8,18 @@ A hobby reverse-engineering project for the US PS2 build, `SLUS_216.64`. The goa
 
 - 2,173 of 13,231 functions are named, each with a confidence tier.
 - Structs are recovered for `CasSimDescription`, `SimBodyPart` and its subclasses.
-- Three functions are matched byte for byte. Nearly everything else is still undecompiled.
-- The compiler for the Create-a-Sim code is SN Systems ee-gcc 2.95.3 build 1.36 at `-O2`.
+- 70 functions are matched byte for byte (3,336 bytes, 0.09% of the code), all in `SimBodyPart` and `CasSimDescription`. Nearly everything else is still undecompiled.
+- The compiler for the Create-a-Sim code is SN Systems ee-gcc 2.95.3 build 1.36 at `-O2 -G0 -fno-rtti`.
 
 ## Where to start
 
 - [HANDOFF.md](HANDOFF.md): project goals, rules, findings and next steps.
 - [pkg/README.md](pkg/README.md): setting up Ghidra and applying the names.
+- [docs/STANDARDS.md](docs/STANDARDS.md): how code is written, checked and kept safe to publish.
+
+## Checking the decompiled code
+
+`tools/verify.py` builds `src/` with the game's compiler and compares each function with your copy of the game. It needs WSL with Wine, the compiler from decompme/compilers, and the game executable; [docs/STANDARDS.md](docs/STANDARDS.md) has the command.
 
 ## Credits
 
