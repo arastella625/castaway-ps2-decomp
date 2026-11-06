@@ -164,6 +164,25 @@ public:
     bool GetFlag(int index) const { return flags[index]; }
     void SetFlag(int index, bool value) { flags.Set(index, value); }
     void CopyBodyPart(Character::eBodyPart part, const CasSimDescription &other);
+
+    // Builds "<info> <first name> <last name>" plus a line break for an assert. The release build throws
+    // the text away, but the code that builds it is still inlined wherever a body part
+    // reports a problem. The Wii build keeps this as a function.
+    void AssertWithInfo(const char *info) const
+    {
+        char text[1024];
+        strncpy(text, info, 1024);
+        text[1023] = 0;
+        char *p = text + strlen(info);
+        *p++ = ' ';
+        for (u32 i = 0; firstName[i] != 0 && i < 32; i++)
+            *p++ = firstName[i];
+        *p++ = ' ';
+        for (u32 i = 0; lastName[i] != 0 && i < 32; i++)
+            *p++ = lastName[i];
+        *p++ = '\n';
+        *p = 0;
+    }
 };
 STATIC_ASSERT(CasSimDescription_size, sizeof(CasSimDescription) == 0x334);
 
@@ -173,6 +192,12 @@ inline bool SimBodyPart::GetCharacterFlag(int index) const
     if (description != 0)
         return description->GetFlag(index);
     return characterFlags[index];
+}
+
+inline void SimBodyPart::AssertWithInfo(const char *info)
+{
+    if (description != 0)
+        description->AssertWithInfo(info);
 }
 
 inline void SimBodyPart::SetCharacterFlag(int index, bool value)

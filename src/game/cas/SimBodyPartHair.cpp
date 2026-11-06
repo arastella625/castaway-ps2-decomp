@@ -232,3 +232,19 @@ EString SimBodyPartHair::GetIconTextureName() const
     name.Format("%s", buffer);
     return name;
 }
+
+// Model code 1 is the lower half of long hair, which only flag kHairBottomDisplayed shows.
+void SimBodyPartHair::Validate()
+{
+    if (IsValid(true, false)) {
+        if (modelCodeIndex == 1 || CalculateModelCodeIndexFromModelIndex(modelIndex) == 1) {
+            char buffer[512];
+            Sprintf(buffer, "Hair cannot be set to Hair-Bottom ModelCode - this is controlled only by the "
+                            "CasSimDescription::kHairBottomDisplayed flag.  Resetting to HH");
+            AssertWithInfo(buffer);
+            modelCodeIndex = 0;
+            GetNumPossibleStyles(0);
+            modelIndex = styleIndex;
+        }
+    }
+}

@@ -1,6 +1,7 @@
 #ifndef GAME_CAS_CASUTILS_H
 #define GAME_CAS_CASUTILS_H
 
+#include "common/ERQuickdata.h"
 #include "common/types.h"
 #include "game/cas/CasSimDescription.h"
 
@@ -34,10 +35,43 @@ public:
     static int cheatIgnoreRequirements;
 };
 
+// The word at 0x514ED8: the Create-a-Sim quickdata once it is loaded. The Wii build keeps
+// it inside _globals; the name here is ours.
+extern ERQuickdata *gCasQuickdata;
+
+namespace Sim {
+
+// Wii: Sim::CostumesTSC6, one row of the costume table. Each list holds one clothing set
+// name per body part database index; an empty name means the costume leaves that part alone.
+struct CostumesTSC6 {
+    u32 field_0x0;                 // 0x00
+    VECTOR<char *> flagSetNames;   // 0x04  used when the caller's bool is true
+    VECTOR<char *> flagClearNames; // 0x08
+};
+
+}  // namespace Sim
+
 // Static helpers. Only the functions the decompiled code uses are declared so far.
 class CasUtils {
 public:
     static Character::eBodyPart GetS2CEquivalentBodyPart(Character::eBodyPart part);
+    static u8 GetClothingSetIndexByName(bool a, Character::eBodyPart part, const char *name);
+
+    // Inlined on PS2. The quickdata is loaded on first use (0x2A2AF469 is its resource id).
+    static ERQuickdata *GetQuickdata()
+    {
+        ERQuickdata *data = gCasQuickdata;
+        if (data == 0)
+            data = _quickdataman.AddRef(0x2A2AF469, 0, 0);
+        return data;
+    }
+
+    // Also inlined on PS2.
+    static const Sim::CostumesTSC6 *GetCostumeData(const char *name)
+    {
+        ERQuickdata *data = GetQuickdata();
+        return (const Sim::CostumesTSC6 *)data->GetRow(data->GetTable("Sim::CostumesTSC6"), name);
+    }
 
     // Also inlined on PS2. Turns a stored texture id into the one to use now: when the
     // game-state switch is set, or the caller asks, a non-zero id is rehashed with "_GAME".

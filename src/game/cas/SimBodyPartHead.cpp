@@ -1,5 +1,7 @@
 #include "game/cas/SimBodyPartHead.h"
 
+#include "game/cas/CasSimDescription.h"
+
 int SimBodyPartHead::GetType() const
 {
     return 0x1a;
@@ -86,4 +88,17 @@ s32 SimBodyPartHead::GetCurrentHitPoints()
 BitFlags<u32> SimBodyPartHead::ApplyDamage(const Weather::DamageEvents &events)
 {
     return BitFlags<u32>(0);
+}
+
+void SimBodyPartHead::Validate()
+{
+    if (IsValid(true, false)) {
+        if (modelCodeIndex != 0 || modelIndex != 0 || styleIndex != 0 || textureIndex != 0
+            || degradationState != 0) {
+            char buffer[512];
+            Sprintf(buffer, "Head has invalid model or model code index of non-zero.  Resetting.");
+            AssertWithInfo(buffer);
+            SetToDefault(GetCharacterFlag(0));
+        }
+    }
 }

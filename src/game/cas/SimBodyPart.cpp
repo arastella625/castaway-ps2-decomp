@@ -3,6 +3,7 @@
 #include "common/EResourceManager.h"
 #include "common/ReconBuffer.h"
 #include "game/cas/CasSimDescription.h"
+#include "game/cas/CasUtils.h"
 
 void SimBodyPart::DoStream(ReconBuffer *buffer, int version)
 {
@@ -40,6 +41,125 @@ bool SimBodyPart::IsValid(bool a, bool b)
         && IsValidTextureIndex(a, b) && IsValidDegradationState(a, b))
         valid = true;
     return valid;
+}
+
+// The six checks below share a shape: report through AssertWithInfo when `b` is set, repair
+// the index when `a` is set, then check again without either.
+bool SimBodyPart::IsValidClothingSetIndex(bool a, bool b)
+{
+    if (clothingSetIndex < geometryVector->size())
+        return true;
+    if (b) {
+        char buffer[512];
+        Sprintf(buffer, "Invalid index %d into %s model array, which only has %d models", clothingSetIndex,
+                bodyPartTypeInfo->name, geometryVector->size());
+        AssertWithInfo(buffer);
+    }
+    if (a) {
+        SetClothingSetIndex(GetDefaultClothingSetIndex(GetCharacterFlag(0)));
+        return IsValidClothingSetIndex(false, false);
+    }
+    return false;
+}
+
+bool SimBodyPart::IsValidModelIndex(bool a, bool b)
+{
+    if (!IsValidClothingSetIndex(a, b))
+        return false;
+    if (modelIndex >= clothingSetData->modelIDs.size()
+        || (IsRequiredBodyPart() && clothingSetData->modelIDs[modelIndex] == 0)) {
+        if (b) {
+            char buffer[512];
+            Sprintf(buffer, "Invalid model index %d in clothing set %s of %s model array, which only has %d models",
+                    modelIndex, clothingSetData->name, bodyPartTypeInfo->name, geometryVector->size());
+            AssertWithInfo(buffer);
+        }
+        if (a) {
+            SwitchToFirstAvailableStyle();
+            return IsValidModelIndex(false, false);
+        }
+        return false;
+    }
+    return true;
+}
+
+bool SimBodyPart::IsValidModelCodeIndex(bool a, bool b)
+{
+    if (modelCodeIndex >= bodyPartTypeInfo->modelCodes.size()) {
+        if (b) {
+            char buffer[512];
+            Sprintf(buffer, "Invalid model code index %d for body part %s", modelCodeIndex,
+                    bodyPartTypeInfo->name);
+            AssertWithInfo(buffer);
+        }
+        if (a) {
+            SwitchToFirstAvailableStyle();
+            return IsValidModelCodeIndex(false, false);
+        }
+        return false;
+    }
+    return true;
+}
+
+bool SimBodyPart::IsValidStyleIndex(bool a, bool b)
+{
+    if (modelCodeIndex >= bodyPartTypeInfo->modelCodes.size()
+        || styleIndex >= bodyPartTypeInfo->modelCodes[modelCodeIndex].styles.size()) {
+        if (b) {
+            char buffer[512];
+            Sprintf(buffer, "Invalid style code index %d for body part %s", styleIndex, bodyPartTypeInfo->name);
+            AssertWithInfo(buffer);
+        }
+        if (a) {
+            SwitchToFirstAvailableStyle();
+            return IsValidStyleIndex(false, false);
+        }
+        return false;
+    }
+    return true;
+}
+
+bool SimBodyPart::IsValidTextureIndex(bool a, bool b)
+{
+    if (!IsValidClothingSetIndex(a, b))
+        return false;
+    if (textureIndex >= clothingSetData->textureVariations.size()) {
+        if (b) {
+            char buffer[512];
+            Sprintf(buffer,
+                    "Invalid texture index %d into clothing-set %s of the %s array, which only has %d textures",
+                    textureIndex, clothingSetData->name, bodyPartTypeInfo->name,
+                    clothingSetData->textureVariations.size());
+            AssertWithInfo(buffer);
+        }
+        if (a) {
+            textureIndex = 0;
+            return IsValidTextureIndex(false, false);
+        }
+        return false;
+    }
+    return true;
+}
+
+bool SimBodyPart::IsValidDegradationState(bool a, bool b)
+{
+    if (modelCodeIndex >= bodyPartTypeInfo->modelCodes.size()
+        || styleIndex >= bodyPartTypeInfo->modelCodes[modelCodeIndex].styles.size()
+        || degradationState
+               >= bodyPartTypeInfo->modelCodes[modelCodeIndex].styles[styleIndex].numDegradationStates) {
+        if (b) {
+            char buffer[512];
+            Sprintf(buffer, "Invalid degradation state %d for body part %s", degradationState,
+                    bodyPartTypeInfo->name);
+            AssertWithInfo(buffer);
+        }
+        if (a) {
+            degradationState = 0;
+            return IsValidDegradationState(false, false);
+        }
+        return false;
+    }
+    return true;
 }
 
 void SimBodyPart::Validate()
@@ -212,6 +332,20 @@ void SimBodyPart::SetToDefault(bool a)
 {
     SetClothingSetIndex(GetDefaultClothingSetIndex(a));
     SwitchToFirstAvailableDegradationStage();
+}
+
+// The "default" costume names a clothing set for most parts. A part it leaves out falls
+// back to the index stored with the part's type.
+u8 SimBodyPart::GetDefaultClothingSetIndex(bool a) const
+{
+    const Sim::CostumesTSC6 *costume = CasUtils::GetCostumeData("default");
+    if (costume != 0) {
+        const VECTOR<char *> *names = a ? &costume->flagSetNames : &costume->flagClearNames;
+        if (strlen((*names)[GetBodyPartDBIndex()]) != 0)
+            return CasUtils::GetClothingSetIndexByName(a, (Character::eBodyPart)GetType(),
+                                                       (*names)[GetBodyPartDBIndex()]);
+    }
+    return bodyPartTypeInfo->defaultClothingSetIndexes[a == false];
 }
 
 u8 SimBodyPart::GetNudeClothingSetIndex(bool a) const

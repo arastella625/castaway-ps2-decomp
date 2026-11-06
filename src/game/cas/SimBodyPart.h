@@ -60,7 +60,7 @@ struct BodyPartTypeInfo {
     u32 field_0x4;                             // 0x04
     VECTOR<BodyPartModelCodeInfo> modelCodes;  // 0x08
     u32 field_0xc;                             // 0x0c
-    u32 field_0x10;                            // 0x10
+    VECTOR<u8> defaultClothingSetIndexes;      // 0x10  [1] and [0], picked by a bool
     u8 *nudeClothingSetIndexes;                // 0x14  [0] and [1], picked by a bool
 };
 STATIC_ASSERT(BodyPartTypeInfo_size, sizeof(BodyPartTypeInfo) == 0x18);
@@ -198,6 +198,7 @@ public:
     // Defined in CasSimDescription.h, because it needs that class. The PS2 build inlines it.
     inline bool GetCharacterFlag(int index) const;
     inline void SetCharacterFlag(int index, bool value);
+    inline void AssertWithInfo(const char *info);
 };
 STATIC_ASSERT(SimBodyPart_size, sizeof(SimBodyPart) == 0x24);
 

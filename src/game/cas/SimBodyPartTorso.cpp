@@ -80,3 +80,16 @@ BitFlags<u32> SimBodyPartTorso::Repair()
     UpdateRelatedData();
     return result;
 }
+
+void SimBodyPartTorso::Validate()
+{
+    if (IsValid(true, false)) {
+        u8 count = GetNumPossibleStyles(0);
+        if (modelIndex >= count) {
+            char buffer[512];
+            Sprintf(buffer, "Torso Model Index %d is invalid.  Must be in the range [0,%d]", modelIndex, count);
+            AssertWithInfo(buffer);
+            SwitchToFirstAvailableDegradationStage();
+        }
+    }
+}
