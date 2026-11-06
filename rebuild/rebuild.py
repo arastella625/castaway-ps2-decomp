@@ -81,12 +81,20 @@ def compile_functions(tool_dir, source, addresses):
     """Compile one source with a section per function. Returns (object, linked, kept)."""
     base = WORK / source.relative_to(verify.SRC)
     base.parent.mkdir(parents=True, exist_ok=True)
-    ii, asm, raw, obj = (base.with_suffix(e) for e in ('.ii', '.s', '.raw.o', '.o'))
-    verify.run_tool(tool_dir, 'cpp.exe', verify.CPPFLAGS + [rel(source), rel(ii)])
-    verify.run_tool(tool_dir, 'cc1plus.exe', verify.CFLAGS + ['-ffunction-sections', rel(ii), '-o', rel(asm)])
-    assemble = lambda: verify.run_tool(tool_dir, 'as.exe', verify.ASFLAGS + ['-o', rel(raw), rel(asm)])
-    assemble()
+    ii, asm, raw, renamed, relinked, obj, stamp = (
+        base.with_suffix(e) for e in ('.ii', '.s', '.raw.o', '.link.s', '.link.o', '.o', '.key'))
+    assemble = lambda src, dst: verify.run_tool(tool_dir, 'as.exe', verify.ASFLAGS + ['-o', rel(dst), rel(src)])
+    # The compile is reused while the source and its headers are unchanged. Everything after
+    # it depends on config/symbols.txt too, so it is redone every time; it is quick.
+    key = verify.source_key(source, verify.CPPFLAGS + verify.CFLAGS + verify.ASFLAGS + ['-ffunction-sections'])
+    if not (raw.is_file() and stamp.is_file() and stamp.read_text() == key):
+        stamp.unlink(missing_ok=True)
+        verify.run_tool(tool_dir, 'cpp.exe', verify.CPPFLAGS + [rel(source), rel(ii)])
+        verify.run_tool(tool_dir, 'cc1plus.exe', verify.CFLAGS + ['-ffunction-sections', rel(ii), '-o', rel(asm)])
+        assemble(asm, raw)
+        stamp.write_text(key)
     linked, kept = classify(verify.Elf32(raw), addresses)
+    final = raw
     if kept:
         # Rename the definitions we can't link. Calls to them then go to the game's assembly,
         # and the renamed copies are discarded by the linker script.
@@ -94,10 +102,11 @@ def compile_functions(tool_dir, source, addresses):
         text = asm.read_bytes().decode('latin-1')
         text = re.sub(r'(?m)^(\t\.(?:globl|ent|end)\t)(%s)(\r?)$' % names, r'\1\2%s\3' % UNLINKED, text)
         text = re.sub(r'(?m)^(%s)(:\r?)$' % names, r'\1%s\2' % UNLINKED, text)
-        asm.write_bytes(text.encode('latin-1'))
-        assemble()
+        renamed.write_bytes(text.encode('latin-1'))
+        assemble(renamed, relinked)
+        final = relinked
     # The old assembler orders the symbol table in a way ld rejects; objcopy rewrites it.
-    binutils('objcopy', raw, obj)
+    binutils('objcopy', final, obj)
     return obj, linked, kept
 
 
@@ -217,8 +226,9 @@ def main():
             if not (tool_dir / 'cc1plus.exe').is_file():
                 raise verify.VerifyError('no cc1plus.exe in %s' % tool_dir)
             kept_all = {}
-            for source in sorted(verify.SRC.rglob('*.cpp')):
-                obj, linked, kept = compile_functions(tool_dir, source, addresses)
+            sources = sorted(verify.SRC.rglob('*.cpp'))
+            results = verify.build_all(lambda source: compile_functions(tool_dir, source, addresses), sources)
+            for obj, linked, kept in results:
                 objects.append(obj)
                 functions.update((name, obj) for name in linked)
                 sizes.update(linked)

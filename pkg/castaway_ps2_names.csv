@@ -1733,7 +1733,8 @@ ps2_addr,name,wii_symbol,wii_file,confidence,shared,jaccard,score,runner_up,ps2_
 00137118,SimBodyPart::CopyFromClothingItem,CopyFromClothingItem__11SimBodyPartFP12ClothingItem,code\game\cas\unity.cpp.s,propagated,0,0,0,0,224,264
 001371F8,SimBodyPart::CreateInstance,CreateInstance__11SimBodyPartFQ29Character9eBodyPartb,code\game\cas\unity.cpp.s,propagated,0,0,0,0,668,544
 00143B20,ClothingItem::GetBodyPartTypeInfo,GetBodyPartTypeInfo__12ClothingItemCFv,code\game\simulator\core\unity.cpp.s,propagated,0,0,0,0,100,96
-0014A050,SimBodyPart::GetCharacterFlag,GetCharacterFlag__11SimBodyPartCFi,code\game\cas\unity.cpp.s,propagated,0,0,0,0,16,28
+001249A0,BitFlags<u32>::operator[],__vc__12BitFlags<Ui>CFi,code\game\cas\unity.cpp.s,matched,0,0,0,0,16,0
+0014A050,BitFlags<u16>::operator[],__vc__12BitFlags<Us>CFi,code\game\cas\unity.cpp.s,matched,0,0,0,0,16,0
 0014FD60,InteractorModule::InteractorManager::InteractorManager,__ct__Q216InteractorModule17InteractorManagerFv,code\game\interactor\unity.cpp.s,propagated,0,0,0,0,100,180
 001765B8,InteractorModule::DirectInteractor::SetAutonomous,SetAutonomous__Q216InteractorModule16DirectInteractorFv,code\game\interactor\unity.cpp.s,propagated,0,0,0,0,52,40
 00177F18,InteractorModule::InteractorManager::GetPlayerInteractor,GetPlayerInteractor__Q216InteractorModule17InteractorManagerFiQ216InteractorModule14InteractorType,code\game\interactor\unity.cpp.s,propagated,0,0,0,0,108,120

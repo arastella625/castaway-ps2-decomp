@@ -14,10 +14,12 @@ third-party runs next to the compiler.
 import argparse
 import hashlib
 import os
+import re
 import socket
 import struct
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -34,6 +36,8 @@ CPPFLAGS = ['-lang-c++', '-nostdinc', '-Isrc']
 CFLAGS = ['-quiet', '-O2', '-G0', '-fno-rtti', '-fno-exceptions']
 ASFLAGS = ['-EL', '-mips3', '-mcpu=r5900', '-G0']
 TOOL_TIMEOUT = 120  # seconds; a hung Wine process must not hang the build
+JOBS = min(8, os.cpu_count() or 1)  # source files compiled at once
+INCLUDE = re.compile(r'^\s*#\s*include\s+"([^"]+)"', re.M)
 
 SANDBOX_MARK = 'CASTAWAY_SANDBOXED'
 
@@ -152,18 +156,51 @@ def run_tool(tool_dir, exe, args):
         print(p.stderr.strip())
 
 
+def source_key(source, flags):
+    """Hash of everything that decides a source's object: itself, its headers and the flags."""
+    seen, todo = {}, [source]
+    while todo:
+        path = todo.pop()
+        if path in seen:
+            continue
+        seen[path] = path.read_bytes()
+        for name in INCLUDE.findall(seen[path].decode('latin-1')):
+            if (SRC / name).is_file():
+                todo.append(SRC / name)
+    digest = hashlib.sha1(repr((COMPILER, flags)).encode())
+    for path in sorted(seen):
+        digest.update(path.as_posix().encode())
+        digest.update(seen[path])
+    return digest.hexdigest()
+
+
 def build(tool_dir, source, defines):
-    """Preprocess, compile and assemble one source file. Returns the object path."""
+    """Preprocess, compile and assemble one source file. Returns the object path.
+
+    Starting Wine three times takes several seconds, so an object is reused while the
+    source, the headers it includes and the flags are all unchanged.
+    """
     rel = source.relative_to(ROOT)
     out = BUILD / rel.relative_to('src')
     out.parent.mkdir(parents=True, exist_ok=True)
-    ii, asm, obj = (out.with_suffix(e) for e in ('.ii', '.s', '.o'))
+    ii, asm, obj, stamp = (out.with_suffix(e) for e in ('.ii', '.s', '.o', '.key'))
+    key = source_key(source, CPPFLAGS + CFLAGS + ASFLAGS + defines)
+    if obj.is_file() and stamp.is_file() and stamp.read_text() == key:
+        return obj
+    stamp.unlink(missing_ok=True)
     # Paths are relative to ROOT, with forward slashes, so Wine never sees a Linux absolute path.
     r = lambda p: p.relative_to(ROOT).as_posix()
     run_tool(tool_dir, 'cpp.exe', CPPFLAGS + ['-D' + d for d in defines] + [rel.as_posix(), r(ii)])
     run_tool(tool_dir, 'cc1plus.exe', CFLAGS + [r(ii), '-o', r(asm)])
     run_tool(tool_dir, 'as.exe', ASFLAGS + ['-o', r(obj), r(asm)])
+    stamp.write_text(key)
     return obj
+
+
+def build_all(function, sources):
+    """Run function(source) for every source, a few at a time. Results keep the sources' order."""
+    with ThreadPoolExecutor(max_workers=JOBS) as pool:
+        return list(pool.map(function, sources))
 
 
 def compare(obj_path, game, game_base, addresses, verbose):
@@ -247,10 +284,10 @@ def main():
         addresses = load_symbols()
         sources = [p.resolve() for p in args.sources] or sorted(SRC.rglob('*.cpp'))
         total, count, failed = 0, 0, 0
-        for source in sources:
+        objects = build_all(lambda source: build(tool_dir, source, args.defines), sources)
+        for source, obj in zip(sources, objects):
             print(source.relative_to(ROOT).as_posix())
-            matched, functions, problems = compare(build(tool_dir, source, args.defines), game,
-                                                   game_base, addresses, args.verbose)
+            matched, functions, problems = compare(obj, game, game_base, addresses, args.verbose)
             total += matched
             count += functions
             failed += len(problems)
