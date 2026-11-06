@@ -1,8 +1,8 @@
 # Audio formats
 
 Worked out from the US disc and the PS2 executable (addresses are from `split\asm\text.s`).
-`tools/audio.py` decodes all of it. All values are little-endian. Nobody has listened to any
-of this: every claim below is from data and code, not from ears.
+`tools/audio.py` decodes all of it. All values are little-endian. Most claims below are from data
+and code. A sample of clips has been heard, as noted under Open.
 
 ## Samples (`SAMPLES`, 7,656 entries)
 
@@ -169,7 +169,8 @@ The 85% pass line in `check` was set after seeing the results; a coin would give
 
 ## Open
 
-- By ear: nothing has been heard.
+- By ear: a sample of the clips was heard on 2026-11-06, and all of those played the right sound.
+  Stereo order and looping are still unheard.
 - The decoder's rounding (`+32 >> 6`) comes from public SPU descriptions, not from this disc. A
   1-count error would not show in any test here and would not be audible.
 - The real SPU applies Gaussian interpolation when pitching; these WAVs are the raw samples.
