@@ -204,6 +204,13 @@ def compare(obj_path, game, game_base, addresses, verbose):
             if (ours ^ theirs) & ~mask & 0xFFFFFFFF:
                 diffs.append('    +0x%03x  ours %08X  game %08X' % (pos - start, ours, theirs))
         note = ', %d linker fields unchecked' % unchecked if unchecked else ''
+        # Functions are aligned to 8 bytes, so only padding may follow ours. Anything else
+        # means the game's function is longer than the one we compiled.
+        tail = game[offset + end - start:offset + ((end - start + 7) & ~7)]
+        if not diffs and any(tail):
+            problems.append('%s: matches as far as it goes, but the game has more code after 0x%08X'
+                            % (name, address + end - start))
+            continue
         if diffs:
             problems.append('%s: %d of %d words differ at 0x%08X\n%s'
                             % (name, len(diffs), (end - start) // 4, address, '\n'.join(diffs[:12])))

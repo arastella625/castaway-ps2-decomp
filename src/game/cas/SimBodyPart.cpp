@@ -1,6 +1,22 @@
 #include "game/cas/SimBodyPart.h"
 
 #include "common/EResourceManager.h"
+#include "common/ReconBuffer.h"
+
+void SimBodyPart::DoStream(ReconBuffer *buffer, int version)
+{
+    if (version >= 3) {
+        buffer->Recon32((int *)&flags, 1);
+        buffer->Recon8((s8 *)&clothingSetIndex, 1);
+        buffer->Recon8((s8 *)&modelCodeIndex, 1);
+        buffer->Recon8((s8 *)&modelIndex, 1);
+        buffer->Recon8((s8 *)&styleIndex, 1);
+        buffer->Recon8((s8 *)&textureIndex, 1);
+        buffer->Recon8((s8 *)&degradationState, 1);
+        if (buffer->IsReading() && geometryVector != 0)
+            SetClothingSetIndex(clothingSetIndex);
+    }
+}
 
 void SimBodyPart::CopyFrom(const SimBodyPart *other)
 {
@@ -94,7 +110,7 @@ u8 SimBodyPart::GetNumValidStyles(u8 modelCodeIndex) const
         u8 model = CalculateModelIndexFromModelCodeIndexAndStyleIndex(modelCodeIndex, i);
         if (clothingSetData == 0)
             count--;
-        else if (model >= clothingSetData->field_0x4.size() || clothingSetData->field_0x4[model] == 0)
+        else if (model >= clothingSetData->modelIDs.size() || clothingSetData->modelIDs[model] == 0)
             count--;
     }
     return count;
@@ -163,6 +179,19 @@ const char *SimBodyPart::GetTextureVariationName() const
     return "";
 }
 
+#ifdef NON_MATCHING
+// One of 29 words differs. The game gives each `return 0` its own copy of the return; here
+// the second one branches back to the first. Four phrasings tried; this is the closest.
+u32 SimBodyPart::GetModelID() const
+{
+    if (clothingSetIndex >= geometryVector->size())
+        return 0;
+    if (modelIndex < clothingSetData->modelIDs.size())
+        return clothingSetData->modelIDs[modelIndex];
+    return 0;
+}
+#endif
+
 u32 SimBodyPart::GetTextureID(bool a) const
 {
     return GetModelID() != 0 ? EResourceManager::CalcId(GetTextureName(a).c_str(), true) : 0;
@@ -213,6 +242,28 @@ u8 SimBodyPart::CalculateModelCodeIndexFromModelIndex(u8 modelIndex) const
 u8 SimBodyPart::CalculateStyleIndexFromModelIndex(u8 modelIndex) const
 {
     return 0;
+}
+
+void SimBodyPart::SwitchToFirstAvailableDegradationStage()
+{
+    modelCodeIndex = 0;
+    modelIndex = 0;
+    styleIndex = 0;
+    textureIndex = 0;
+    degradationState = 0;
+    flags.bits = 0;
+    if (IsValidClothingSetIndex(false, true)) {
+        flags.bits = clothingSetData->flags;
+        for (u8 i = 0; i < (u8)clothingSetData->modelIDs.size(); i++) {
+            if (clothingSetData->modelIDs[i] != 0) {
+                modelIndex = i;
+                modelCodeIndex = CalculateModelCodeIndexFromModelIndex(i);
+                styleIndex = CalculateStyleIndexFromModelIndex(i);
+                break;
+            }
+        }
+        UpdateRelatedData();
+    }
 }
 
 void SimBodyPart::UpdateRelatedData()

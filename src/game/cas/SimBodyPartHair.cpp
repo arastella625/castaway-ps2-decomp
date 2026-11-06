@@ -1,6 +1,27 @@
 #include "game/cas/SimBodyPartHair.h"
 
+#include "common/ReconBuffer.h"
 #include "game/cas/CasSimDescription.h"
+
+void SimBodyPartHair::DoStream(ReconBuffer *buffer, int version)
+{
+    if (version >= 3) {
+        buffer->Recon32((int *)&flags, 1);
+        buffer->Recon8((s8 *)&clothingSetIndex, 1);
+        buffer->Recon8((s8 *)&modelCodeIndex, 1);
+        buffer->Recon8((s8 *)&modelIndex, 1);
+        buffer->Recon8((s8 *)&styleIndex, 1);
+        buffer->Recon8((s8 *)&textureIndex, 1);
+        buffer->Recon8((s8 *)&degradationState, 1);
+        if (buffer->IsReading() && geometryVector != 0)
+            SetClothingSetIndex(clothingSetIndex);
+    }
+    // Hit points were added to the save format in version 7.
+    if (version >= 7) {
+        buffer->Recon32(&currentHitPoints, 1);
+        buffer->ReconBool((bool *)&isDamaged);
+    }
+}
 
 void SimBodyPartHair::CopyFrom(const SimBodyPart *other)
 {
@@ -70,6 +91,18 @@ const char *SimBodyPartHair::GetModelCode() const
     if (index < bodyPartTypeInfo->modelCodes.size())
         return bodyPartTypeInfo->modelCodes[index].code;
     return "";
+}
+
+u32 SimBodyPartHair::GetModelID() const
+{
+    if (clothingSetIndex >= geometryVector->size())
+        return 0;
+    if (modelIndex >= clothingSetData->modelIDs.size())
+        return 0;
+    u8 index = modelIndex;
+    if (GetCharacterFlag(2))
+        index = CalculateModelIndexFromModelCodeIndexAndStyleIndex(1, styleIndex);
+    return clothingSetData->modelIDs[index];
 }
 
 u32 SimBodyPartHair::GetReflectionMaskID(bool a) const

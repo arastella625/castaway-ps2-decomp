@@ -1,5 +1,27 @@
 #include "game/cas/SimBodyPartFacialFeature.h"
 
+#include "common/ReconBuffer.h"
+
+void SimBodyPartFacialFeature::DoStream(ReconBuffer *buffer, int version)
+{
+    if (version >= 3) {
+        buffer->Recon32((int *)&flags, 1);
+        buffer->Recon8((s8 *)&clothingSetIndex, 1);
+        buffer->Recon8((s8 *)&modelCodeIndex, 1);
+        buffer->Recon8((s8 *)&modelIndex, 1);
+        buffer->Recon8((s8 *)&styleIndex, 1);
+        buffer->Recon8((s8 *)&textureIndex, 1);
+        buffer->Recon8((s8 *)&degradationState, 1);
+        if (buffer->IsReading() && geometryVector != 0)
+            SetClothingSetIndex(clothingSetIndex);
+    }
+    // Hit points were added to the save format in version 7.
+    if (version >= 7) {
+        buffer->Recon32(&currentHitPoints, 1);
+        buffer->ReconBool((bool *)&isDamaged);
+    }
+}
+
 void SimBodyPartFacialFeature::CopyFrom(const SimBodyPart *other)
 {
     flags = other->flags;

@@ -29,7 +29,7 @@ struct ClothingSetIndexInfo;
 // One clothing set of a body part. SimBodyPart::geometryVector holds these.
 struct BodyPartGeometryTSC6 {
     const char *name;                       // 0x00
-    VECTOR<u32> field_0x4;                  // 0x04  one per model index; zero rules that style out
+    VECTOR<u32> modelIDs;                   // 0x04  one per model index; zero means no such model
     VECTOR<const char *> textureVariations; // 0x08
     u32 flags;                              // 0x0c  bits 1-5: generic for style 1-5
     s32 hitPointsPerDegradationState;       // 0x10

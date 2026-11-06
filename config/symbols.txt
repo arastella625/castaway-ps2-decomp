@@ -371,3 +371,17 @@
 0x001442D8 GetTattooTextureID__C17CasSimDescriptionQ23Sim15eTattooLocationb
 0x003D9930 ComputeSymbol__9EChecksumPCcUi
 0x00515178 gUseGameStateTextures
+0x00147698 DoStream__11SimBodyPartP11ReconBufferi
+0x001B7348 Recon32__11ReconBufferPii
+0x001DEF78 Recon8__11ReconBufferPSci
+
+# game/cas/SimBodyPartFacialFeature
+0x00148358 DoStream__24SimBodyPartFacialFeatureP11ReconBufferi
+
+# game/cas/SimBodyPartHair
+0x00148600 DoStream__15SimBodyPartHairP11ReconBufferi
+0x001B7058 ReconBool__11ReconBufferPb
+
+# game/cas/SimBodyPartHair
+0x0013B7F0 GetModelID__C15SimBodyPartHair
+0x00147DE8 GetModelID__C11SimBodyPart
