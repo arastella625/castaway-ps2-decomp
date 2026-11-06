@@ -4,6 +4,7 @@
 #include "common/BitFlags.h"
 #include "common/EString.h"
 #include "common/EVec3.h"
+#include "common/eastl.h"
 #include "common/StringFunctions.h"
 #include "common/TRect.h"
 #include "common/Vector.h"
@@ -13,10 +14,6 @@ class CasSimDescription;
 class ReconBuffer;
 class SimModelTSC6;
 
-namespace eastl {
-class allocator;
-template <class T, class Allocator> class vector;
-}
 
 namespace Weather {
 enum eDamageType { DAMAGE_TYPE_COUNT = 3 };
@@ -25,7 +22,12 @@ struct DamageEvents;
 
 namespace Sim {
 
-struct ClothingSetIndexInfo;
+// One entry of the list GetValidClothingSetIndexes fills. Eight bytes; the fields are
+// not known yet.
+struct ClothingSetIndexInfo {
+    u32 field_0x0; // 0x00
+    u32 field_0x4; // 0x04
+};
 
 // One clothing set of a body part. SimBodyPart::geometryVector holds these.
 struct BodyPartGeometryTSC6 {
@@ -160,7 +162,7 @@ public:
     virtual void CreateIcon(SimModelTSC6 *model, EVec3 *cameraPos, EVec3 *cameraTarget, f32 a, u32 b,
                             u32 c, int d, int e, int f, bool g);
     virtual void GetRequiredDyesForTextureVariation(u8 textureIndex, s16 *dyes);
-    virtual void GetValidClothingSetIndexes(
+    virtual bool GetValidClothingSetIndexes(
         eastl::vector<Sim::ClothingSetIndexInfo, eastl::allocator> &indexes);
     virtual u8 GetClothingSetUIIndex() const;
     virtual u8 GetDegradationModelCodeIndex() const;

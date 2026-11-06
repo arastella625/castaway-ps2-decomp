@@ -139,7 +139,7 @@ public:
     virtual EString GetCompositeTextureBaseName() const;
     virtual EString GetCompositeTextureName(const char *base, Sim::eSimPartsMapLocation location) const;
     virtual u32 GetCompositeTextureID(const char *base, Sim::eSimPartsMapLocation location) const;
-    virtual void GetValidClothingSetIndexes(
+    virtual bool GetValidClothingSetIndexes(
         Character::eBodyPart part, eastl::vector<Sim::ClothingSetIndexInfo, eastl::allocator> &indexes);
     virtual void GetValidTattooIndexes(
         Sim::eTattooLocation location, eastl::vector<Sim::ClothingSetIndexInfo, eastl::allocator> &indexes);

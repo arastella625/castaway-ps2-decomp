@@ -258,6 +258,24 @@ u32 CasSimDescription::GetCompositeTextureID(const char *base, Sim::eSimPartsMap
     return EResourceManager::CalcId(GetCompositeTextureName(base, location).c_str(), true);
 }
 
+#ifdef NON_MATCHING
+// The clear() is a short loop, and short loops don't match yet for two reasons.
+// 1. The assembler pads a short loop with nops, a workaround for a fault in the PS2's
+//    processor. The game's assembler pads until the branch is 4 instructions after the top
+//    of the loop; every assembler build we have pads to 5. So this is one nop too long.
+// 2. The game closes the loop with a "branch likely" (bnel) and keeps the index in a1;
+//    this compiles to a plain bne and a2. The source shape of clear() is still a guess.
+bool CasSimDescription::GetValidClothingSetIndexes(
+    Character::eBodyPart part, eastl::vector<Sim::ClothingSetIndexInfo, eastl::allocator> &indexes)
+{
+    indexes.clear();
+    u8 index = CasUtils::GetBodyPartDBIndex(part);
+    if (index == 0x7f)
+        return false;
+    return bodyParts[index]->GetValidClothingSetIndexes(indexes);
+}
+#endif
+
 void CasSimDescription::SwitchToFirstAvailableStyle(Character::eBodyPart part)
 {
     bodyParts[GetBodyPartIndex(part)]->SwitchToFirstAvailableStyle();
