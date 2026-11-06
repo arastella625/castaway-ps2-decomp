@@ -436,7 +436,7 @@ The stack object is the frame's object ID. A call passes it on to the called tre
 | AnimateObject | `+0` flags: bit 0 use stack object, 1 ignore anim tags, 2 preload only, 3 sync object location, 4 object anim table, 5 run immediately; `+1` anim tag target; `+2` state owner; `+4` animation index; `+6` sync object location |
 | Budget | `+4` bit 0 just test, bit 1 clear means subtract |
 | CallNamedTree | `+2`: 1 global, 2 semi-global, 3 private |
-| CreateObject | `+5` flags: bit 0 no duplicate, 1 pass my ID and stack object ID, 2 neighbour in stack object, 3 empty tiles only, 4 pass temp 0, 5 use stack object's direction, 6 use GUID |
+| CreateObject | See its own section |
 | Dialog | `+1` icon index; `+7` bits 1-3 icon type, bits 4-6 result temp, bit 7 semi-global strings |
 | DirectionTo, DistanceTo | A flag byte (`+4`, `+2`), bit 0 set: the "from" value is the scope in the next byte and the data after it. Clear: scope 3, data 0xB. DistanceTo bit 1 returns sixteenths of a tile |
 | FindGoodLocation | `+2` flags: bit 0 start at relative object, 1 not prefer empty tiles, 2 editable tiles only, 3 orientation in temp 0, 4 prefer under roof |
@@ -468,7 +468,7 @@ It steps a value through a list of things. The value is the target; `+4` is the 
 | `+0` s32 | GUID for search types 4 and 7 |
 | `+4` bits 0 to 3 | Search type |
 | `+4` bit 5 | Take the GUID from temps 1 and 2 (high, low) |
-| `+4` bit 6 | Skip non-leads: only stop on objects where `IsInteractionTile(true)` is true. Ignored for search type 12 |
+| `+4` bit 6 | Skip non-leads. See "Skipping" below |
 | `+4` bit 7 | Target given: `+5` is its scope and `+7` its data. Clear means scope 0xA data 0, the stack object |
 | `+6` u8 | For search type 9, the local holding the centre object |
 
@@ -486,9 +486,74 @@ The target is read first, and it must have an address or it's error 0x13. Return
 | 9 | The four tiles around the object in local `+6`, in the order (1,0), (0,1), (-1,0), (0,-1). It carries on from the side the target is on; a target of 0 starts at (1,0) | False after (0,-1) |
 | 10 | Nothing | False |
 | 11 | Lots in the neighbourhood list at `+0xA0`: the one after the target, wrapping to the first; the first if it's 0 | False if the target isn't in the list |
-| Others | | Error 0x1E. With skipping on, only 0, 2 and 6 are valid, because 12 turns skipping off |
+| Others | | Error 0x1E, with skipping on or off |
 
 Search type 9's object has to be in the same room (object variable 0x1D) as the centre object, and off-grid tiles are skipped. A missing centre object is error 0xA, and a local past the tree's count is error 8.
+
+**Skipping.** Proven in structure: both builds test the flag in the same seven places. An earlier version of this page said only 0, 2 and 6 allow it. That rule is only about the list walk, and each other type has its own test:
+
+| Type | With skipping on |
+|---|---|
+| 0, 2, 6 | Passes over objects where `IsInteractionTile(true)` is false |
+| 1, 5, 7, 10, 11 | The flag is ignored |
+| 3 | Passes over parts where `IsInteractionTile(false)` is false, the only type that doesn't require the object to be in the world. Coming back to the start is false, with no write |
+| 4 | An object also needs `IsInteractionTile(true)` |
+| 8 | Passes over objects where `IsInteractionTile(true)` is false. Coming back to the target is false, with no write |
+| 9 | An object also needs `IsInteractionTile(true)` |
+| 12 | Turned off before anything else |
+
+`IsInteractionTile(inWorld)` asks whether a tile of an object counts as the object. In order:
+
+1. If `inWorld` is set and the object isn't in the world: false.
+2. `ObjDefinition +0x8A` is 2: false.
+3. It's a Sim: true.
+4. It's single-tile: true.
+5. `ObjDefinition +0x10` is negative: true.
+6. `ObjDefinition +0x8A` is 1: false.
+7. True if it has a tree for entry point 8.
+
+Only the `IsInteractionTile` body is Wii-only; the object's tile is the same data on both.
+
+## CreateObject (opcode 0x2A)
+
+**Likely**, read from the Wii build. 401 uses. It isn't matched, and the PS2 function (`0x22AA30`) hasn't been compared line by line.
+
+| Operand | Meaning |
+|---|---|
+| `+0` u32 | GUID |
+| `+4` s8 | Where to put it, below |
+| `+5` bit 0 | No duplicate: false if the tile already has an object of this type |
+| `+5` bit 1 | Pass my ID as the new object's parameter 0, and my stack object as its stack object |
+| `+5` bit 2 | Make the Neighbor whose ID is my stack object, not a GUID |
+| `+5` bit 3 | Empty tiles only: false if the tile has any object |
+| `+5` bit 4 | Pass my temp 0 as its parameter 0. With bit 1 as well, error 0x37 |
+| `+5` bit 5 | Face the way my stack object faces |
+| `+5` bit 6 | Take the GUID from temps 1 and 2 (high, low) |
+| `+6` s8 | For places 8 and 9, a local |
+
+| Place | Tile |
+|---|---|
+| 0 | One tile ahead of me |
+| 1, 2, 5 | My tile. 1 and 2 let it overlap me |
+| 3 | One tile ahead of my stack object, in its room. No stack object is false |
+| 4 | My stack object's tile, in its room. No stack object is false |
+| 6 | Out of the world, at (-1, -1) |
+| 7 | The tile of the object whose ID is parameter 0. No parameters is error 8, no object is false |
+| 8 | The tile of the object whose ID is in local `+6`. A bad local is error 8, no object is false |
+| 9 | Next to me, in the direction of my facing plus local `+6`, and not through a wall |
+
+In order:
+
+1. A GUID of 0 with no flag saying where else to get one is error 0xC. An unknown GUID is false.
+2. If the object's data isn't loaded, it returns 2 and waits, but only during the main simulation.
+3. It works out the tile, then tests no-duplicate and empty-tiles.
+4. Unless the place is 6, it's false if the tile is out of bounds or marked not routable, or in the wrong room when a room is set.
+5. `MakeNewOutOfWorldObject` builds it, with each multi-tile part. `AddObject` puts it at the front of the object list.
+6. Facing is copied by turning up to four times.
+7. Unless the place is 6, it tests `CanPlace` and then `Place`. If it can't be placed, a Sim tries `TryFindSafeLocForSim`, and anything else is killed and it's false.
+8. A Neighbor who's a visitor runs its `init visitor` tree.
+9. The parameters from `+5` go into the new object's first stack frame.
+10. **My stack object becomes the new object's ID**, and it returns 1.
 
 ## Animate (opcode 0x2C)
 
@@ -577,7 +642,7 @@ The generator is at `0x262AF0`: `state = state * 0x41C64E6D + 0x3039`, returning
 `ObjM` is the saved state of a running lot, so a placed object arrives with almost everything a tree reads. `docs/formats/world.md` has the layout, and `tools/placed.py` reads it. **Proven** on all 2,611 objects: each ends exactly on its stream mark, and `placed.py check` has the controls. An earlier reader was misaligned from the attribute lists on, which is why the variables and attributes seemed to be missing.
 
 - **Variable 0xB is the object's own ID.** `Reset` and `Initialize` both copy `mID` (`+0xC0`) into it, and it equals the ID on all 2,611 placed objects. So "my variable 0xB" is "me", and a tree that gives it to `TestObjectType` is testing itself.
-- **Attributes are in `ObjM`.** They aren't only set by trees. Make the arrays from the counts below, then copy the saved lists over the start of them. The rest stay 0. Non-zero attributes are on 168 objects, semi-global on 1,488, static on 407.
+- **Attributes are in `ObjM`.** Make the arrays from the counts below, then copy the saved lists over the start of them. The rest stay 0. Non-zero attributes are on 168 objects, semi-global on 1,488, static on 407. Most objects then reset on load, which clears all but the static ones: see "How an object starts running".
 - **Variables, temps, object slots and the idle status** are all there. A variable the object doesn't list takes its starting value from the table below.
 - **The stack holds one frame,** at node 0 of the object's main tree, with its locals and parameters. So a loaded object's next tick starts main.
 
@@ -626,17 +691,19 @@ The purposes are read from the callers' names, so treat them as **likely**. 14, 
 
 ### How an object starts running
 
-**Likely, from Wii.** Loading a lot:
+**Proven for `PostLoad`, read on both builds, and likely for the rest.** Loading a lot:
 
 1. `ObjectModule::DoStream` makes each object, runs `Initialize`, and reads its saved state over the top.
 2. `cXObject::PostLoad` sets its location.
-3. If its selector needs a reset, it runs `Cleanup(0)` and then the init tree, entry point 0.
+3. If its selector needs a reset, it runs `CleanupPeople`, `Cleanup(0)` and then the init tree, entry point 0.
 4. Unless the game is in author mode, it runs the load tree, entry point 2, with parameter 0 set to the transition type.
-5. Its main tree carries on from the saved frame.
+5. Its main tree carries on from the stack.
 
-A selector needs a reset when `objt`'s saved init or main tree version isn't the current one. The version is `GetCumulativeTreeVersion` over the entry point's tree. A newly created object has no saved frame: `Reset` runs init and puts main on the stack.
+A selector needs a reset when `objt`'s saved init or main tree version isn't the current one. A version is the root tree's header byte 8 in the high 16 bits, plus the sum of byte 8 over the root and every tree it can reach by calls. **Proven:** that gives exactly the saved value on 504 of the 1,134 type entries, and byte 7 gives none. The other 630 differ by small amounts, because the trees on the disc are newer than the saved houses.
 
-`Reset` also zeroes the attributes, semi-global attributes and temps, but not static attributes.
+**So most placed objects reset on load.** 2,027 of the 2,610 with a definition are of a type that needs it, and only 583 keep their state as saved. Of the 2,027, 108 have a cleanup tree and 1,919 don't. Without one, `Cleanup(0)` goes through `Reset(true)`, which zeroes the attributes, semi-global attributes and temps and puts main on the stack. It doesn't zero static attributes. So for those objects the saved attributes don't survive, and what matters is what the init and load trees write. A port should run this sequence, not just copy `ObjM`. 1,985 of the objects have a load tree.
+
+A newly created object has no saved frame: `Reset` runs init and puts main on the stack.
 
 **After an error, `Cleanup(0)` with no cleanup tree** picks the object up, calls `Reset(true)` unless misc flag 0x40 is set, and if it was placed, puts it back where it was with `Place`. So an object with no entry point 3 still restarts.
 
@@ -660,7 +727,7 @@ The tables are `ObjDefinition`, 196 bytes or 98 s16 words, which is why scope 0x
 
 **Attributes.** A new array of the count, all 0, then a placed object's saved list over the start of it. Static attributes and scope 0x1B's array are made the same way. Scope 0x1B has no use in any expression.
 
-**Semi-global attributes.** The count is the number of strings in `STR#` set 0x100 in the object's semi-global row, and the array starts at 0. **Proven:** all 420 uses of scope 2 fit, and sets 0x101 and 0x102 overrun 202 and 332 times. The strings are the attributes' names, like `Bed Type`.
+**Semi-global attributes.** The count is the number of strings in `STR#` set 0x100 in the object's semi-global row, and the array starts at 0. **Proven:** all 420 uses of scope 2 fit, and sets 0x101 and 0x102 overrun 202 and 332 times. `tools/bhav.py` reruns this test and the attribute count's. The strings are the attributes' names, like `Bed Type`.
 
 **The `ResFile` row's vectors**, as far as they're known:
 
@@ -691,10 +758,23 @@ The game saves memory by keeping unchanged variables in a table shared by each o
 
 **What else `Initialize` does:** it sets the stack up with the temps as default parameters, loads the slot set, moves the object off the map to (-1, -1), and works out its room score.
 
+## What a RAM snapshot would settle
+
+The code answers most of this, but three things are worth reading from a snapshot taken just after a lot has loaded, before much has run. `tools/livecheck.py snapshot` saves the memory. All offsets are PS2.
+
+To find the objects: scan for a word equal to `0x4BC630` (`cXObject`'s vtable) at object `+0x50`. Any object's `+0xB4` is `ObjectModule`, whose `+0x28` is the first object in the list, and each object's `+0xB8` is the next.
+
+| Question | Read | What it shows |
+|---|---|---|
+| Is the list in `ObjM` order, with Sims first? | Each object's ID at `+0xC0`, walking the list | Compare with `placed.py list`. Sims and created objects should come first |
+| Do selectors really need a reset? | Selector pointer at object `+0xEC`, then bit 1 of the word at selector `+0xAC` | Set on the types `objt` says differ. It stays set while the lot is loaded |
+| Did the saved attributes survive? | Pointer and count at `+0x54`, `+0x58` (attributes), `+0x5C`, `+0x60` (semi-global), `+0x64`, `+0x68` (static) | Clam Shell is a good case: a type that resets, with a saved semi-global list starting 94. If the list is all 0 or differs, `Reset` ran. Static lists should still equal `ObjM` |
+
 ## What's left
 
 **Open:**
 - The bodies of the primitives, except what's above. Each is a function at the address in the table.
 - What scope 0x18's virtual call returns, and what reads the flag `0x49DDA4`.
 - What `+4` of an expression is for. No code reads it.
-- Header bytes 7 and 8, and type 0x16.
+- Header byte 7 and type 0x16. Byte 8 is the tree's version, used only to decide resets.
+- Which way variable 1 turns an object.

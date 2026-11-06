@@ -6,7 +6,7 @@ Usage: python -I tools/bhav.py <game.iso>
 docs/formats/world.md says what each field of a tree means; those statements come from the
 decompiled interpreter (src/game/simulator/core2/TreeSim.cpp). This reads all of EDITHTRE and
 tests them on the real data: branch targets, tree ID ranges, expression operators and scopes,
-the header bytes, the link to an object's semi-global set, and tree constants. Each rule also runs at a wrong offset, as a negative control: a rule
+the header bytes, the link to an object's semi-global set, tree constants and the attribute counts. Each rule also runs at a wrong offset, as a negative control: a rule
 that passes there too proves nothing. It prints counts only. Exit status is 0 when every rule
 holds and every control fails.
 """
@@ -37,6 +37,13 @@ RESFILE_CONSTANTS = 0x20  # VECTOR<BehaviorConstants>
 RESFILE_SEMI = 0x34  # pointer to the ResFile row of the object's semi-global set
 CONSTANTS_SIZE = 16
 CONSTANT_VALUE_SIZE = 8
+RESFILE_STRINGS = 0x10  # 12-byte entries: pointer to a VECTOR of strings, tag, ID in the low 16 bits
+STRING_SET_SIZE = 12
+ATTRIBUTE_SCOPE, SEMI_ATTRIBUTE_SCOPE = 0, 2
+DEF_ATTRIBUTES, DEF_ATTRIBUTES_CONTROL = 0x74, 0x72
+DEFAULT_ATTRIBUTES = 8  # what a count of 0 means
+SEMI_ATTRIBUTES, SEMI_ATTRIBUTES_CONTROL = 0x100, 0x101  # STR# IDs
+SEMI_SET_SUFFIX = '_sg'
 
 
 def read_trees(data, label):
@@ -181,6 +188,68 @@ def check_links(disc, sets):
         control_calls * 2 < calls and control_found * 4 < controls * 3
 
 
+def operand_overruns(sets, limit_of, scope):
+    """Expression operands of a scope in each set's trees: (within its limit, past it)."""
+    within = past = 0
+    for name, trees in sets.items():
+        limit = limit_of(name)
+        if limit is None:
+            continue
+        for tree in trees:
+            for node in tree[3]:
+                if struct.unpack_from('<H', node, 0)[0] != EXPRESSION:
+                    continue
+                for offset, operand_scope in ((4, node[10]), (6, node[11])):
+                    if operand_scope == scope:
+                        if struct.unpack_from('<h', node, offset)[0] < limit:
+                            within += 1
+                        else:
+                            past += 1
+    return within, past
+
+
+def check_counts(disc, sets):
+    """Test ObjDefinition +0x74 on scope 0 operands, and STR# 0x100 on scope 2 operands."""
+    quickdata = gamedata.load_quickdata(disc)
+    data, table = gamedata.find_table(quickdata, 'ResFile')
+    _, definitions = gamedata.find_table(quickdata, 'ObjDefinition')
+    rows = {data.row_name(table, i): table.rows + i * table.stride for i in range(table.count)}
+    semis = {name: semi for name, (semi, _) in read_resfiles(disc).items()}
+    first, last = definitions.rows, definitions.rows + definitions.count * definitions.stride
+
+    def attribute_limit(offset):
+        def limit_of(name):
+            if name not in rows:
+                return None
+            start, count = data.vector(rows[name])
+            pointers = (data.word(start + 4 * i) for i in range(count))
+            values = [struct.unpack_from('<h', data.image, p + offset)[0] for p in pointers if first <= p < last]
+            return max(v or DEFAULT_ATTRIBUTES for v in values) if values else None
+        return limit_of
+
+    def semi_limit(string_set):
+        def limit_of(name):
+            semi = name if name.endswith(SEMI_SET_SUFFIX) else semis.get(name)
+            if semi not in rows:
+                return None
+            start, count = data.vector(rows[semi] + RESFILE_STRINGS)
+            for entry in range(start, start + count * STRING_SET_SIZE, STRING_SET_SIZE):
+                if data.word(entry + 8) & 0xFFFF == string_set and entry in data.pointers:
+                    return data.vector(entry)[1]
+            return None
+        return limit_of
+
+    attributes = operand_overruns(sets, attribute_limit(DEF_ATTRIBUTES), ATTRIBUTE_SCOPE)
+    attributes_control = operand_overruns(sets, attribute_limit(DEF_ATTRIBUTES_CONTROL), ATTRIBUTE_SCOPE)
+    semi = operand_overruns(sets, semi_limit(SEMI_ATTRIBUTES), SEMI_ATTRIBUTE_SCOPE)
+    semi_control = operand_overruns(sets, semi_limit(SEMI_ATTRIBUTES_CONTROL), SEMI_ATTRIBUTE_SCOPE)
+    print('scope 0 operands within ObjDefinition +0x74: %d, past it: %d (control +0x72: %d past)'
+          % (attributes[0], attributes[1], attributes_control[1]))
+    print('scope 2 operands within STR# 0x100: %d, past it: %d (control STR# 0x101: %d past)'
+          % (semi[0], semi[1], semi_control[1]))
+    return attributes[1] == 0 and semi[1] == 0, attributes_control[1] > 0 and semi_control[1] > 0
+
+
 def main(argv):
     if len(argv) != 2:
         print(__doc__)
@@ -228,9 +297,10 @@ def main(argv):
     print('primitive use:', ' '.join('%02X:%d' % (k, opcodes[k]) for k in primitives))
 
     links_hold, link_control_fails = check_links(disc, sets)
+    counts_hold, count_control_fails = check_counts(disc, sets)
 
-    rules_hold = bad_targets == 0 and bad_expressions == 0 and None not in classes and links_hold
-    controls_fail = bad_control > 0 and bad_expr_control > 0 and link_control_fails
+    rules_hold = bad_targets == 0 and bad_expressions == 0 and None not in classes and links_hold and counts_hold
+    controls_fail = bad_control > 0 and bad_expr_control > 0 and link_control_fails and count_control_fails
     print('rules hold' if rules_hold else 'a rule failed', '/',
           'controls fail as they should' if controls_fail else 'a control passed: the test proves nothing')
     return 0 if rules_hold and controls_fail else 1

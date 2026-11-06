@@ -394,7 +394,8 @@ the definition, then overlays what's saved, so the rest stay 0.
 exception is one Conch, saved on the semi-global main tree.
 
 Variable 0xB is the object's own ID on all 2,611. Non-zero attributes are on 168 objects, semi-global
-ones on 1,488 and static ones on 407. Temps are non-zero on 28.
+ones on 1,488 and static ones on 407. Temps are non-zero on 28. This is what's saved, not what a running
+lot ends up with: 2,027 objects reset on load, as `docs/formats/bhav.md` explains.
 
 Positions are in sixteenths of a tile, and a tile is a metre. Controllers such as `The Weather God`
 sit at -16, -16, off the lot: 365 objects do, leaving 2,246 on lots.
