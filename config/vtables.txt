@@ -23,3 +23,5 @@
 
 # The tree interpreter. TreeSim's constructor stores this address.
 0x004B8220 TreeSim game/simulator/core2/TreeSim.h
+
+0x004BC630 cXObject                   game/simulator/core/cXObject.h

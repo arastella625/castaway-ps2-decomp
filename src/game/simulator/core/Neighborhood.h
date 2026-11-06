@@ -20,6 +20,7 @@ public:
 // Wii: pNeighborhood__5Globs, read through GetNeighborhood__Fv, which the PS2 build inlines.
 class Globs {
 public:
+    enum TransitionType { };
     static Neighborhood *pNeighborhood;
 };
 

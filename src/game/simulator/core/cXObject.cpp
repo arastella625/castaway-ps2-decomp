@@ -6,12 +6,12 @@ void cXObject::PreSave()
 
 void cXObject::TagGraphicsField()
 {
-    field_0x134 = 1;
+    mGraphicsTagged = 1;
 }
 
 u32 cXObject::GetSpriteSlot()
 {
-    return field_0x110;
+    return mSpriteSlots;
 }
 
 void cXObject::ForceLocation()
