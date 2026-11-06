@@ -297,7 +297,7 @@ inline void cXObject::TryParticleEffect(ParticleEffectParam effect, long &result
 {
     cXPerson *person = GetPerson();
     TREE_CHECK(this, person, 0x1c, result = -1; return);
-    int played = person->mSimInstance->PlayEffect(effect.field_0x0, effect.field_0x4);
+    int played = person->mAnimator->PlayEffect(effect.field_0x0, effect.field_0x4);
     result = 1;
     if (played != 1)
         result = 0;

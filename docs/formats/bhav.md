@@ -108,6 +108,8 @@ A frame also has a word at `+8`. When a callee returns and it's set, the caller 
 
 `Behavior::GetNodeRef` keeps recently used trees in `s_cachedTrees`, most recent first; a miss reuses the last slot. A port with everything in memory doesn't need this.
 
+**What an error does. Likely, from both builds:** `cXObject::Error` sets bit 0x100 of the object's flags (`+0xE4`) and a flag in `ObjectModule`. It doesn't stop anything itself; the tree stops because the primitive returns -1. `cXObject::HandleError` runs later: if the flag is set and an error is recorded, it clears the flag, calls `ObjectModule::CleanupPeople` and then the object's `Cleanup(0)`. If the object has a tree for entry point 3, `Cleanup` runs it, sets object data 0x3E to 0, clears bit 5 of data 8, and resets the stack to the tree for entry point 1, on every tile of a multi-tile object. With no such tree it takes a path through the object's placement instead, which hasn't been followed. Both paths then set the idle status and quiet the object's sounds. So one error resets that object rather than ending the game.
+
 Error codes seen so far:
 
 | Code | Meaning |
@@ -122,7 +124,9 @@ Error codes seen so far:
 | 0x00A | No stack object |
 | 0x00D | Bit number above 16 in an expression |
 | 0x00F | Scope 0xA with data other than 0 |
+| 0x004 | Random's limit is 0 |
 | 0x013 | An expression tried to write to something it can't |
+| 0x014 | CheckObject test 4 with a relationship type outside 1 to 9 |
 | 0x015 | No stack object, in scopes that need a Sim or a slot |
 | 0x017 | TestObjectType's object doesn't exist |
 | 0x01A | Motive number out of range, or ad number out of range |
@@ -161,9 +165,10 @@ The switch is `cXObject::TryElement` (`0x234678`), 73 cases, and `cXPerson::TryE
 On a non-Sim object, an opcode with no `cXObject` handler is error 5. Opcode 0x26 on a Sim returns -1 at once. Five primitives are inlined in the switch rather than being functions. **Proven:**
 
 - `WantsAndFearsNotify` and `ChangeWantFearTree` return 1 and do nothing else.
-- `TreeBreak` reads a value (`+0` data, `+2` scope) and returns 1 if it's 0. Otherwise `+4` bit 0 returns 1 (log only), bit 1 stops the tree with error 0x3E, and neither returns 1.
+- `TreeBreak` reads a value (`+0` data, `+2` scope) and returns 1 if it's 0. Otherwise `+4` bit 0 returns 1 (log only), bit 1 stops the tree with error 0x3E, and neither returns 1. The literal form (135 of 235 nodes, value 1, flags 0) just returns 1.
+- **`TreeBreak` with all-FF operands is a deliberate trap, and it does stop the tree.** Scope -1 isn't special: `InterpValue` gives error 9, on both builds, with nothing in front of it. All 99 such nodes have false target 0xFD, 86 are reached only by a false branch and 3 by both, and 10 by nothing. `global/Sim - Is Alive?` is `CheckObject` with its false branch going to one. So it's an "this can't happen" check: it runs only when the test before it failed, and the object gets reset (see "What an error does"). A port should keep the error.
 - `Tutorial` claims the tutorial for this object (`+0` is 0) or releases it (1). Only one object has it at a time: claiming fails if another has it, releasing fails if this one doesn't. Any other value is error 0x36.
-- `ParticleEffect` needs a Sim (error 0x1C). It passes the operands as two words to a virtual on what's at Sim `+0x5F0` and returns 1 if that returned 1, otherwise 0. No tree uses it.
+- `ParticleEffect` needs a Sim (error 0x1C). It passes the operands as two words to a virtual on the Sim's animator, at `+0x5F0`, and returns 1 if that returned 1, otherwise 0. No tree uses it.
 
 | Opcode | Primitive | Address | Sim override | Address | Uses |
 |---|---|---|---|---|---|
@@ -285,6 +290,7 @@ It reads the right operand first, then the left. A scope of 7 skips `InterpValue
 Rules a port has to copy:
 
 - **Writing.** With an s16 address, the new value goes through `InterpWriteValue`. With no address but a float one (a motive), the sum is done on the float. With neither, it's error 0x13. Operators 9, 0xA, 0xC, 0xD and 0x12 never use the float: on a motive they're error 0x13. This test comes first, so **an expression that writes an unwritable scope is error 0x13, not 9**. Error 9 is `InterpWriteValue`'s own default, which Expression never reaches, because every scope that gives an address is one it can write. The two `left = right` on scope 0x2A are 0x13.
+- **A failed write doesn't stop the expression.** `TryExpression` ignores what `InterpWriteValue` returns. Writing scope 4 with a missing variable records error 7 and calls `Error`, and the instruction still takes its true target. That's in the PS2 code: there's no test after any of its write calls.
 - **Bit numbers.** Anything above 16 is error 0xD. Below 1 isn't checked.
 - **After a write**, for scopes 0xE, 0xF and 0x11, the float is clamped to -100.0 to 100.0. Then if `EdithVariableSet::s_bTaggedGraphicField` is set, it's cleared, and `TagGraphicsField` runs on me (left scope 3) or the stack object (left scope 4).
 - **Operator 0xA doesn't count as a write**, so it does neither of those. That's in the code, and it may be a slip in the original. It changes nothing unless the left scope is a motive, which is error 0x13 anyway, or a variable that sets the tag.
@@ -327,12 +333,12 @@ A value is a scope and a data word. `cXObject::InterpValue` (`0x235968`) reads i
 | 0x13 | Stack object's person data field | 0x21, 0x15, 0x1C | yes |
 | 0x14 | ID of the object in my slot `data` | 0x1B | no |
 | 0x15 | Word `data` of stack object's definition, below 0x62 | 0x23 | no |
-| 0x16 | Stack object's attribute, indexed by parameter `data` | 8, 6 | yes |
+| 0x16 | Stack object's attribute, indexed by parameter `data`. The game reads the object's attribute count before it tests for no object, so that test can't help; a port should test first and give error 0xA | 8, 6 | yes |
 | 0x17 | Data of the room numbered by my temp 0; see below | 0x28, 0x29 | no |
 | 0x18 | A virtual call on the neighbourhood with the stack object's ID and `data` (slot 1); what it holds is open | | yes |
 | 0x19 | **Local** `data` of this tree. The limit is enforced | 8 | yes |
 | 0x1A | Tree constant; see below. Index 0x7F means temp 0 holds it | 0x2F | no |
-| 0x1B | Word of an array at `+0x6C` of the stack object, numbered by my temp `data`. It's its own array with a count at `+0x70`, not the attributes. What fills it is open, and no expression uses this scope | 2, 0x32 | yes |
+| 0x1B | Word of an array at `+0x6C` of the stack object, numbered by my temp `data`. It's its own array with a count at `+0x70`, not the attributes: see "Loading an object". No expression uses this scope | 2, 0x32 | yes |
 | 0x1C | Personality variable of ad `data`, like 0x0C | 0x1A | yes |
 | 0x1D | Minimum of ad `data`, like 0x0C | 0x1A | yes |
 | 0x1E | My person data field, numbered by my temp `data` | 0x1C, 2, 0x21 | yes |
@@ -486,16 +492,140 @@ Search type 9's object has to be in the same room (object variable 0x1D) as the 
 
 ## Animate (opcode 0x2C)
 
-**Likely**, from both builds. `cXObject::TryAnimate` (`0x234558`) is only the case for objects that aren't Sims. The C++ is in `cXObjectPrims.cpp` under `NON_MATCHING`, with 69 of 70 words the same. A Sim's animation is `SAnimator2::TryAnimate`, which hasn't been read.
+3,953 uses. On a Sim, `cXPerson::TryElement` sends behaviours 7 and 8 to the object wrapper and everything else to `SAnimator2::TryAnimate` (`0x104050`) through the animator at Sim `+0x5F0`. **Proven** for that function, which byte-matches. What it calls is **likely**, read from the Wii build.
 
-The behaviour number comes from two bytes: if `+3` & 0x7F is non-zero it's that plus 3, otherwise bit 0 of `+5` is bit 0 and bit 4 of `+5` is bit 1. 7 uses me, 8 the stack object, and anything else is error 5. Then it resolves the skill for passive influence and tells `PassiveInfluenceSystem` the object's skill name. So on an object that isn't a Sim this primitive plays nothing, and a port can return what `resolveSkillForPassiveInfluence` gives once that's read.
+| Operand | Meaning |
+|---|---|
+| `+0` s16 | Animation. 0 turns the current one off |
+| `+2` u8 | The local that events go to, with `+5` bit 5 |
+| `+3` | Bit 7 mirrored. Bits 0 to 6: behaviour number minus 3 |
+| `+5` bit 0 | Behaviour 1, when bits 0 to 6 of `+3` are 0 |
+| `+5` bit 1 | Backwards |
+| `+5` bit 2 | The animation is in parameter 0, not `+0` |
+| `+5` bit 4 | Behaviour 2, or with bit 0 behaviour 3 |
+| `+5` bit 5 | Events go to the local in `+2`, not parameter 0 |
+| `+5` bit 7 | Preload only |
+| `+7` s8 | Sync object, checked before the animation starts |
+
+| Behaviour | Path |
+|---|---|
+| 0, 3, 6 and up | Normal. 3 passes a flag to the start of the animation; 6 picks an algorithmic idle |
+| 1 | `BackgroundBehavior` |
+| 2, 5 | `CarryBehavior`, a virtual function |
+| 4 | `FXAnimationBehavior` |
+| 7, 8 | The object wrapper: 7 me, 8 the stack object |
+
+The primitive runs again each tick until it returns something other than 2. In order:
+
+1. The Sim's model isn't loaded: return 2.
+2. An animation is still loading: return 2.
+3. Preload only: load it and return.
+4. The Sim has a queued operation: return 2.
+5. An animation of 0 turns the current one off.
+6. If this animation hasn't started, resolve and start it. A sync object that isn't ready gives its own return value.
+7. If an animation event is waiting, store its number in the event target and **return 0**, the false branch.
+8. Otherwise, if the animation has finished, deliver any end event the same way, or stop and **return 1**, the true branch.
+9. Otherwise **return 2** and wait.
+
+So a tree animates in a loop: the false branch handles an event, then comes back to the same node, and the true branch means it finished. With no events to deliver, one play is many ticks of 2 and then a 1. A port without real animation can return 1 at once, or after the animation's length, and trees that wait for events will just see none. The event target is `+2`'s local or parameter 0, and a tree with neither is error 8. End events are negative in the animator (`+0x194`), and with `+5` bit 1 set they're stored as `-1 - value`.
+
+On an object that isn't a Sim, `cXObject::TryAnimate` (`0x234558`) is all there is: behaviour 7 uses me, 8 the stack object, and anything else is error 5. It resolves a skill for passive influence and plays nothing. Its C++ is under `NON_MATCHING`, 69 of 70 words.
+
+## Idle (opcode 0)
+
+**Proven:** `cXObject::TryIdle` byte-matches. 3 uses on the disc.
+
+`+0` s16 is a parameter number, and that parameter is the counter. Past the tree's parameters is error 8.
+
+1. If the object's idle status is 0, the counter is set to 0 and the status to -1.
+2. A negative counter becomes 0.
+3. A counter of 0 returns 1, the true branch.
+4. Otherwise it returns 2, so the node runs again next tick. Normally the counter goes down by 1. If the object can sleep, the counter stays and the status becomes counter - 1 instead.
+
+An object can sleep if it isn't a Sim, its variable 0x19 is 0, and no sprite slot is active. Idle status is a per-object word in `ObjectModule`, and it's what reading variable 0x19 clears, which ends the sleep at step 1. A port can ignore sleeping and always count down: the tick count comes out the same unless something wakes the object early.
+
+## Random (opcode 8)
+
+**Likely**, from both builds; the C++ is under `NON_MATCHING`, 108 of 118 words.
+
+| Operand | Meaning |
+|---|---|
+| `+0` s16, `+2` s16 | Target data and scope |
+| `+4` s16, `+6` s16 | Limit data and scope |
+
+A limit of 0 is error 4. The result is a random number modulo the limit, taken as unsigned, so a negative limit is a very large one. It's written through `InterpWriteValue`, or to the float for a motive, and with neither address it's error 0x13. It returns 1.
+
+The generator is at `0x262AF0`: `state = state * 0x41C64E6D + 0x3039`, returning bits 16 to 47 of the 64-bit result of that multiply and add. State is 32 bits, at `0x5112E8`.
+
+## CheckObject (opcode 0x35)
+
+**Likely**, from both builds; the C++ is under `NON_MATCHING`, 131 of 189 words.
+
+`+0` data and `+2` scope give an object ID, and `+4` s16 is the test. Reading the value can fail with the usual errors. Any other test is false.
+
+| Test | True when |
+|---|---|
+| 0 | The object is the player's Sim and it has a player interactor that isn't autonomous |
+| 1 | The object exists |
+| 2 | The object exists and is a Sim |
+| 3 | A Neighbor has that ID |
+| 4 | Always true. Temp 0 is a relationship type, 1 to 9, or error 0x14. It's replaced by how many relationships of that type the Sim has, or 0 |
+| 5 | The object is the player's Sim and it has no player interactor |
+
+## Loading an object
+
+What a port needs to make a real object from the disc. **Proven** where it says so: each has been tested on the disc, with a wrong offset failing. The rest is from `cXObject`'s constructor and `Initialize` on Wii, and the offsets are in the data so they're the same on PS2.
+
+The tables are `ObjDefinition`, 196 bytes or 98 s16 words, which is why scope 0x15's limit is 0x62, and `ResFile`. A `ResFile` row's `+0` vector points to its `ObjDefinition` rows.
+
+| `ObjDefinition` offset | Meaning |
+|---|---|
+| `+4` | Stack size for its `TreeSim` |
+| `+0x12` | Object type, word 9. 2 is a Sim |
+| `+0x14` | Non-zero means multi-tile |
+| `+0x1C` | GUID. **Proven** |
+| `+0x28` | Slot set ID. Below 1000 it's in the object's own `ResFile`, from 1000 in its semi-global row |
+| `+0x74` | Attribute count; 0 means 8. **Proven:** all 1,127 uses of scope 0 fit under it, and other offsets give 169 to 294 overruns |
+| `+0x76` | Static attribute count (scopes 0x40, 0x41) |
+| `+0x82` | Size of the array for scope 0x1B. Only 13 definitions have one (18 or 3) |
+
+**Attributes.** A new array of the count, all 0. Static attributes and scope 0x1B's array are made the same way and start at 0. Scope 0x1B has no use in any expression.
+
+**Semi-global attributes.** The count is the number of strings in `STR#` set 0x100 in the object's semi-global row, and the array starts at 0. **Proven:** all 420 uses of scope 2 fit, and sets 0x101 and 0x102 overrun 202 and 332 times. The strings are the attributes' names, like `Bed Type`.
+
+**The `ResFile` row's vectors**, as far as they're known:
+
+| Offset | Holds |
+|---|---|
+| `+0` | Pointers to `ObjDefinition` rows |
+| `+0x10` | String sets, 12-byte entries: vector of strings, tag `STR#`, ID in the low 16 bits |
+| `+0x1C` | Catalogue text |
+| `+0x20` | Constant tables |
+| `+0x24` | Tree tables (`VECTOR<TreeTable>`) |
+| `+0x28` | Slot sets, by ID |
+| `+0x34` | Pointer to the semi-global row |
+
+**Variables** (scopes 3 and 4). There are 72 numbers. Six don't exist and are error 7: 0x16, 0x2C, 0x39, 0x45, 0x46 and 0x47. Everything else exists on every object. `Initialize` gives these starting values, and all others start at 0:
+
+| Variable | Starts as |
+|---|---|
+| 3, 0xE | -1 |
+| 0xB | The object's ID |
+| 0x17 | 2 |
+| 0x18 | 9, the game's start hour |
+| 0x2D, 0x2E, 0x2F | 2000, 1, 1: the start year, month and day |
+| 0x31 | 50 |
+| 0x43 | The number of object slots, not counting slot 0 |
+
+The game saves memory by keeping unchanged variables in a table shared by each object type, and writing a value equal to the shared one removes the object's own copy. That's invisible to a tree, so a port can give each object a plain array of 72. Reading variable 0x19 also clears the idle status, as scope 3 says.
+
+**What else `Initialize` does:** it sets the stack up with the temps as default parameters, loads the slot set, moves the object off the map to (-1, -1), and works out its room score. After that the object's init and main trees run, through `ObjSelector`'s tree table; that hasn't been read yet.
 
 ## What's left
 
 **Open:**
-- The bodies of the primitives, except what's above. Each is a function at the address in the table. `CheckObject`, `SAnimator2::TryAnimate` and `resolveSkillForPassiveInfluence` are next.
+- The bodies of the primitives, except what's above. Each is a function at the address in the table.
+- Which trees an object starts with: the entry points behind `GetTreeID`, and `ObjSelector`'s tree table. `Cleanup` shows entry point 1 is the one a reset goes back to and 3 is a reset tree; the rest are open.
 - What scope 0x18's virtual call returns, and what reads the flag `0x49DDA4`.
 - What `+4` of an expression is for. No code reads it.
-- Which variables an object has, which decides error 7: `EdithVariableSet::Contains` at `0x2193B8`.
-- What fills the array at object `+0x6C`, scope 0x1B.
 - Header bytes 7 and 8, and type 0x16.

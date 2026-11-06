@@ -24,8 +24,8 @@ public:
     }
 };
 
-// What a Sim's +0x5f0 points at: only the slot ParticleEffect calls.
-class PersonSimInstance {
+// The Sim's animator, SAnimator2 in game/animation: only the slot ParticleEffect calls.
+class PersonAnimator {
 public:
     virtual void Slot0();
     virtual void Slot1();
@@ -73,7 +73,7 @@ public:
     s16 mPersonData[0x24];    // 0x548  scopes 0x12, 0x13 and 0x30 to 0x33
     Neighbor *mNeighbor;      // 0x590
     u32 pad_0x594[0x17];      // 0x594
-    PersonSimInstance *mSimInstance; // 0x5f0
+    PersonAnimator *mAnimator; // 0x5f0
 
     static int sbAllowingCheckTreeAds;
 
