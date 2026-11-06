@@ -8,9 +8,9 @@ A hobby reverse-engineering project for the US PS2 build, `SLUS_216.64`. The goa
 
 - 2,173 of 13,231 functions are named, each with a confidence tier.
 - Structs are recovered for `CasSimDescription`, `SimBodyPart` and its subclasses.
-- 768 functions are matched byte for byte (14,704 bytes, 0.39% of the code). 315 are in Create-a-Sim (`CasSimDescription`, `SimBodyPart` and its 15 subclasses). The other 453 are functions of one to four instructions in 93 classes across the game, generated from patterns; for those a match confirms the code but not the name. Nearly everything else is still undecompiled.
+- 776 functions are matched byte for byte (14,768 bytes, 0.40% of the code). 315 are in Create-a-Sim (`CasSimDescription`, `SimBodyPart` and its 15 subclasses). The other 461 are functions of one to four instructions in 96 classes across the game, generated from patterns; for those a match confirms the code but not the name. Nearly everything else is still undecompiled.
 - The compiler for the Create-a-Sim code is SN Systems ee-gcc 2.95.3 build 1.36 at `-O2 -G0 -fno-rtti -fno-exceptions`.
-- A full rebuild links 756 of those functions in place of their assembly and reproduces the game's checksum. The data sections are still raw binary.
+- A full rebuild links 764 of those functions in place of their assembly and reproduces the game's checksum. The data sections are still raw binary.
 
 ## Where to start
 
