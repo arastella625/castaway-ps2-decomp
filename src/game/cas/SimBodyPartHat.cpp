@@ -1,5 +1,7 @@
 #include "game/cas/SimBodyPartHat.h"
 
+#include "game/cas/CasSimDescription.h"
+
 int SimBodyPartHat::GetType() const
 {
     return 0x21;
@@ -48,6 +50,14 @@ u8 SimBodyPartHat::CalculateModelIndexFromModelCodeIndexAndStyleIndex(u8 modelCo
 u8 SimBodyPartHat::CalculateStyleIndexFromModelIndex(u8 modelIndex) const
 {
     return modelIndex;
+}
+
+void SimBodyPartHat::UpdateRelatedData()
+{
+    if (GetModelID() != 0)
+        SetCharacterFlag(2, true);
+    else
+        SetCharacterFlag(2, false);
 }
 
 s32 SimBodyPartHat::GetIsDamaged()

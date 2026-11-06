@@ -172,6 +172,7 @@ public:
     BodyPartTypeInfo *GetBodyPartTypeInfo() const;
     // Defined in CasSimDescription.h, because it needs that class. The PS2 build inlines it.
     inline bool GetCharacterFlag(int index) const;
+    inline void SetCharacterFlag(int index, bool value);
 };
 STATIC_ASSERT(SimBodyPart_size, sizeof(SimBodyPart) == 0x24);
 

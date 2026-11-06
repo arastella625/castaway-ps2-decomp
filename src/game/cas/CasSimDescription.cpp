@@ -203,6 +203,19 @@ u32 CasSimDescription::GetTattooTextureID(Sim::eTattooLocation location, bool a)
         textureInfo->tattooTextures[(u8)location][tattooIndices[location]].textureID, a);
 }
 
+#ifdef NON_MATCHING
+// Two of 30 words differ, both around the last constructor call: the game sets the second
+// argument before the first (move a1,v0 / jal / move a0,s1) and this does the reverse.
+// Three phrasings of the return statement gave the same code.
+EString CasSimDescription::GetCompositeTextureBaseName() const
+{
+    EString name;
+    name.Format("%S_%S", firstName, lastName);
+    name.MakeLegalSymbolName();
+    return EString(name.GetCharacters());
+}
+#endif
+
 u32 CasSimDescription::GetCompositeTextureID(const char *base, Sim::eSimPartsMapLocation location) const
 {
     return EResourceManager::CalcId(GetCompositeTextureName(base, location).c_str(), true);

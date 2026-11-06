@@ -2,7 +2,7 @@
 
 `rebuild.py` builds the whole executable from a splat split plus the decompiled C++ in `src/`, and checks the result against `pkg/target.sha1`. A passing run means the C++ is linked into a file that is byte-identical to the game.
 
-**Status:** all 776 matched C++ functions are linked in place of their assembly, and the rebuilt file matches. The ELF header, `.vutext`, `.data`, `.rodata` and everything else after `.text` (12.7% of the file) are still raw binary.
+**Status:** all 786 matched C++ functions are linked in place of their assembly, and the rebuilt file matches. The ELF header, `.vutext`, `.data`, `.rodata` and everything else after `.text` (12.7% of the file) are still raw binary.
 
 ## Setup
 

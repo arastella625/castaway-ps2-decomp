@@ -867,3 +867,11 @@
 0x003DE540 __7EStringPCc
 0x00139268 Degrade__11SimBodyPart
 0x00139508 Repair__11SimBodyPart
+
+# game/cas/SimBodyPartHat
+0x0013C240 UpdateRelatedData__14SimBodyPartHat
+0x00144470 GetCompositeTextureBaseName__C17CasSimDescription
+0x003DED30 MakeLegalSymbolName__7EString
+0x00141AF0 GetCharacters__C7EString
+0x003D1FB8 Format__7EStringPCce
+0x003DE498 __7EString

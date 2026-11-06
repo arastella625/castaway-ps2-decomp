@@ -136,7 +136,7 @@ public:
     virtual u32 GetTattooTextureID(Sim::eTattooLocation location, bool a) const;
     virtual void GetTattooTextureInfo(Sim::eSimPartsMapLocation location, TextureBlendInfo *info, bool a) const;
     virtual void GetClothingTextureInfo(Sim::eSimPartsMapLocation location, TextureBlendInfo *info, bool a) const;
-    virtual void GetCompositeTextureBaseName() const;
+    virtual EString GetCompositeTextureBaseName() const;
     virtual EString GetCompositeTextureName(const char *base, Sim::eSimPartsMapLocation location) const;
     virtual u32 GetCompositeTextureID(const char *base, Sim::eSimPartsMapLocation location) const;
     virtual void GetValidClothingSetIndexes(
@@ -162,6 +162,7 @@ public:
 
     // Not virtual. The PS2 build inlines GetFlag.
     bool GetFlag(int index) const { return flags[index]; }
+    void SetFlag(int index, bool value) { flags.Set(index, value); }
     void CopyBodyPart(Character::eBodyPart part, const CasSimDescription &other);
 };
 STATIC_ASSERT(CasSimDescription_size, sizeof(CasSimDescription) == 0x334);
@@ -172,6 +173,14 @@ inline bool SimBodyPart::GetCharacterFlag(int index) const
     if (description != 0)
         return description->GetFlag(index);
     return characterFlags[index];
+}
+
+inline void SimBodyPart::SetCharacterFlag(int index, bool value)
+{
+    if (description != 0)
+        description->SetFlag(index, value);
+    else
+        characterFlags.Set(index, value);
 }
 
 #endif

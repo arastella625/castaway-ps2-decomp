@@ -15,6 +15,14 @@ struct BitFlags {
     BitFlags(const BitFlags &other) : bits(other.bits) {}
     // Wii: __vc__12BitFlags<Ui>CFi. Defined in BitFlags.cpp; the game keeps one copy per T.
     bool operator[](int index) const;
+    // Inlined everywhere in the game. The name is ours.
+    void Set(int index, bool value)
+    {
+        if (value)
+            bits |= 1 << index;
+        else
+            bits &= ~(1 << index);
+    }
 };
 STATIC_ASSERT(BitFlags_u32_size, sizeof(BitFlags<u32>) == 0x4);
 STATIC_ASSERT(BitFlags_u16_size, sizeof(BitFlags<u16>) == 0x2);
