@@ -1,0 +1,12 @@
+-O1
+-O2
+-O3
+-Os
+-O2 -fno-exceptions -fno-rtti
+-O2 -G0
+-O2 -mcpu=r5900 -mips3 -mgp64 -mfp32 -mabi=eabi
+-O2 -mcpu=r5900 -mips3 -mgp64 -mfp32 -mabi=eabi -mlong64
+-O2 -funroll-loops
+-O2 -fno-schedule-insns
+-O2 -fno-schedule-insns2
+-O2 -fno-omit-frame-pointer

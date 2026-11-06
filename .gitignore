@@ -1,0 +1,33 @@
+# Game data: never commit (see HANDOFF.md)
+*.iso
+SLUS_*
+*.elf
+*.bin
+/extracted/
+/assets/
+
+# Generated from the game, so rebuild locally
+/asm/
+/build/
+*.o
+*.s
+ps2_funcs.json
+wii_funcs.json
+ghidra_functions.csv
+
+# Built from the unlicensed ts2c repo, and contains game strings
+wii_function_reference.csv
+/ts2c/
+
+# Proprietary toolchains
+/compilers/
+*.exe
+
+# Ghidra projects embed the executable
+*.gpr
+*.rep/
+
+# Local tooling
+venv/
+__pycache__/
+*.pyc
