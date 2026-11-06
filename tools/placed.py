@@ -34,6 +34,7 @@ DIRECTION_KEY = 1
 UNITS_PER_TILE = 16
 EIGHTH_TURN = math.pi / 4
 FIRST_LOT_OFFSET = 1  # section 0 is lot_01: HouseData's row 0 is a placeholder
+MISMATCHED_LOT = 'lot_28'  # see docs/formats/world.md
 DEF_GUID = 0x1C
 RES_MODELS_FROM = 7  # the first word of ResData that may hold a resource hash
 # Stand-ins, not decoded. Nothing on the disc ties a palm's leaf to its trunk, and this object's
@@ -381,6 +382,8 @@ def export_lot(disc, out_path, lot):
     objects = read_houses(disc).get(lot)
     if objects is None:
         raise arc.FormatError('no placed objects for %s' % lot)
+    if lot == MISMATCHED_LOT:
+        print('warning: this house looks like an older lot_27, so objects will be misplaced')
     library = gltf.Library(disc)
     table = model_table(disc)
     available = {e.name: (e, raw) for e, raw in mdl.each_model(disc, library.shaders)}
