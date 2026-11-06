@@ -1,0 +1,80 @@
+#include "game/simulator/core/TokenItem.h"
+
+s16 TokenItem::GetID() const
+{
+    return field_0x8;
+}
+
+s16 TokenItem::GetCount() const
+{
+    return field_0xa;
+}
+
+int TokenItem::GetCategory() const
+{
+    return 2;
+}
+
+int TokenItem::GetOwnerID() const
+{
+    return -1;
+}
+
+int TokenItem::GetOwnershipPoints(s16 a) const
+{
+    return -1;
+}
+
+int TokenItem::GetNumAttributes() const
+{
+    return -1;
+}
+
+int TokenItem::GetAttribute(int a)
+{
+    return 0;
+}
+
+void TokenItem::SetAttribute(int a, s16 b)
+{
+}
+
+void TokenItem::AddAtribute(s16 a)
+{
+}
+
+int TokenItem::GetStatusText()
+{
+    return -1;
+}
+
+void TokenItem::SetStatusText(s8 a)
+{
+}
+
+u32 TokenItem::GetToken()
+{
+    return field_0x10;
+}
+
+void TokenItem::LoadItemInfo(cXObject *a, Family *b, s16 c)
+{
+}
+
+bool TokenItem::IsClothing()
+{
+    return false;
+}
+
+bool TokenItem::IsDyable()
+{
+    return false;
+}
+
+void TokenItem::ClearAttributes()
+{
+}
+
+void TokenItem::SetupOwnershipInfo(cXObject *a)
+{
+}

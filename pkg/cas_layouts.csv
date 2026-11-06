@@ -1,25 +1,29 @@
 class,offset,type,name,comment
 SimBodyPart,size,0x24,,
-SimBodyPart,0x0,uint,field_0x0,Unknown. GetCharacterFlag reads 16 bits here on PS2 but 32 on Wii
+SimBodyPart,0x0,ptr,description,The CasSimDescription this part belongs to or null; GetCharacterFlag asks it for flags (inlined in Hair::GetModelCode)
 SimBodyPart,0x4,uint,flags,BitFlags; SetClothingSetIndex copies the clothing set's flags here
 SimBodyPart,0x8,ptr,geometryVector,Wii IsGeneric passes this to VECTOR<Sim::BodyPartGeometryTSC6>::size
 SimBodyPart,0xc,ptr,bodyPartTypeInfo,Direct getter GetBodyPartTypeInfo
 SimBodyPart,0x10,ptr,clothingSetData,Direct getter GetClothingSetData
-SimBodyPart,0x14,ptr,damageState,Null-checked by GetIsDamaged and GetCurrentHitPoints; +0x8 hit points and +0x1c damaged flag
+SimBodyPart,0x14,ptr,clothingItem,The ClothingItem being worn or null (SetClothingItem); GetIsDamaged reads its +0x1c and GetCurrentHitPoints its +0x8
 SimBodyPart,0x18,byte,clothingSetIndex,SetClothingSetIndex and IsValidClothingSetIndex
 SimBodyPart,0x19,byte,modelCodeIndex,IsValidModelCodeIndex
 SimBodyPart,0x1a,byte,modelIndex,IsValidModelIndex
 SimBodyPart,0x1b,byte,styleIndex,IsValidStyleIndex
 SimBodyPart,0x1c,byte,textureIndex,IsValidTextureIndex
 SimBodyPart,0x1d,byte,degradationState,IsValidDegradationState
-SimBodyPart,0x1e,ushort,field_0x1e,Address taken in 5 methods; exact type unknown
+SimBodyPart,0x1e,ushort,characterFlags,BitFlags<unsigned short>; GetCharacterFlag reads it when description is null
 SimBodyPart,0x20,ptr,vptr,GCC places the vtable pointer after the base data; Wii has it at offset 0
 SimBodyPartHead,size,0x24,,
 SimBodyPartHead,0x0,SimBodyPart,base,
 SimBodyPartFacialFeature,size,0x2c,,
 SimBodyPartFacialFeature,0x0,SimBodyPart,base,
+SimBodyPartFacialFeature,0x24,uint,currentHitPoints,Signed. GetCurrentHitPoints and SetCurrentHitPoints overrides (matched)
+SimBodyPartFacialFeature,0x28,uint,isDamaged,Signed. GetIsDamaged and SetIsDamaged overrides (matched)
 SimBodyPartHair,size,0x2c,,
 SimBodyPartHair,0x0,SimBodyPart,base,
+SimBodyPartHair,0x24,uint,currentHitPoints,Signed. GetCurrentHitPoints and SetCurrentHitPoints overrides (matched)
+SimBodyPartHair,0x28,uint,isDamaged,Signed. GetIsDamaged and SetIsDamaged overrides (matched)
 SimBodyPartGlasses,size,0x24,,
 SimBodyPartGlasses,0x0,SimBodyPart,base,
 SimBodyPartTorso,size,0x24,,
@@ -42,16 +46,17 @@ SimBodyPartAddonLowerBody,size,0x24,,
 SimBodyPartAddonLowerBody,0x0,SimBodyPart,base,
 SimBodyPartSleeves,size,0x28,,
 SimBodyPartSleeves,0x0,SimBodyPart,base,
+SimBodyPartSleeves,0x24,byte,field_0x24,Added to the style index by CalculateModelIndexFromModelCodeIndexAndStyleIndex (matched)
 SimBodyPartUnused,size,0x24,,
 SimBodyPartUnused,0x0,SimBodyPart,base,
 CasSimDescription,size,0x334,,
 CasSimDescription,0x0,char16[32],firstName,Verify checks a null terminator; Wii constructor copies a default name with ewcsncpy
 CasSimDescription,0x40,char16[32],lastName,Verify checks a null terminator; Wii constructor copies a default name with ewcsncpy
-CasSimDescription,0x80,uint,field_0x80,Unknown
-CasSimDescription,0x84,ushort,field_0x84,Unknown
-CasSimDescription,0x86,byte,field_0x86,Unknown
+CasSimDescription,0x80,int,field_0x80,ClearSim sets -1; streamed from version 5
+CasSimDescription,0x84,short,magic,DoStream writes -275 (0xfeed) here
+CasSimDescription,0x86,sbyte,version,Stream version; DoStream sets 7 after reading
 CasSimDescription,0x88,uint,flags,Wii constructor builds a BitFlags<uint> here
-CasSimDescription,0x8c,uint,field_0x8c,Unknown
+CasSimDescription,0x8c,ptr,textureInfo,Tattoo texture lists at +0x34 (one per location) and skin list at +0x44; GetTattooTextureID and GetSkinTextureID (matched)
 CasSimDescription,0x90,ptr,typeInfo,GetBodyPartName indexes a table at +0x0; GetTypeCode reads through +0x4
 CasSimDescription,0x94,SimBodyPart*[15],bodyParts,GetBodyPartByIndex; GetNumBodyParts returns 15
 CasSimDescription,0xd0,float[4],latticeMorphValues,GetLatticeMorphValue
@@ -61,8 +66,8 @@ CasSimDescription,0xf4,byte[5],personalityValues,GetPersonalityValue and GetPers
 CasSimDescription,0xf9,byte,archetype,GetArchetype
 CasSimDescription,0xfa,byte,bodyType,GetBodyType
 CasSimDescription,0xfb,byte,skinColor,GetSkinColor
-CasSimDescription,0xfc,byte,field_0xfc,Unknown
-CasSimDescription,0xfe,ushort,field_0xfe,Unknown
+CasSimDescription,0xfc,byte,skinTextureOffset,Added to the skin texture index in GetSkinTextureID (matched)
+CasSimDescription,0xfe,short,skinHitPoints,ApplyDamage takes skin damage off this; DegradeSkin refills it
 CasSimDescription,0x100,SimBodyPartHead,head,Wii constructor
 CasSimDescription,0x124,SimBodyPartFacialFeature,facialFeature,Wii constructor
 CasSimDescription,0x150,SimBodyPartHair,hair,Wii constructor

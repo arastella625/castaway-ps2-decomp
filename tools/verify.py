@@ -14,11 +14,15 @@ third-party runs next to the compiler.
 import argparse
 import hashlib
 import os
+import re
 import socket
 import struct
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+import asm_filter
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / 'src'
@@ -29,9 +33,19 @@ TARGET_SHA1 = ROOT / 'pkg' / 'target.sha1'
 COMPILER = 'ee-gcc2.95.3-136'
 TOOL_DIR = 'lib/gcc-lib/ee/2.95.3'
 CPPFLAGS = ['-lang-c++', '-nostdinc', '-Isrc']
-CFLAGS = ['-quiet', '-O2', '-G0', '-fno-rtti']
-ASFLAGS = ['-EL', '-mips3', '-mcpu=r5900', '-G0']
+# -fno-exceptions: the game has no cleanup code around calls made while a temporary is alive
+# (SimBodyPart::GetIconTextureID), which the compiler adds when exceptions are on.
+CFLAGS = ['-quiet', '-O2', '-G0', '-fno-rtti', '-fno-exceptions']
+# SN's own assembler, not the GNU as that ships beside it. The two differ where the game's
+# code shows it: SN's puts a nop after mtc1, GNU's never does (CasSimDescription::ApplyDamage).
+# It takes few options: -EL, -mips3 and -mcpu make this build crash while reporting them.
+ASSEMBLER = 'Ps2EeAs.exe'
+ASFLAGS = ['-G0']
+# Everything that decides what an object file holds, for the build cache.
+BUILD_KEY = CPPFLAGS + CFLAGS + [ASSEMBLER] + ASFLAGS + ['asm_filter ' + asm_filter.VERSION]
 TOOL_TIMEOUT = 120  # seconds; a hung Wine process must not hang the build
+JOBS = min(8, os.cpu_count() or 1)  # source files compiled at once
+INCLUDE = re.compile(r'^\s*#\s*include\s+"([^"]+)"', re.M)
 
 SANDBOX_MARK = 'CASTAWAY_SANDBOXED'
 
@@ -150,18 +164,83 @@ def run_tool(tool_dir, exe, args):
         print(p.stderr.strip())
 
 
+def source_key(source, flags):
+    """Hash of everything that decides a source's object: itself, its headers and the flags."""
+    seen, todo = {}, [source]
+    while todo:
+        path = todo.pop()
+        if path in seen:
+            continue
+        seen[path] = path.read_bytes()
+        for name in INCLUDE.findall(seen[path].decode('latin-1')):
+            if (SRC / name).is_file():
+                todo.append(SRC / name)
+    digest = hashlib.sha1(repr((COMPILER, flags)).encode())
+    for path in sorted(seen):
+        digest.update(path.as_posix().encode())
+        digest.update(seen[path])
+    return digest.hexdigest()
+
+
+def assemble(tool_dir, asm, obj):
+    """Assemble compiler output, with its short loops padded as the game's are (asm_filter.py)."""
+    r = lambda p: p.relative_to(ROOT).as_posix()
+    run = lambda src, dst: run_tool(tool_dir, ASSEMBLER, ASFLAGS + ['-o', r(dst), r(src)])
+
+    def measure(probe_text, markers):
+        """Assemble a probe copy and return the instruction words after each marker symbol."""
+        probe_asm, probe_obj = asm.with_suffix('.probe.s'), asm.with_suffix('.probe.o')
+        probe_asm.write_bytes(probe_text.encode('latin-1'))
+        run(probe_asm, probe_obj)
+        elf = Elf32(probe_obj)
+        found = {}
+        for name, value, _, _, shndx in elf.symbols():
+            if name in markers and 0 < shndx < len(elf.sections):
+                code = elf.contents(elf.sections[shndx])[value:value + 4 * (asm_filter.BRANCH_DISTANCE + 1)]
+                found[name] = struct.unpack('<%dI' % (len(code) // 4), code[:len(code) // 4 * 4])
+        missing = sorted(set(markers) - set(found))
+        if missing:
+            raise VerifyError('%s: the assembler dropped loop marker %s' % (probe_asm.name, missing[0]))
+        return found
+
+    text = asm.read_bytes().decode('latin-1')
+    try:
+        padded = asm_filter.pad_short_loops(text, measure)
+    except asm_filter.FilterError as error:
+        raise VerifyError('%s: %s' % (asm.name, error))
+    if padded != text:
+        asm = asm.with_suffix('.padded.s')
+        asm.write_bytes(padded.encode('latin-1'))
+    run(asm, obj)
+
+
 def build(tool_dir, source, defines):
-    """Preprocess, compile and assemble one source file. Returns the object path."""
+    """Preprocess, compile and assemble one source file. Returns the object path.
+
+    Starting Wine three times takes several seconds, so an object is reused while the
+    source, the headers it includes and the flags are all unchanged.
+    """
     rel = source.relative_to(ROOT)
     out = BUILD / rel.relative_to('src')
     out.parent.mkdir(parents=True, exist_ok=True)
-    ii, asm, obj = (out.with_suffix(e) for e in ('.ii', '.s', '.o'))
+    ii, asm, obj, stamp = (out.with_suffix(e) for e in ('.ii', '.s', '.o', '.key'))
+    key = source_key(source, BUILD_KEY + defines)
+    if obj.is_file() and stamp.is_file() and stamp.read_text() == key:
+        return obj
+    stamp.unlink(missing_ok=True)
     # Paths are relative to ROOT, with forward slashes, so Wine never sees a Linux absolute path.
     r = lambda p: p.relative_to(ROOT).as_posix()
     run_tool(tool_dir, 'cpp.exe', CPPFLAGS + ['-D' + d for d in defines] + [rel.as_posix(), r(ii)])
     run_tool(tool_dir, 'cc1plus.exe', CFLAGS + [r(ii), '-o', r(asm)])
-    run_tool(tool_dir, 'as.exe', ASFLAGS + ['-o', r(obj), r(asm)])
+    assemble(tool_dir, asm, obj)
+    stamp.write_text(key)
     return obj
+
+
+def build_all(function, sources):
+    """Run function(source) for every source, a few at a time. Results keep the sources' order."""
+    with ThreadPoolExecutor(max_workers=JOBS) as pool:
+        return list(pool.map(function, sources))
 
 
 def compare(obj_path, game, game_base, addresses, verbose):
@@ -202,6 +281,13 @@ def compare(obj_path, game, game_base, addresses, verbose):
             if (ours ^ theirs) & ~mask & 0xFFFFFFFF:
                 diffs.append('    +0x%03x  ours %08X  game %08X' % (pos - start, ours, theirs))
         note = ', %d linker fields unchecked' % unchecked if unchecked else ''
+        # Functions are aligned to 8 bytes, so only padding may follow ours. Anything else
+        # means the game's function is longer than the one we compiled.
+        tail = game[offset + end - start:offset + ((end - start + 7) & ~7)]
+        if not diffs and any(tail):
+            problems.append('%s: matches as far as it goes, but the game has more code after 0x%08X'
+                            % (name, address + end - start))
+            continue
         if diffs:
             problems.append('%s: %d of %d words differ at 0x%08X\n%s'
                             % (name, len(diffs), (end - start) // 4, address, '\n'.join(diffs[:12])))
@@ -238,10 +324,10 @@ def main():
         addresses = load_symbols()
         sources = [p.resolve() for p in args.sources] or sorted(SRC.rglob('*.cpp'))
         total, count, failed = 0, 0, 0
-        for source in sources:
+        objects = build_all(lambda source: build(tool_dir, source, args.defines), sources)
+        for source, obj in zip(sources, objects):
             print(source.relative_to(ROOT).as_posix())
-            matched, functions, problems = compare(build(tool_dir, source, args.defines), game,
-                                                   game_base, addresses, args.verbose)
+            matched, functions, problems = compare(obj, game, game_base, addresses, args.verbose)
             total += matched
             count += functions
             failed += len(problems)

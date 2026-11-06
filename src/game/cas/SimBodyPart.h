@@ -2,35 +2,47 @@
 #define GAME_CAS_SIMBODYPART_H
 
 #include "common/BitFlags.h"
+#include "common/EString.h"
 #include "common/EVec3.h"
+#include "common/eastl.h"
+#include "common/StringFunctions.h"
+#include "common/TRect.h"
 #include "common/Vector.h"
 #include "common/types.h"
 
+class CasSimDescription;
+class ClothingItem;
 class ReconBuffer;
 class SimModelTSC6;
 
-namespace eastl {
-class allocator;
-template <class T, class Allocator> class vector;
-}
 
 namespace Weather {
 enum eDamageType { DAMAGE_TYPE_COUNT = 3 };
-struct DamageEvents;
+// Wii: Weather::DamageEvent. One amount per damage type for the clothes, and one for the
+// skin. Nothing else is known.
+struct DamageEvent {
+    s16 amounts[DAMAGE_TYPE_COUNT]; // 0x00
+    s16 skinAmount;                 // 0x06
+};
 }
 
 namespace Sim {
 
-struct ClothingSetIndexInfo;
+// One entry of the list GetValidClothingSetIndexes fills. Eight bytes; the fields are
+// not known yet.
+struct ClothingSetIndexInfo {
+    u32 field_0x0; // 0x00
+    u32 field_0x4; // 0x04
+};
 
 // One clothing set of a body part. SimBodyPart::geometryVector holds these.
 struct BodyPartGeometryTSC6 {
     const char *name;                       // 0x00
-    u32 field_0x4;                          // 0x04
+    VECTOR<u32> modelIDs;                   // 0x04  one per model index; zero means no such model
     VECTOR<const char *> textureVariations; // 0x08
     u32 flags;                              // 0x0c  bits 1-5: generic for style 1-5
     s32 hitPointsPerDegradationState;       // 0x10
-    u8 *armorValues;                        // 0x14  one per Weather::eDamageType
+    VECTOR<u8> armorValues;                 // 0x14  one per Weather::eDamageType
 };
 STATIC_ASSERT(BodyPartGeometryTSC6_size, sizeof(BodyPartGeometryTSC6) == 0x18);
 
@@ -38,7 +50,7 @@ STATIC_ASSERT(BodyPartGeometryTSC6_size, sizeof(BodyPartGeometryTSC6) == 0x18);
 
 // The three structs below have no known Wii names; these names are ours.
 struct BodyPartStyleInfo {
-    u32 field_0x0;           // 0x00
+    const char *code;        // 0x00  returned by SimBodyPart::GetStyleCode
     u8 numDegradationStates; // 0x04
 };
 STATIC_ASSERT(BodyPartStyleInfo_size, sizeof(BodyPartStyleInfo) == 0x8);
@@ -54,36 +66,28 @@ struct BodyPartTypeInfo {
     u32 field_0x4;                             // 0x04
     VECTOR<BodyPartModelCodeInfo> modelCodes;  // 0x08
     u32 field_0xc;                             // 0x0c
-    u32 field_0x10;                            // 0x10
+    VECTOR<u8> defaultClothingSetIndexes;      // 0x10  [1] and [0], picked by a bool
     u8 *nudeClothingSetIndexes;                // 0x14  [0] and [1], picked by a bool
 };
 STATIC_ASSERT(BodyPartTypeInfo_size, sizeof(BodyPartTypeInfo) == 0x18);
-
-struct BodyPartDamageState {
-    u32 field_0x0;         // 0x00
-    u32 field_0x4;         // 0x04
-    s32 currentHitPoints;  // 0x08
-    u32 field_0xc[4];      // 0x0c
-    s32 isDamaged;         // 0x1c
-};
 
 // The virtual functions are in vtable order, which the Wii and PS2 builds share.
 // Return types of functions that aren't decompiled yet are guesses.
 class SimBodyPart {
 public:
-    u32 field_0x0;                                    // 0x00
-    BitFlags flags;                                   // 0x04  copy of the clothing set's flags
+    CasSimDescription *description;                   // 0x00  the sim this part belongs to, or null
+    BitFlags<u32> flags;                                 // 0x04  copy of the clothing set's flags
     VECTOR<Sim::BodyPartGeometryTSC6> *geometryVector; // 0x08
     BodyPartTypeInfo *bodyPartTypeInfo;               // 0x0c
     Sim::BodyPartGeometryTSC6 *clothingSetData;       // 0x10  &(*geometryVector)[clothingSetIndex]
-    BodyPartDamageState *damageState;                 // 0x14
+    ClothingItem *clothingItem;                       // 0x14  the inventory item being worn, or null
     u8 clothingSetIndex;                              // 0x18
     u8 modelCodeIndex;                                // 0x19
     u8 modelIndex;                                    // 0x1a
     u8 styleIndex;                                    // 0x1b
     u8 textureIndex;                                  // 0x1c
     u8 degradationState;                              // 0x1d
-    u16 field_0x1e;                                   // 0x1e
+    BitFlags<u16> characterFlags;                     // 0x1e  used when description is null
     // vtable pointer                                 // 0x20  GCC 2.95 puts it after the data
 
     virtual ~SimBodyPart();
@@ -106,7 +110,7 @@ public:
     virtual bool UseStyleCodeInTextureName() const;
     virtual bool IsRequiredBodyPart() const;
     virtual int GetLayoutMapNumber() const = 0;
-    virtual int GetLayoutMapRect() const = 0;
+    virtual TRect<u16> GetLayoutMapRect() const = 0;
     virtual int GetImageModelSetType() const = 0;
     virtual EVec3 GetDefaultCameraPos() const;
     virtual EVec3 GetDefaultCameraTarget() const;
@@ -123,10 +127,10 @@ public:
     virtual const char *GetStyleCode() const;
     virtual const char *GetClothingSetName() const;
     virtual const char *GetTextureVariationName() const;
-    virtual void GetModelName() const;
-    virtual void GetTextureName(bool a) const;
-    virtual void GetReflectionMaskName(bool a) const;
-    virtual void GetIconTextureName() const;
+    virtual EString GetModelName() const;
+    virtual EString GetTextureName(bool a) const;
+    virtual EString GetReflectionMaskName(bool a) const;
+    virtual EString GetIconTextureName() const;
     virtual u32 GetModelID() const;
     virtual u32 GetTextureID(bool a) const;
     virtual u32 GetReflectionMaskID(bool a) const;
@@ -150,16 +154,59 @@ public:
     virtual void SetIsDamaged(bool damaged);
     virtual s32 GetCurrentHitPoints();
     virtual void SetCurrentHitPoints(int hitPoints);
-    virtual void ApplyDamage(const Weather::DamageEvents &events);
-    virtual void Degrade();
-    virtual void Repair();
+    virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvent &event, s16 scale);
+    virtual BitFlags<u32> Degrade();
+    virtual BitFlags<u32> Repair();
     virtual void CreateIcon(SimModelTSC6 *model, EVec3 *cameraPos, EVec3 *cameraTarget, f32 a, u32 b,
                             u32 c, int d, int e, int f, bool g);
     virtual void GetRequiredDyesForTextureVariation(u8 textureIndex, s16 *dyes);
-    virtual void GetValidClothingSetIndexes(
+    virtual bool GetValidClothingSetIndexes(
         eastl::vector<Sim::ClothingSetIndexInfo, eastl::allocator> &indexes);
     virtual u8 GetClothingSetUIIndex() const;
     virtual u8 GetDegradationModelCodeIndex() const;
+
+    // Not virtual. The PS2 build inlines these five; the Wii build keeps them as functions.
+    u8 GetClothingSetIndex() { return clothingSetIndex; }
+    void SetClothingItem(ClothingItem *item) { clothingItem = item; }
+    u8 &ModelCodeIndex() { return modelCodeIndex; }
+    u8 &StyleIndex() { return styleIndex; }
+    u8 &TextureIndex() { return textureIndex; }
+    u8 &DegradationState() { return degradationState; }
+    Sim::BodyPartGeometryTSC6 *GetClothingSetData() const;
+    BodyPartTypeInfo *GetBodyPartTypeInfo() const;
+    const char *GetCharacterType() const;
+    void Init(CasSimDescription *description);
+    // Inlined wherever the degradation state is clamped. The name is ours.
+    u8 NumDegradationStates() const
+    {
+        return bodyPartTypeInfo->modelCodes[GetDegradationModelCodeIndex()].styles[styleIndex]
+            .numDegradationStates;
+    }
+    // The PS2 build inlines these five into the name functions; the Wii build keeps them.
+    void CalculateNameBase(char *buffer) const
+    {
+        Sprintf(buffer, "%s_%s_%s", GetCharacterType(), GetModelCode(), GetClothingSetName());
+    }
+    void CalculateNameStyle(char *buffer) const
+    {
+        const char *style = GetStyleCode();
+        if (*style != 0)
+            Sprintf(buffer, "_%s", style);
+    }
+    void CalculateNameTextureVariation(char *buffer) const
+    {
+        const char *variation = GetTextureVariationName();
+        if (variation != 0 && strlen(variation) != 0 && *variation != 0)
+            Sprintf(buffer, "_%s", variation);
+        else
+            Sprintf(buffer, "_n");
+    }
+    void CalculateNameDegradationState(char *buffer) const { Sprintf(buffer, "_%i", degradationState + 1); }
+    void CalculateNameLowRes(char *buffer) const { Sprintf(buffer, "_GAME"); }
+    // Defined in CasSimDescription.h, because it needs that class. The PS2 build inlines it.
+    inline bool GetCharacterFlag(int index) const;
+    inline void SetCharacterFlag(int index, bool value);
+    inline void AssertWithInfo(const char *info);
 };
 STATIC_ASSERT(SimBodyPart_size, sizeof(SimBodyPart) == 0x24);
 

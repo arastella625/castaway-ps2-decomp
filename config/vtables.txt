@@ -1,0 +1,22 @@
+# PS2 address of each class's virtual function table (the value its constructor stores in the
+# object), the class, and the header that declares it. tools/verify_vtables.py checks that
+# the virtual functions the header declares sit in the same slots as in the game.
+#
+# These addresses come from CasSimDescription's destructor, which stores each one.
+
+0x004ACBF0 CasSimDescription          game/cas/CasSimDescription.h
+0x004AEE98 SimBodyPartHead            game/cas/SimBodyPartHead.h
+0x004AEC48 SimBodyPartFacialFeature   game/cas/SimBodyPartFacialFeature.h
+0x004AE9F8 SimBodyPartHair            game/cas/SimBodyPartHair.h
+0x004AE7A8 SimBodyPartGlasses         game/cas/SimBodyPartGlasses.h
+0x004AE558 SimBodyPartTorso           game/cas/SimBodyPartTorso.h
+0x004AE308 SimBodyPartLowerBody       game/cas/SimBodyPartLowerBody.h
+0x004AE0B8 SimBodyPartShoes           game/cas/SimBodyPartShoes.h
+0x004ADE68 SimBodyPartHat             game/cas/SimBodyPartHat.h
+0x004ADC18 SimBodyPartNecklaceEarring game/cas/SimBodyPartNecklaceEarring.h
+0x004AD9C8 SimBodyPartArmAccessory    game/cas/SimBodyPartArmAccessory.h
+0x004AD778 SimBodyPartBelt            game/cas/SimBodyPartBelt.h
+0x004AD528 SimBodyPartAddonUpperBody  game/cas/SimBodyPartAddonUpperBody.h
+0x004AD2D8 SimBodyPartAddonLowerBody  game/cas/SimBodyPartAddonLowerBody.h
+0x004AD088 SimBodyPartSleeves         game/cas/SimBodyPartSleeves.h
+0x004ACE38 SimBodyPartUnused          game/cas/SimBodyPartUnused.h
