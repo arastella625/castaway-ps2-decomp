@@ -108,7 +108,7 @@ A frame also has a word at `+8`. When a callee returns and it's set, the caller 
 
 `Behavior::GetNodeRef` keeps recently used trees in `s_cachedTrees`, most recent first; a miss reuses the last slot. A port with everything in memory doesn't need this.
 
-**What an error does. Likely, from both builds:** `cXObject::Error` sets bit 0x100 of the object's flags (`+0xE4`) and a flag in `ObjectModule`. It doesn't stop anything itself; the tree stops because the primitive returns -1. `cXObject::HandleError` runs later: if the flag is set and an error is recorded, it clears the flag, calls `ObjectModule::CleanupPeople` and then the object's `Cleanup(0)`. If the object has a tree for entry point 3, `Cleanup` runs it, sets object data 0x3E to 0, clears bit 5 of data 8, and resets the stack to the tree for entry point 1, on every tile of a multi-tile object. With no such tree it takes a path through the object's placement instead, which hasn't been followed. Both paths then set the idle status and quiet the object's sounds. So one error resets that object rather than ending the game.
+**What an error does. Likely, from both builds:** `cXObject::Error` sets bit 0x100 of the object's flags (`+0xE4`) and a flag in `ObjectModule`. It doesn't stop anything itself; the tree stops because the primitive returns -1. `cXObject::HandleError` runs later: if the flag is set and an error is recorded, it clears the flag, calls `ObjectModule::CleanupPeople` and then the object's `Cleanup(0)`. If the object has a tree for entry point 3, `Cleanup` runs it, sets object data 0x3E to 0, clears bit 5 of data 8, and resets the stack to the tree for entry point 1, on every tile of a multi-tile object. With no such tree it picks the object up, resets it and puts it back. Both paths then set the idle status and quiet the object's sounds. So one error resets that object rather than ending the game.
 
 Error codes seen so far:
 
@@ -572,6 +572,74 @@ The generator is at `0x262AF0`: `state = state * 0x41C64E6D + 0x3039`, returning
 | 4 | Always true. Temp 0 is a relationship type, 1 to 9, or error 0x14. It's replaced by how many relationships of that type the Sim has, or 0 |
 | 5 | The object is the player's Sim and it has no player interactor |
 
+## What a placed object starts with
+
+`ObjM` is the saved state of a running lot, so a placed object arrives with almost everything a tree reads. `docs/formats/world.md` has the layout, and `tools/placed.py` reads it. **Proven** on all 2,611 objects: each ends exactly on its stream mark, and `placed.py check` has the controls. An earlier reader was misaligned from the attribute lists on, which is why the variables and attributes seemed to be missing.
+
+- **Variable 0xB is the object's own ID.** `Reset` and `Initialize` both copy `mID` (`+0xC0`) into it, and it equals the ID on all 2,611 placed objects. So "my variable 0xB" is "me", and a tree that gives it to `TestObjectType` is testing itself.
+- **Attributes are in `ObjM`.** They aren't only set by trees. Make the arrays from the counts below, then copy the saved lists over the start of them. The rest stay 0. Non-zero attributes are on 168 objects, semi-global on 1,488, static on 407.
+- **Variables, temps, object slots and the idle status** are all there. A variable the object doesn't list takes its starting value from the table below.
+- **The stack holds one frame,** at node 0 of the object's main tree, with its locals and parameters. So a loaded object's next tick starts main.
+
+### Object list order
+
+**Likely, from Wii:** `DoStream` adds each object with `AddObject(object, id, true)`, which appends, so the list is in `ObjM`'s order after loading. It has to be: the same walk writes the IDs and then the objects, and the reader matches them up by walking its own list. Everything added later goes through `AddObject(object, id)`, which **prepends**. So a Sim or a created object comes before every placed object, newest first. Objects of type 9 (GUID 0x437 on these lots) are swapped for a placeholder and killed at the end of the load, which removes them without changing the others' order.
+
+## Entry points
+
+**Proven for the table, from callers for the names.** An object's trees for game events are a table, `ObjFnData`. A `ResFile` row's `+0x2C` vector holds 0x90-byte records:
+
+| Offset | Meaning |
+|---|---|
+| `+0` | ID. A definition's record is the one matching `ObjDefinition +0xBC` (1,315 of 1,335 definitions have one) |
+| `+4` | 35 s16: the tree for each entry point. 0 means none |
+| `+0x4A` | 35 s16: a check tree for each entry point |
+
+With no record, entry point 0 is global tree 0x10F, entry point 1 is global tree 0x187, and the rest are 0.
+
+| Entry point | Used by | What it's for |
+|---|---|---|
+| 0 | `Reset`, `PostLoad` | Init |
+| 1 | `Reset`, `Cleanup` | Main: the tree a reset stack starts on |
+| 2 | `PostLoad` | Load |
+| 3 | `Cleanup` | Cleanup |
+| 4 | `cXPerson::ActionSkipped` | An action was skipped |
+| 5 | `TestIntersection`, routing | May something overlap this? |
+| 6 | `UpdateWallAdjacency` | Walls next to it changed |
+| 7 | `UpdateRooms` | Rooms changed |
+| 8 | `UpdateDynAdjacency` | Multi-tile adjacency |
+| 9 | `Place`, `Pickup` | Placed |
+| 10 | `Pickup` | Picked up |
+| 11 | `UserPlace` | The player placed it |
+| 12 | `UserPickup` | The player picked it up |
+| 13 | `PassiveInfluence` | Applying an influence |
+| 15 | `IsDoor`, `AddObject`, routing | Portal. An object with this tree is a portal |
+| 17 | `KillAllObjects` | Everything is being removed |
+| 25 | `UpdateChairFacing` | Chair facing |
+| 26, 27 | `InitRoute`, `Routing_Initial` | Routing |
+| 30, 31 | `InventoryItems` | Added to and removed from an inventory |
+| 32 | `ApplyDamage` | Damage |
+| 33 | `TryCallFunctionalTree`, `CheckForEvent` | Functional tree |
+| 34 | `NotifyBuildModeObjects` | Build mode |
+
+The purposes are read from the callers' names, so treat them as **likely**. 14, 16, 18 to 24, 28 and 29 have no caller by number. Some may be reached through a variable.
+
+### How an object starts running
+
+**Likely, from Wii.** Loading a lot:
+
+1. `ObjectModule::DoStream` makes each object, runs `Initialize`, and reads its saved state over the top.
+2. `cXObject::PostLoad` sets its location.
+3. If its selector needs a reset, it runs `Cleanup(0)` and then the init tree, entry point 0.
+4. Unless the game is in author mode, it runs the load tree, entry point 2, with parameter 0 set to the transition type.
+5. Its main tree carries on from the saved frame.
+
+A selector needs a reset when `objt`'s saved init or main tree version isn't the current one. The version is `GetCumulativeTreeVersion` over the entry point's tree. A newly created object has no saved frame: `Reset` runs init and puts main on the stack.
+
+`Reset` also zeroes the attributes, semi-global attributes and temps, but not static attributes.
+
+**After an error, `Cleanup(0)` with no cleanup tree** picks the object up, calls `Reset(true)` unless misc flag 0x40 is set, and if it was placed, puts it back where it was with `Place`. So an object with no entry point 3 still restarts.
+
 ## Loading an object
 
 What a port needs to make a real object from the disc. **Proven** where it says so: each has been tested on the disc, with a wrong offset failing. The rest is from `cXObject`'s constructor and `Initialize` on Wii, and the offsets are in the data so they're the same on PS2.
@@ -585,11 +653,12 @@ The tables are `ObjDefinition`, 196 bytes or 98 s16 words, which is why scope 0x
 | `+0x14` | Non-zero means multi-tile |
 | `+0x1C` | GUID. **Proven** |
 | `+0x28` | Slot set ID. Below 1000 it's in the object's own `ResFile`, from 1000 in its semi-global row |
-| `+0x74` | Attribute count; 0 means 8. **Proven:** all 1,127 uses of scope 0 fit under it, and other offsets give 169 to 294 overruns |
+| `+0x74` | Attribute count; 0 means 8. **Proven:** all 1,127 uses of scope 0 fit under it, and other offsets give 169 to 294 overruns. Every placed object's saved list has this length too |
 | `+0x76` | Static attribute count (scopes 0x40, 0x41) |
 | `+0x82` | Size of the array for scope 0x1B. Only 13 definitions have one (18 or 3) |
+| `+0xBC` | ID of its `ObjFnData` record. See "Entry points" |
 
-**Attributes.** A new array of the count, all 0. Static attributes and scope 0x1B's array are made the same way and start at 0. Scope 0x1B has no use in any expression.
+**Attributes.** A new array of the count, all 0, then a placed object's saved list over the start of it. Static attributes and scope 0x1B's array are made the same way. Scope 0x1B has no use in any expression.
 
 **Semi-global attributes.** The count is the number of strings in `STR#` set 0x100 in the object's semi-global row, and the array starts at 0. **Proven:** all 420 uses of scope 2 fit, and sets 0x101 and 0x102 overrun 202 and 332 times. The strings are the attributes' names, like `Bed Type`.
 
@@ -603,6 +672,7 @@ The tables are `ObjDefinition`, 196 bytes or 98 s16 words, which is why scope 0x
 | `+0x20` | Constant tables |
 | `+0x24` | Tree tables (`VECTOR<TreeTable>`) |
 | `+0x28` | Slot sets, by ID |
+| `+0x2C` | `ObjFnData`, the entry point tables |
 | `+0x34` | Pointer to the semi-global row |
 
 **Variables** (scopes 3 and 4). There are 72 numbers. Six don't exist and are error 7: 0x16, 0x2C, 0x39, 0x45, 0x46 and 0x47. Everything else exists on every object. `Initialize` gives these starting values, and all others start at 0:
@@ -619,13 +689,12 @@ The tables are `ObjDefinition`, 196 bytes or 98 s16 words, which is why scope 0x
 
 The game saves memory by keeping unchanged variables in a table shared by each object type, and writing a value equal to the shared one removes the object's own copy. That's invisible to a tree, so a port can give each object a plain array of 72. Reading variable 0x19 also clears the idle status, as scope 3 says.
 
-**What else `Initialize` does:** it sets the stack up with the temps as default parameters, loads the slot set, moves the object off the map to (-1, -1), and works out its room score. After that the object's init and main trees run, through `ObjSelector`'s tree table; that hasn't been read yet.
+**What else `Initialize` does:** it sets the stack up with the temps as default parameters, loads the slot set, moves the object off the map to (-1, -1), and works out its room score.
 
 ## What's left
 
 **Open:**
 - The bodies of the primitives, except what's above. Each is a function at the address in the table.
-- Which trees an object starts with: the entry points behind `GetTreeID`, and `ObjSelector`'s tree table. `Cleanup` shows entry point 1 is the one a reset goes back to and 3 is a reset tree; the rest are open.
 - What scope 0x18's virtual call returns, and what reads the flag `0x49DDA4`.
 - What `+4` of an expression is for. No code reads it.
 - Header bytes 7 and 8, and type 0x16.
