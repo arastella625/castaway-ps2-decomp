@@ -169,9 +169,9 @@ A batch holds at most 50 vertices.
 | UNPACK S-32 to slot 0 | `00 80 01 60` | One word: the vertex count |
 | STCYCL 5,1 | `05 01 00 01` | Write every fifth vector, interleaving the slots |
 | UNPACK V4-16 to slot 1 | `01 80 nn 6d` | Positions: x, y, z, flags as `s16` |
-| UNPACK V4-8 to slot 2 | `02 80 nn 6e` | Normals: x, y, z as `s8` over 127, then a byte; optional |
+| UNPACK V4-8 to slot 2 | `02 80 nn 6e` | Normals: x, y, z as `s8` over 127, then a baked brightness over 127; optional |
 | UNPACK V2-16 to slot 3 | `03 80 nn 65` | UVs: u, v as `s16` over 4096 |
-| UNPACK V4-8 to slot 4 | `04 80 nn 6e` | Vertex colour; its first byte tags the body lattice. Optional |
+| UNPACK V4-8 to slot 4 | `04 80 nn 6e` | Vertex colour on an unlit mesh; its first byte tags the body lattice. Optional |
 | UNPACK V4-8 to slot 5 | `05 c0 nn 6e` | Bone weights, one byte per palette slot; optional |
 | MSCAL | `00 00 00 14` | Run the VU1 program |
 
@@ -200,7 +200,6 @@ texture. `tree_pine` lands on opaque pixels 46 times out of 46 as stored, and on
 
 Open:
 - The rest of a position's flags, including bit 13.
-- The fourth byte of a normal, usually 127.
 - The plain copy of each group's vertices stored ahead of its batches.
 - The offset and size pairs in a group's tail, and the `02` byte seen before some palettes.
 - Any transform on a submodel.

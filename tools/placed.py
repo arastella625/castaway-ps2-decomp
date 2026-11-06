@@ -9,7 +9,9 @@ Usage:
 check decodes every object of every house. list prints one lot's objects. lot writes the lot's
 terrain, its scenery and every placed object that has a model to one .glb, which is game data:
 keep it out of the repo. Terrain is the node named after the lot; placed objects and scenery are
-the other nodes, with names starting 'placed ' and 'scenery '. docs/formats/world.md has the format.
+the other nodes, with names starting 'placed ' and 'scenery '. COLOR_0 holds what VU1 sends the GS
+per vertex, and material extras hold the draw order and any detail pass, whose texture rides in
+occlusionTexture. docs/formats/world.md has the format.
 """
 import collections
 import math
@@ -46,6 +48,7 @@ PALM_CROWN_HEIGHT = 4.12  # treeanimate3 in isTreeSkeleton
 PALM_LEAVES = 9
 PALM_LEAF_LIFT = 20.0  # degrees above level
 MISSING_TEXTURE = 'missingshader'  # the purple 16x16 behind Maya's default materials
+ALPHA_ADD = 0x68  # the GS ALPHA register: source * FIX + destination
 
 
 class BitReader:
@@ -325,19 +328,30 @@ def add_triangle(cells, a, b, c):
                 cells[(x, y)] = max(z, cells.get((x, y), z))
 
 
+def adds_nothing(shader):
+    """True if every pass blends to source * 0 + destination: the GS leaves the screen as it was."""
+    return shader is not None and all(p.flags & mdl.PASS_BLEND_FLAG and p.alpha == ALPHA_ADD
+                                      and p.fix == 0 for p in shader.passes)
+
+
 def textured(meshes, library):
-    """Leave out meshes on the purple placeholder. How the game draws them is open."""
-    def is_placeholder(mesh):
+    """Leave out what isn't seen: meshes that add nothing, and those on the purple placeholder.
+
+    What the game does with the placeholder is open. docs/formats/world.md has what's known.
+    """
+    def is_hidden(mesh):
         texture = library.texture_for(mesh.shader_hash)
-        return texture is not None and texture.name == MISSING_TEXTURE
-    return [mesh for mesh in meshes if not is_placeholder(mesh)]
+        return (texture is not None and texture.name == MISSING_TEXTURE) \
+            or adds_nothing(library.shader(mesh.shader_hash))
+    return [mesh for mesh in meshes if not is_hidden(mesh)]
 
 
 def add_mesh(builder, library, name, meshes, cache):
     primitives = []
     for mesh in textured(meshes, library):
-        material = gltf.add_material(builder, library, mesh.shader_hash, cache)
-        primitive = gltf.add_primitive(builder, mesh, material, False)
+        material = gltf.add_material(builder, library, mesh.shader_hash, cache, layers=True)
+        primitive = gltf.add_primitive(builder, mesh, material, False,
+                                       library.shader(mesh.shader_hash))
         if primitive:
             primitives.append(primitive)
     builder.gltf['meshes'].append({'name': name, 'primitives': primitives})

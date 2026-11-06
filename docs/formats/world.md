@@ -231,7 +231,9 @@ split by submodel yet, so use the whole model.
 | u32, then items | Mid-lot objects |
 | grid x 3 | Tile grids |
 
-The lists sort a lot's submodels into groups; which group means what is open.
+The lists sort a lot's submodels into groups. **Likely** the instance list is the outer lot: in
+version 7 `Read` puts it in the array that `DrawOuterLotInstancesWithShadow` walks, and list 3 holds
+the sheet over the walkable lot on the lots that have one. What else list 3 does is open.
 
 ### Mid-lot objects
 
@@ -504,17 +506,127 @@ These make a lot look right and are **not decoded**:
 The port also blocks tiles under placed objects over 0.5 m tall. Which objects really block is
 **open**.
 
+### How ground is drawn
+
+Lots do **not** blend ground textures by vertex alpha. That idea was tested first and failed: `lot_24`'s
+ground has no vertex colour at all, and no ground texture but two has any alpha. What a lot has
+instead is below.
+
+**Proven, baked brightness.** The fourth byte of a normal is a brightness, 0 to 127, that scales a lit
+vertex's RGB and leaves alpha alone. The VU1 routine at 0xD20 does `MULw.xyz vf11, vf11, vf10w` after
+adding up the lights, and 1/127 is folded into the light colours first. On Wii,
+`SetupTEVStageVertexIntensity` multiplies the rasterised colour by its alpha for the same flag. No
+vertex on the disc is over 127. Where two sheets share a vertex they mostly agree on it (651 of 652 on
+`lot_15`, 93 of 98 on `lot_01`, about half on `lot_24`), and the two values never add up to a constant,
+so it isn't a weight between layers. `lot_01` shows its use: it reaches 127 over the play area and
+falls away towards the edges.
+
+**Proven, lit or not.** Bit 8 of the shader word at body + 7 picks where a vertex's colour comes from.
+Set, VU1 lights the normal as above. Clear, it copies slot 4 to the GS untouched, as RGBA with 128 as
+1.0. Wii tests the same bit. Over all 9,827 meshes on the disc, 7,693 lit ones have normals, 531 unlit
+ones have slot 4, and none is unlit without it. 1,575 use multi-shaders, which this doesn't read. **Open:**
+28 meshes are lit with no normals, all roof fringes and walls of the `connect_west` family and one
+`am_lb_shsisal_sr`. None is on a lot.
+
+**Proven, a second pass.** Most ground shaders have two passes. The second is `terrain_grass_noise_detail`
+or similar with ALPHA 0x64, so `mix(first pass, second pass, FIX / 128)`, FIX being 12 to 32 on ground (96 on `new_sand`, which mixes in `floor_sand`).
+UV source 4 is the mesh's own UVs through the pass's scale. **Likely** `uv * scale`, not `uv / scale`:
+0.24 repeats the noise about every 20 m and hides the base texture's tiling, but the code that builds
+that matrix wasn't followed to the multiply. `placed.py lot` writes this pass as `occlusionTexture`
+plus `extras`, because glTF has no such layer.
+
+**Proven, draw order.** `UpdateShaderFlags` calls `IsAlphaShader`, which is `IsAlphaPass` on the first
+pass: blend flag set, and field A, B or D of ALPHA reads the screen. `DrawNormal` draws other shaders at
+once and sends these to the order table, keyed by the header's i16 at + 1, so alpha ground lands on
+top of opaque ground. **Likely** the rest of the order is the file's: all but one lot mesh has priority 0,
+and how the table orders ties wasn't read. `placed.py lot` writes `extras.draw_rank`: 0 for opaque,
+then rising in file order.
+
+That order matters because some sheets repeat the triangles of the sheet below them exactly (24 to
+33% of `riverSand` and `rockMoss` on `lot_15`, 6 to 14% of `is3Path` and `isGroundGreen` on `lot_24`).
+Their depths tie, so the order alone picks a winner. Godot sorts surfaces as it likes, which makes
+mesh-shaped blocks. Reversing `draw_rank` changes 60,321 pixels of `lot_15`, so it does settle them.
+
+**Proven, depth.** Pass byte + 6 is depth and alpha test, from `ENgcRenderer::SetShaderPass`: 0x08 tests
+depth with LEQUAL, 0x10 writes it, 0x04 alpha-tests at the float at + 7. All ground passes that draw
+first are 0x18, so sheets test and write depth like any solid. Wii reads this byte; PS2's use of it
+wasn't traced.
+
+**Likely, the rest of the patches are the game's own.** Where two sheets lie close without repeating
+triangles they cross each other, and with depth on, nearest wins. `lot_24`'s `is3Path` and
+`isGroundGreen` overlap on 885 m^2, a median of 1.6 cm apart, either side of each other. Their edge
+there is the line where they cross, so its shape is in the geometry. This could be how the artists got ragged edges with no vertex alpha. It hasn't been checked
+against a running game, as none of the saved screenshots show a lot. If the real ground is smoother
+there, something here is still missing.
+
+**Open:** the overall light level. VU1 multiplies this brightness by lights the port doesn't decode, so
+`terrain.gdshader` treats 127 as the texture's own colour and leaves the rest to Godot's sun. Pixels
+follow brightness / 127 in both renderers, measured on `lot_01`, so ground is darker than it was. It
+may well be too dark. `lot_24`'s plate at 127 now shows as a pale shape with a hard edge; whether the
+game's lights hide that is open.
+
+**What this did to the patches: it didn't remove them.** Seven of lots 1 to 28 have ten metres or more of
+seam where sheets lie on each other (`lot_02`, 09, 15, 22, 24, 27, 28). All seven still do. Seam
+contrast, as a share of local brightness, rose on six of them (`lot_24` from 17% to 28%, `lot_02` from
+29% to 54%) and fell on `lot_27`; absolute contrast fell on most, but only because the ground got
+darker. The four lots with exact ties (`lot_02`, 15, 24, 28) now settle them as the game does. The seam
+test finds only sheets lying on each other, not plain painted edges like `lot_01`'s sand and grass.
+
+#### `SHDR`
+
+From `ERShader::CopyShedData`. Offsets count from just after the body's size word. Kind 1 at file offset
+8 is a multi-shader, a list of day and night shaders; `read_shader` skips those.
+
+| Offset | Type | Meaning |
+|---|---|---|
+| 0 | u8 | Pass count |
+| 1 | i16 | Order table priority |
+| 3 | u32 | Flags. Bits 0x200 to 0x4000 look like a lighting model; 0x2000 is the default. Open |
+| 7 | u32 | Bit 8: lit |
+| 0xB | f32 x 8 | Two colours. Open |
+| 0x2B | 16 bytes | Open |
+| 0x3B | pass x count | 0x30 bytes each |
+
+A pass:
+
+| Offset | Type | Meaning | Status |
+|---|---|---|---|
+| 0 | u32 | Texture hash | Proven |
+| 4 | u16 | Flags: 0x40 blends. 0x08, 0x10 and 0x80 are open | 0x40 proven |
+| 6 | u8 | Depth and alpha test, above | Proven on Wii |
+| 7 | f32 | Alpha test threshold | Likely |
+| 0xB | f32 | -1.4 on some; a mipmap bias? | Open |
+| 0xF | u8 | The GS ALPHA register | Proven |
+| 0x10 | u8 | ALPHA's FIX, 128 being 1.0 | Proven |
+| 0x12 | u8 | UV source: 0 the mesh's, 3 reflection (every `reflection_*`), 4 scaled, 5 and 6 scrolled | 3 and 4 by shape |
+| 0x18 | f32 x 2 | UV scroll speed | Likely |
+| 0x20 | f32 x 2 | UV scale | Likely |
+| 0x28 | f32 x 2 | UV offset | Likely |
+
+ALPHA is four two-bit fields, `(A - B) * C + D`, the GS's own. `IsAlphaPass` reads it as such, and
+`SetupFinalBlendMode` switches on it: 0x44 is ordinary alpha, 0x54 uses the screen's alpha, 0x64 mixes
+by FIX and 0x68 adds by FIX. The loader caps FIX at 0x7F only for 0x68, and sets 0x2A when the blend
+flag is clear.
+
 ### Purple terrain
 
-Seven lots (`lot_02`, 04, 15, 16, 22, 23, 30) hold meshes on the shaders `lambert1` and `phong1`,
-which are Maya's defaults and point at the 16x16 purple texture `missingshader`. This is on the
-disc, not a decoding fault. **Proven:** all 354 such batches are type 0x16 (no normals, with slot
-4), and on `lot_16` they lie on the ground, a median of 2 mm from it. Their slot 4 bytes are grey,
-all four alike, from 0 to about 128.
+Seven lots (`lot_02`, 04, 15, 16, 22, 23, 30) hold 354 batches on the shaders `lambert1` and `phong1`,
+which are Maya's defaults and point at the 16x16 purple texture `missingshader`. This is on the disc,
+not a decoding fault. They are type 0x16, unlit, and their slot 4 reaches the GS as RGBA.
 
-**Likely** these are an overlay faded by vertex alpha: the only other terrain of type 0x16 is 13
-meshes of `global_transparent` on a white texture, plus `Lava` and `templeBigStones`. **Open:** what
-the game draws. `placed.py lot` leaves them out, and `PLAYTEST.md` step 15 looks for them.
+**Proven they aren't a faded overlay.** A fade would run to 0 at a patch's edge. All of `lot_16` is
+exactly 91, and all of `lot_23` and `lot_30` exactly 128. Under 4% of edge vertices are 0 on any lot, and
+edges average brighter than the middle on three of the four lots where the value varies. The bytes are
+grey with alpha equal to the grey, so at 128 they'd be solid purple.
+
+**Likely** they don't show as drawn here. Their pass byte + 6 is 0, so no depth test and no depth write,
+and they'd paint over walls and Sims regardless of distance. The shaders' two header colours have
+alpha 0, and their pass flags include 0x80, which elsewhere is mostly on `ico_*` UI shaders with the
+same placeholder. `placed.py lot` leaves them out. **Open:** what they're for and whether the game
+draws them at all. `PLAYTEST.md` step 15 looks for them.
+
+`global_transparent`, on 19 batches, is settled: ALPHA 0x68 with FIX 0 is `source * 0 + screen`, so it
+changes nothing on screen. `placed.py lot` leaves that out too.
 
 ## QUICKDAT.ARC
 
@@ -656,10 +768,12 @@ it. So `ranger` is torso, lowerBody and shoes `ranger` and the rest `none`. `def
 Open:
 - The rest of each `ObjM` object after its variables. In `Arry`: floor values, flags 0x02 and 0x40, the lone wall edge, the trees that change flag 0x10, and whether the mesh bit is vertex flag 0x10.
 - Object height, the sense of direction, and how shared models pick a variant.
-- How `missingshader` terrain is drawn.
+- What the `lambert1` and `phong1` meshes are for, and whether the game draws them.
+- The light level behind a vertex's baked brightness. Pass flags 0x08, 0x10 and 0x80.
+- Whether `lot_24`'s ragged ground edges match the running game. No saved screenshot shows a lot.
 - How palm leaves attach, and which objects block a Sim.
 - Scale for rigged mid-lot objects.
-- ObjDefinition, ResFile and most `world` columns. `ERLevel`'s submodel list groups.
+- ObjDefinition, ResFile and most `world` columns. What `ERLevel`'s list 3 does.
 - The bodies of most BHAV primitives and some expression scopes; see [bhav.md](bhav.md).
 - Kinds 0 and 1 of `DEFAULT.NGH`: kind 0 holds `TATT`, `SIMI` and `HOUS` chunks and kind 1 `NGBH`, `NBRS` and `FAMI`. Those are likely the neighbourhood, neighbours and families.
 - Which of languages 0 and 1 is the US text. Sample word bit 31.

@@ -183,10 +183,21 @@ def unit_normal(normal):
     return (x / length, y / length, z / length) if length else (0.0, 1.0, 0.0)
 
 
-def add_primitive(builder, mesh, material, skinned):
+def vertex_colors(batch, shader):
+    """What VU1 hands the GS per vertex: lit RGB's scale, or an unlit vertex's own RGBA."""
+    if shader.lit:
+        return [(v / mdl.INTENSITY_ONE,) * 3 + (1.0,) for v in batch.intensities]
+    return [tuple(min(c / mdl.COLOR_ONE, 1.0) for c in color) for color in batch.colors]
+
+
+def add_primitive(builder, mesh, material, skinned, shader=None):
+    """Give shader to also write vertex colours, as COLOR_0."""
     positions, uvs, normals, joints, weights, indices = [], [], [], [], [], []
+    colors = []
     for batch in mesh.batches:
         base = len(positions)
+        if shader:
+            colors.extend(vertex_colors(batch, shader))
         for index, position in enumerate(batch.positions):
             positions.append(to_y_up([c * mesh.scale for c in position]))
             uvs.append((batch.uvs[index][0] / mdl.FIXED_ONE,
@@ -206,6 +217,8 @@ def add_primitive(builder, mesh, material, skinned):
         'TEXCOORD_0': builder.add_accessor(uvs, 'VEC2', FLOAT, 'f', ARRAY_BUFFER)}
     if normals:
         attributes['NORMAL'] = builder.add_accessor(normals, 'VEC3', FLOAT, 'f', ARRAY_BUFFER)
+    if colors and len(colors) == len(positions):
+        attributes['COLOR_0'] = builder.add_accessor(colors, 'VEC4', FLOAT, 'f', ARRAY_BUFFER)
     if skinned:
         attributes['JOINTS_0'] = builder.add_accessor(joints, 'VEC4', UNSIGNED_SHORT, 'H',
                                                       ARRAY_BUFFER)
@@ -312,12 +325,48 @@ class Library:
         target = mdl.shader_texture_hash(data, shader.name, self.textures)
         if target is None:
             return None
-        entry = self.textures[target]
+        return self.read_texture(target)
+
+    def read_texture(self, texture_hash):
+        entry = self.textures[texture_hash]
         raw = self.disc.read(self.texture_archive.lba, entry.offset, entry.size)
         return tex.parse_texture(raw, entry.name)
 
+    def shader(self, shader_hash):
+        """Return a shader's passes, or None for a multi-shader."""
+        entry = self.shaders[shader_hash]
+        data = self.disc.read(self.shader_archive.lba, entry.offset, entry.size)
+        return mdl.read_shader(data, entry.name)
 
-def add_material(builder, library, shader_hash, cache):
+
+def add_texture(builder, texture):
+    gltf = builder.gltf
+    view = builder.add_view(tex.png_bytes(texture.width, texture.height, tex.rgba(texture)))
+    gltf.setdefault('images', []).append({'name': texture.name, 'bufferView': view,
+                                          'mimeType': 'image/png'})
+    gltf.setdefault('textures', []).append({'source': len(gltf['images']) - 1})
+    return len(gltf['textures']) - 1
+
+
+def add_detail_pass(builder, library, material, shader):
+    """Write a shader's second pass, if it fades a texture over the first by a constant.
+
+    glTF has no such layer. The texture rides in occlusionTexture, where a reader that knows
+    nothing of it only darkens the surface a little, and extras says how to use it.
+    """
+    if shader is None or len(shader.passes) < 2:
+        return
+    layer = shader.passes[1]
+    if (layer.alpha != mdl.ALPHA_FIX_MIX or layer.uv_source != mdl.UV_SCALED
+            or layer.texture_hash not in library.textures):
+        return
+    material['occlusionTexture'] = {
+        'index': add_texture(builder, library.read_texture(layer.texture_hash))}
+    material['extras'].update({'detail_mix': layer.fix / mdl.COLOR_ONE,
+                               'detail_scale': list(layer.uv_scale)})
+
+
+def add_material(builder, library, shader_hash, cache, layers=False):
     if shader_hash in cache:
         return cache[shader_hash]
     gltf = builder.gltf
@@ -325,16 +374,16 @@ def add_material(builder, library, shader_hash, cache):
                 'pbrMetallicRoughness': {'metallicFactor': 0.0, 'roughnessFactor': 1.0}}
     texture = library.texture_for(shader_hash)
     if texture:
-        pixels = tex.rgba(texture)
-        view = builder.add_view(tex.png_bytes(texture.width, texture.height, pixels))
-        gltf.setdefault('images', []).append({'name': texture.name, 'bufferView': view,
-                                              'mimeType': 'image/png'})
-        gltf.setdefault('textures', []).append({'source': len(gltf['images']) - 1})
         material['pbrMetallicRoughness']['baseColorTexture'] = {
-            'index': len(gltf['textures']) - 1}
-        if min(pixels[3::4], default=255) < OPAQUE_ALPHA:
+            'index': add_texture(builder, texture)}
+        if min(tex.rgba(texture)[3::4], default=255) < OPAQUE_ALPHA:
             material['alphaMode'] = 'MASK'
             material['alphaCutoff'] = ALPHA_CUTOFF
+    if layers:
+        shader = library.shader(shader_hash)
+        # The game draws opaque shaders at once and alpha ones later, so alpha wins an exact tie.
+        material['extras'] = {'draw_rank': len(cache) + 1 if shader and shader.is_alpha else 0}
+        add_detail_pass(builder, library, material, shader)
     gltf.setdefault('materials', []).append(material)
     cache[shader_hash] = len(gltf['materials']) - 1
     return cache[shader_hash]
