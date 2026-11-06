@@ -63,6 +63,10 @@ Opcode ranges, from `Behavior::GetResFileID`:
 
 Each object has one namespace ID for private trees and one for semi-global trees, kept in its `ObjSelector`; there is one global ID (a static at `0x492898`). A tree is found by that ID plus the opcode.
 
+**Which set an object's semi-global trees are in. Proven:** `ResFile` row `+0x34` is a pointer to another `ResFile` row, and the set with that row's name holds them. `ObjectFolder::GetSemiGlobalID` reads it, and the result goes in `ObjSelector +8`. 579 of the 698 rows have one, and a null means the object has no semi-global set. All 3,453 semi-global calls on the disc find their tree this way; the control, the next set along, finds 141. A `ResFile` row and the `EDITHTRE` set of the same name go together.
+
+The selector decides this, not the running tree's own set. A semi-global tree that calls a private tree (0x1000 up) calls the private tree of the object it's running on, and the same goes for constants. Semi-global sets link to nothing, except `car_sg`, which links to itself. `counter_sg` is the only set with semi-global trees that nothing links to, so its trees never run.
+
 **Calls.** The 8 operand bytes are four s16 parameters. All FF means "pass nothing": the call uses the object's default parameters (`TreeSim::mDefaultParams`). 6,887 of the 10,744 calls do this.
 
 ## Running a tree
@@ -318,7 +322,7 @@ A value is a scope and a data word. `cXObject::InterpValue` (`0x235968`) reads i
 | 0x17 | Data of the room numbered by my temp 0; see below | 0x28, 0x29 | no |
 | 0x18 | A virtual call on the neighbourhood with the stack object's ID and `data` (slot 1); what it holds is open | | yes |
 | 0x19 | **Local** `data` of this tree | 8 | yes |
-| 0x1A | Tree constant: `XObjLang::GetConstantsID` splits `data` into table and index, and index 0x7F means temp 0 | 0x2F | no |
+| 0x1A | Tree constant; see below. Index 0x7F means temp 0 holds it | 0x2F | no |
 | 0x1B | Stack object's indexed data (`+0x6C`, count at `+0x70`), indexed by my temp `data` | 2, 0x32 | yes |
 | 0x1C | Personality variable of ad `data`, like 0x0C | 0x1A | yes |
 | 0x1D | Minimum of ad `data`, like 0x0C | 0x1A | yes |
@@ -337,7 +341,7 @@ A value is a scope and a data word. `cXObject::InterpValue` (`0x235968`) reads i
 | 0x2A | Column `data` of the Ingredient row with the ID in my temp 0; see below | 0x5D | no |
 | 0x2B | 9, if the stack object is a Sim with a description | 0x15, 0x1C | no |
 | 0x2C | 0, with the same tests | 0x15, 0x1C | no |
-| 0x2D | Tree constant in table temp 0, index `data`; index 0x7F means temp 1 | 0x2F | no |
+| 0x2D | Tree constant: temp 0 is the table ID as a whole, `data` the index; index 0x7F means temp 1 holds it | 0x2F | no |
 | 0x2E | Variable `data` of the family of the Neighbor whose ID is the stack object; 0 if there's none | 0x38 | yes |
 | 0x2F | Stack object's action queue: data 0 and 2 the stack object ID of the action, 1 and 3 its tree table index. Action number is `data` / 2, and -1 if it isn't there | 0x1C, 7 | no |
 | 0x30 | My raw person data word `data`, below 0x24 | 0x1C, 0x21 | yes |
@@ -355,6 +359,33 @@ A value is a scope and a data word. `cXObject::InterpValue` (`0x235968`) reads i
 | 0x42 | Column `data` of the InventoryTokens row with the ID in my temp 0; see below | 0x5D | no |
 | 0x43 | Column `data` of the plan with the ID in my temp 0; see below | 0x5D | no |
 | 0x44 | Lot transition in my temp 0, 1 to 0x47: data 0 bit 0 of its flags, 1 bits 0 and 1 both set, 2 bit 2 | | no |
+
+### Tree constants (scopes 0x1A and 0x2D)
+
+**Proven**, by `tools/bhav.py` on every operand, and from `XObjLang::GetConstantsID` and `QuickDataBehaviorConstants` in the Wii build.
+
+Scope 0x1A's data word packs three things. The PS2 function at `0x1E4D90` has the same logic:
+
+| Bits | Meaning |
+|---|---|
+| 15 to 13 | Where: 0 private, 1 semi-global, 2 global. Anything else is error 0x2F |
+| 12 to 7 | Table number. It's added to 0x1000, 0x2000 or 0x100 to give the table ID |
+| 6 to 0 | Index in the table. 0x7F means temp 0 holds it |
+
+The table ID goes through the same ranges as a tree ID, so private means the running object's `ResFile` row, semi-global its linked row, and global the row named `global`. `Behavior::GetResFileID` picks. Note that a private constant used in a semi-global tree belongs to the object running it.
+
+**Where they are:** the `ResFile` table in `SimsObjects` quickdata, not `EDITHTRE`. Row `+0x20` is a `VECTOR<BehaviorConstants>` of 16-byte entries, sorted by ID:
+
+| Offset | Type | Meaning |
+|---|---|---|
+| 0 | u32 | Table ID in the low 16 bits |
+| 4 | `VECTOR<BehaviorConstantValue>` | The values |
+| 8 | pointer | Title, like `Tuning - Food Points` |
+| 12 | u8 | 1 if it's a tuning table (`IsTuning`) |
+
+A `BehaviorConstantValue` is 8 bytes: an s16 value, 2 bytes of 0xFA padding, and a pointer to the value's label. `tools/bhav.py` has `read_resfiles`, which returns all of this.
+
+An index at or past the end is error 0x2F, and so is a table that doesn't exist. There are 1,450 tables and 13,911 values. Of the 6,346 scope 0x1A operands in expressions, 6,012 are found in every context their tree can run in, 232 in some, and 102 in none. With private and semi-global swapped, the control, only 1,375 of 3,877 are found. The 102 are in objects this game cut, like `npc_grimreaper`, `npc_repoman` and `car_sg`, whose tables were pruned while their trees stayed, plus `counter_sg` and a few in `bed_sg`, `door_sg`, `food_stove_sg`, `scenario_sg`, `roof_sg`, `wall_sg` and `window_sg`. Reaching one stops the tree with error 0x2F, so a port should do the same.
 
 Person data fields (0x12, 0x13, 0x1E, 0x1F) are split between two arrays. `cXPerson::TranslasteToNewPersonDataIndex` (a table at `0x492350`) gives the index in the Sim's own array at `+0x548`; if that's -1, the table at `0x4925F0` gives the index in the Neighbor's array at `+0x6C`. Neither is error 0x21.
 
@@ -416,4 +447,3 @@ The full list is `*Param` in the Wii symbols. `tools/bhav.py` doesn't test any o
 - What scope 0x18's virtual call returns, and what reads the flag `0x49DDA4`.
 - What `+4` of an expression is for. No code reads it.
 - Header bytes 7 and 8, and type 0x16.
-- Tree constants: how `GetConstantsID` finds them, and whether a set holds any on PS2.
