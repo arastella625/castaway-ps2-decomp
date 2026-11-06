@@ -7,7 +7,8 @@ enforce the parts a machine can check:
   is byte-identical to the game.
 - `rebuild/rebuild.py` links `src/` into a complete executable and fails unless its SHA-1
   is the game's. It catches what `verify.py` can't: a wrong address in `config/symbols.txt`,
-  or a function whose size or neighbours are wrong.
+  a function whose size or neighbours are wrong, or a string literal that differs from the
+  game's.
 - `tools/check_repo.py` fails when a commit holds game data, binaries or secrets. It runs
   as a pre-commit hook and in CI.
 
