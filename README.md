@@ -8,8 +8,8 @@ A hobby reverse-engineering project for the US PS2 build, `SLUS_216.64`. The goa
 
 - 2,205 of 13,231 functions are named, each with a confidence tier.
 - Structs are recovered for `CasSimDescription`, `SimBodyPart` and its subclasses.
-- 786 functions are matched byte for byte (15,444 bytes, 0.42% of the code). 325 are in Create-a-Sim (`CasSimDescription`, `SimBodyPart` and its 15 subclasses). The other 461 are functions of one to four instructions in 96 classes across the game, generated from patterns; for those a match confirms the code but not the name. Nearly everything else is still undecompiled.
-- The compiler for the Create-a-Sim code is SN Systems ee-gcc 2.95.3 build 1.36 at `-O2 -G0 -fno-rtti -fno-exceptions`.
+- 825 functions are matched byte for byte (33,076 bytes, 0.89% of the code). 364 are in Create-a-Sim (`CasSimDescription`, `SimBodyPart` and its 15 subclasses). The other 461 are functions of one to four instructions in 96 classes across the game, generated from patterns; for those a match confirms the code but not the name. Nearly everything else is still undecompiled.
+- The compiler for the Create-a-Sim code is SN Systems ee-gcc 2.95.3 build 1.36 at `-O2 -G0 -fno-rtti -fno-exceptions`, with SN's own assembler. The assembler build isn't exact yet: functions with very short loops don't match (see HANDOFF.md).
 - A full rebuild links all of those functions in place of their assembly and reproduces the game's checksum. String literals and jump tables are checked against the game's copies. The data sections are still raw binary.
 
 ## Where to start
@@ -22,7 +22,7 @@ A hobby reverse-engineering project for the US PS2 build, `SLUS_216.64`. The goa
 
 `tools/verify.py` builds `src/` with the game's compiler and compares each function with your copy of the game. It needs WSL with Wine, the compiler from decompme/compilers, and the game executable; [docs/STANDARDS.md](docs/STANDARDS.md) has the command.
 
-`tools/verify_vtables.py` checks names: each class's declared virtual functions must sit in the same vtable slots as in the game. It confirms 844 slots across the 16 Create-a-Sim classes.
+`tools/verify_vtables.py` checks names: each class's declared virtual functions must sit in the same vtable slots as in the game. It confirms 1,050 slots across the 16 Create-a-Sim classes.
 
 `rebuild/rebuild.py` goes further: it links the C++ into a complete executable and checks its SHA-1. [rebuild/README.md](rebuild/README.md) has the setup.
 
