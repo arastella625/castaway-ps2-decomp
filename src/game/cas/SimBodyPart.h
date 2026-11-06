@@ -3,6 +3,7 @@
 
 #include "common/BitFlags.h"
 #include "common/EVec3.h"
+#include "common/TRect.h"
 #include "common/Vector.h"
 #include "common/types.h"
 
@@ -106,7 +107,7 @@ public:
     virtual bool UseStyleCodeInTextureName() const;
     virtual bool IsRequiredBodyPart() const;
     virtual int GetLayoutMapNumber() const = 0;
-    virtual int GetLayoutMapRect() const = 0;
+    virtual TRect<u16> GetLayoutMapRect() const = 0;
     virtual int GetImageModelSetType() const = 0;
     virtual EVec3 GetDefaultCameraPos() const;
     virtual EVec3 GetDefaultCameraTarget() const;
@@ -150,9 +151,9 @@ public:
     virtual void SetIsDamaged(bool damaged);
     virtual s32 GetCurrentHitPoints();
     virtual void SetCurrentHitPoints(int hitPoints);
-    virtual void ApplyDamage(const Weather::DamageEvents &events);
-    virtual void Degrade();
-    virtual void Repair();
+    virtual BitFlags ApplyDamage(const Weather::DamageEvents &events);
+    virtual BitFlags Degrade();
+    virtual BitFlags Repair();
     virtual void CreateIcon(SimModelTSC6 *model, EVec3 *cameraPos, EVec3 *cameraTarget, f32 a, u32 b,
                             u32 c, int d, int e, int f, bool g);
     virtual void GetRequiredDyesForTextureVariation(u8 textureIndex, s16 *dyes);

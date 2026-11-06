@@ -18,8 +18,12 @@ SimBodyPartHead,size,0x24,,
 SimBodyPartHead,0x0,SimBodyPart,base,
 SimBodyPartFacialFeature,size,0x2c,,
 SimBodyPartFacialFeature,0x0,SimBodyPart,base,
+SimBodyPartFacialFeature,0x24,uint,currentHitPoints,Signed. GetCurrentHitPoints and SetCurrentHitPoints overrides (matched)
+SimBodyPartFacialFeature,0x28,uint,isDamaged,Signed. GetIsDamaged and SetIsDamaged overrides (matched)
 SimBodyPartHair,size,0x2c,,
 SimBodyPartHair,0x0,SimBodyPart,base,
+SimBodyPartHair,0x24,uint,currentHitPoints,Signed. GetCurrentHitPoints and SetCurrentHitPoints overrides (matched)
+SimBodyPartHair,0x28,uint,isDamaged,Signed. GetIsDamaged and SetIsDamaged overrides (matched)
 SimBodyPartGlasses,size,0x24,,
 SimBodyPartGlasses,0x0,SimBodyPart,base,
 SimBodyPartTorso,size,0x24,,
@@ -42,6 +46,7 @@ SimBodyPartAddonLowerBody,size,0x24,,
 SimBodyPartAddonLowerBody,0x0,SimBodyPart,base,
 SimBodyPartSleeves,size,0x28,,
 SimBodyPartSleeves,0x0,SimBodyPart,base,
+SimBodyPartSleeves,0x24,byte,field_0x24,Added to the style index by CalculateModelIndexFromModelCodeIndexAndStyleIndex (matched)
 SimBodyPartUnused,size,0x24,,
 SimBodyPartUnused,0x0,SimBodyPart,base,
 CasSimDescription,size,0x334,,
