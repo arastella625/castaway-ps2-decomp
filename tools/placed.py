@@ -36,6 +36,14 @@ EIGHTH_TURN = math.pi / 4
 FIRST_LOT_OFFSET = 1  # section 0 is lot_01: HouseData's row 0 is a placeholder
 DEF_GUID = 0x1C
 RES_MODELS_FROM = 7  # the first word of ResData that may hold a resource hash
+# Stand-ins, not decoded. Nothing on the disc ties a palm's leaf to its trunk, and this object's
+# table row names only a rig, so these come from model names and from looking at the models.
+OBJECT_MODELS = {'source_tree_coconutpalm': 'isPalmTreeTrunkEdithFruitFull'}
+PALM_TRUNK = 'isPalmTreeTrunk'
+PALM_LEAF = 'isPalmTreeLeaf'
+PALM_CROWN_HEIGHT = 4.12  # treeanimate3 in isTreeSkeleton
+PALM_LEAVES = 9
+PALM_LEAF_LIFT = 20.0  # degrees above level
 MISSING_TEXTURE = 'missingshader'  # the purple 16x16 behind Maya's default materials
 
 
@@ -219,6 +227,8 @@ def object_model(placed, table, available):
     entry = table.get(placed.guid)
     if entry is None:
         return None
+    if OBJECT_MODELS.get(entry[0]) in available:
+        return OBJECT_MODELS[entry[0]]
     return next((name for name in entry[1] if name in available), None)
 
 
@@ -349,6 +359,18 @@ def euler_quaternion(degrees):
     return multiply(multiply(qz, qy), qx)
 
 
+def palm_crown(builder, leaf_mesh):
+    """Return child nodes for a palm: one frond repeated round the top of the trunk."""
+    children = []
+    for index in range(PALM_LEAVES):
+        turn = euler_quaternion((0.0, PALM_LEAF_LIFT, index * 360.0 / PALM_LEAVES))
+        children.append(builder.add_node({
+            'name': 'stand-in leaf %d' % index, 'mesh': leaf_mesh,
+            'translation': list(gltf.to_y_up((0.0, 0.0, PALM_CROWN_HEIGHT))),
+            'rotation': list(gltf.quaternion_to_y_up(turn))}))
+    return children
+
+
 def read_lot_level(disc, lot):
     archive = arc.find_archive(disc, 'LEVELS')
     entry = next(e for e in arc.read_toc(disc, archive) if e.name == lot)
@@ -384,11 +406,14 @@ def export_lot(disc, out_path, lot):
         if name not in available or mesh_for(name) is None:
             continue
         sx, sy, sz = item.scale
-        nodes.append(builder.add_node({
+        node = {
             'name': 'scenery %s %d' % (name, index), 'mesh': meshes[name],
             'translation': list(gltf.to_y_up(item.position)),
             'rotation': list(gltf.quaternion_to_y_up(euler_quaternion(item.rotation))),
-            'scale': [sx, sz, sy]}))
+            'scale': [sx, sz, sy]}
+        if name.startswith(PALM_TRUNK):
+            node['children'] = palm_crown(builder, mesh_for(PALM_LEAF))
+        nodes.append(builder.add_node(node))
         scenery_count += 1
     placed_count = 0
     for placed in objects:
@@ -398,10 +423,12 @@ def export_lot(disc, out_path, lot):
         x, y = placed.metres
         z = heights.get((math.floor(x), math.floor(y)), 0.0)
         half = placed.direction * EIGHTH_TURN / 2
-        nodes.append(builder.add_node({
-            'name': 'placed %s %d' % (placed.name, placed.object_id), 'mesh': meshes[name],
-            'translation': list(gltf.to_y_up((x, y, z))),
-            'rotation': [0.0, math.sin(half), 0.0, math.cos(half)]}))
+        node = {'name': 'placed %s %d' % (placed.name, placed.object_id), 'mesh': meshes[name],
+                'translation': list(gltf.to_y_up((x, y, z))),
+                'rotation': [0.0, math.sin(half), 0.0, math.cos(half)]}
+        if name.startswith(PALM_TRUNK):
+            node['children'] = palm_crown(builder, mesh_for(PALM_LEAF))
+        nodes.append(builder.add_node(node))
         placed_count += 1
     builder.gltf['scenes'][0]['nodes'] = nodes
     with open(out_path, 'wb') as out:

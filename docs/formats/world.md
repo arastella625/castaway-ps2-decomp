@@ -489,6 +489,20 @@ HouseData's rows 1 to 27 are used up by houses 0 to 26, leaving none for it. `re
 names it `lot_28`, as `placed.py` does. `walkable` follows `lot_28`'s grid 1, so it's right for that
 level, but don't pair that level with this house's objects.
 
+### Stand-ins in `placed.py lot`
+
+These make a lot look right and are **not decoded**:
+
+- **Palm crowns.** `isPalmTreeLeaf` is one frond with its own rig. Scanning the whole disc image
+  for its name and hash finds only archive tables and one preload list, and the executable has no
+  such string, so how the game attaches leaves to `isPalmTreeTrunk` is **open**. The tool repeats
+  the frond nine times at `treeanimate3`, 4.12 m up, lifted 20 degrees. The count and lift are guesses.
+- **`source_tree_coconutpalm`** names only a rig and an action queue, so it uses
+  `isPalmTreeTrunkEdithFruitFull`, chosen by name.
+
+The port also blocks tiles under placed objects over 0.5 m tall. Which objects really block is
+**open**.
+
 ### Purple terrain
 
 Seven lots (`lot_02`, 04, 15, 16, 22, 23, 30) hold meshes on the shaders `lambert1` and `phong1`,
@@ -642,6 +656,7 @@ Open:
 - The rest of each `ObjM` object after its variables. In `Arry`: floor values, flags 0x02 and 0x40, the lone wall edge, the trees that change flag 0x10, and whether the mesh bit is vertex flag 0x10.
 - Object height, the sense of direction, and how shared models pick a variant.
 - How `missingshader` terrain is drawn.
+- How palm leaves attach, and which objects block a Sim.
 - Scale for rigged mid-lot objects.
 - ObjDefinition, ResFile and most `world` columns. `ERLevel`'s submodel list groups.
 - BHAV instruction fields and opcodes, including the many above 256 and 8192 (globals and semi-globals, likely).
