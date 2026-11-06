@@ -41,6 +41,9 @@ public:
          eastl::vector<Sim::ClothingSetIndexInfo, eastl::allocator> &indexes);
     virtual u8 GetClothingSetUIIndex() const;
     virtual u8 GetDegradationModelCodeIndex() const;
+
+    // Not virtual. Hair textures are named after the first model code, whichever is set.
+    const char *GetModelCodeForTexture() const;
 };
 STATIC_ASSERT(SimBodyPartHair_size, sizeof(SimBodyPartHair) == 0x2c);
 

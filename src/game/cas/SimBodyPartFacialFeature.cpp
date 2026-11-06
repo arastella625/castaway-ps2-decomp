@@ -1,6 +1,7 @@
 #include "game/cas/SimBodyPartFacialFeature.h"
 
 #include "common/ReconBuffer.h"
+#include "game/cas/CasSimDescription.h"
 
 void SimBodyPartFacialFeature::DoStream(ReconBuffer *buffer, int version)
 {
@@ -130,4 +131,22 @@ s32 SimBodyPartFacialFeature::GetCurrentHitPoints()
 void SimBodyPartFacialFeature::SetCurrentHitPoints(int hitPoints)
 {
     currentHitPoints = hitPoints;
+}
+
+// Like SimBodyPart's, but the empty case is a sim without character flag 0.
+EString SimBodyPartFacialFeature::GetTextureName(bool a) const
+{
+    if (!GetCharacterFlag(0))
+        return "";
+    char buffer[256];
+    CalculateNameBase(buffer);
+    if (UseStyleCodeInTextureName())
+        CalculateNameStyle(buffer + strlen(buffer));
+    CalculateNameTextureVariation(buffer + strlen(buffer));
+    CalculateNameDegradationState(buffer + strlen(buffer));
+    if (a)
+        CalculateNameLowRes(buffer + strlen(buffer));
+    EString name;
+    name.Format("%s", buffer);
+    return name;
 }

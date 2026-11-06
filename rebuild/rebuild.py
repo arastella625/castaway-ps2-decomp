@@ -154,7 +154,7 @@ def resolve_local_data(source, dest, addresses, slus):
 def classify(obj, addresses):
     """Sort an object's functions into linkable {name: size} and not linkable {name: reason}."""
     symbols = obj.symbols()
-    linked, kept = {}, {}
+    linked, kept, calls = {}, {}, {}
     for name, _, _, kind, shndx in symbols:
         if kind != verify.STT_FUNC or not 0 < shndx < len(obj.sections):
             continue
@@ -166,7 +166,12 @@ def classify(obj, addresses):
             if kind == R_MIPS_NONE:
                 continue  # resolve_local_data settled it
             target, _, _, target_kind, target_section = symbols[index]
-            if target_section and target_kind != verify.STT_FUNC:
+            inside = obj.sections[target_section]['name'] if 0 < target_section < len(obj.sections) else ''
+            if target_kind == STT_SECTION and inside.startswith('.text.'):
+                # The assembler writes a call to a function in the same file as a reference
+                # to that function's section.
+                calls.setdefault(name, set()).add(inside[len('.text.'):])
+            elif target_section and target_kind != verify.STT_FUNC:
                 reason = "uses data from its own object file that the game's copy doesn't confirm"
             elif not target_section and target not in addresses:
                 reason = 'refers to %s, which has no address in config/symbols.txt' % target
@@ -174,6 +179,16 @@ def classify(obj, addresses):
             kept[name] = reason
         else:
             linked[name] = section['size']
+    # A kept function's section is discarded, so nothing linked may call into it.
+    settled = False
+    while not settled:
+        settled = True
+        for name in sorted(linked):
+            missing = sorted(calls.get(name, set()) - set(linked))
+            if missing:
+                kept[name] = 'calls %s in the same file, which is not linked' % missing[0]
+                del linked[name]
+                settled = False
     return linked, kept
 
 

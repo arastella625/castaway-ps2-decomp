@@ -281,6 +281,17 @@ void CasSimDescription::RemoveClothesForTattoo()
         bodyParts[(u8)(part - 0x1a)]->SetToNude(GetFlag(0));
 }
 
+// A clothing set with flag bit 7 takes its texture variations from dyes, except when the
+// requirements cheat is on or the sim is a ready-made archetype.
+bool CasSimDescription::UseDyesForTextureVariation(Character::eBodyPart part)
+{
+    if (PlanManager::cheatIgnoreRequirements)
+        return false;
+    if (!(bodyParts[GetBodyPartIndex(part)]->flags.bits & 0x80))
+        return false;
+    return !CasUtils::UseArchetype();
+}
+
 const char *CasSimDescription::GetBodyPartName(Character::eBodyPart part) const
 {
     return typeInfo->bodyPartTypes[GetBodyPartIndex(part)].name;

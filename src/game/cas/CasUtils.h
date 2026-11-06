@@ -14,6 +14,26 @@ public:
 // The word at 0x515178. The name is ours.
 extern int gUseGameStateTextures;
 
+// Wii: _gd, the game's global data. Only the two words UseArchetype tests are known.
+struct GlobalData {
+    u8 field_0x0[0x48]; // 0x00
+    int field_0x48;     // 0x48
+    int field_0x4c;     // 0x4c
+};
+extern GlobalData _gd;
+
+// Wii: UIDBGetInt__4UIDBFPCc. Reads a named integer from the UI database.
+class UIDB {
+public:
+    static int UIDBGetInt(const char *name);
+};
+
+// Wii: cheatIgnoreRequirements__11PlanManager, a bool there. The PS2 code reads a word.
+class PlanManager {
+public:
+    static int cheatIgnoreRequirements;
+};
+
 // Static helpers. Only the functions the decompiled code uses are declared so far.
 class CasUtils {
 public:
@@ -30,6 +50,24 @@ public:
             return EChecksum::ComputeSymbol("_GAME", id);
         }
         return id;
+    }
+
+    // Also inlined on PS2. True in the Create-a-Sim modes that pick a ready-made archetype.
+    static bool UseArchetype()
+    {
+        bool use = false;
+        if (_gd.field_0x4c != 0 || _gd.field_0x48 != 0) {
+            switch (UIDB::UIDBGetInt("CAS_mode")) {
+            case 0:
+            case 6:
+            case 7:
+            case 8:
+            case 9:
+                use = true;
+                break;
+            }
+        }
+        return use;
     }
 
     // The PS2 build inlines this into its callers; the Wii build keeps it as a function.

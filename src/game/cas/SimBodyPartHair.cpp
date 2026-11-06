@@ -182,3 +182,53 @@ u8 SimBodyPartHair::GetDegradationModelCodeIndex() const
 {
     return 0;
 }
+
+const char *SimBodyPartHair::GetModelCodeForTexture() const
+{
+    return bodyPartTypeInfo->modelCodes[0].code;
+}
+
+EString SimBodyPartHair::GetTextureName(bool a) const
+{
+    char buffer[256];
+    Sprintf(buffer, "%s_%s_%s", GetCharacterType(), GetModelCodeForTexture(), GetClothingSetName());
+    if (UseStyleCodeInTextureName())
+        CalculateNameStyle(buffer + strlen(buffer));
+    CalculateNameTextureVariation(buffer + strlen(buffer));
+    CalculateNameDegradationState(buffer + strlen(buffer));
+    if (a)
+        CalculateNameLowRes(buffer + strlen(buffer));
+    EString name;
+    name.Format("%s", buffer);
+    return name;
+}
+
+EString SimBodyPartHair::GetReflectionMaskName(bool a) const
+{
+    if (clothingSetIndex == GetNudeClothingSetIndex(GetCharacterFlag(0)))
+        return "";
+    char buffer[256];
+    Sprintf(buffer, "%s_%s_%s", GetCharacterType(), GetModelCodeForTexture(), GetClothingSetName());
+    if (UseStyleCodeInTextureName())
+        CalculateNameStyle(buffer + strlen(buffer));
+    CalculateNameDegradationState(buffer + strlen(buffer));
+    Sprintf(buffer + strlen(buffer), "_RFL");
+    if (a)
+        CalculateNameLowRes(buffer + strlen(buffer));
+    EString name;
+    name.Format("%s", buffer);
+    return name;
+}
+
+EString SimBodyPartHair::GetIconTextureName() const
+{
+    char buffer[256];
+    Sprintf(buffer, "%s_%s_%s", GetCharacterType(), GetModelCodeForTexture(), GetClothingSetName());
+    CalculateNameStyle(buffer + strlen(buffer));
+    CalculateNameTextureVariation(buffer + strlen(buffer));
+    CalculateNameDegradationState(buffer + strlen(buffer));
+    Sprintf(buffer + strlen(buffer), "_ICON");
+    EString name;
+    name.Format("%s", buffer);
+    return name;
+}
