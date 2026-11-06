@@ -52,7 +52,9 @@ STATIC_ASSERT(BodyPartSkinTSC6_size, sizeof(BodyPartSkinTSC6) == 0xc);
 struct CasSimTypeInfo {
     VECTOR<BodyPartTypeInfo> bodyPartTypes; // 0x00  one per body part index
     const char **typeCodes;                 // 0x04  [0] when flag 0 is set, else [1]
-    u8 field_0x8[0x2c];                     // 0x08
+    u8 field_0x8[0x24];                     // 0x08
+    u16 field_0x2c;                         // 0x2c  copied to CasSimDescription 0xfe by ClearSim
+    u8 field_0x2e[6];                       // 0x2e
     u8 skinTexturesPerLocation;             // 0x34  multiplies the parts-map location in GetSkinTextureID
 };
 
@@ -69,7 +71,7 @@ class CasSimDescription {
 public:
     u16 firstName[32];                                // 0x000
     u16 lastName[32];                                 // 0x040
-    u32 field_0x80;                                   // 0x080
+    s32 field_0x80;                                   // 0x080  ClearSim sets -1
     s16 magic;                                        // 0x084  -275 (0xfeed), set by DoStream
     s8 version;                                       // 0x086  stream version; 7 is current
     BitFlags<u32> flags;                              // 0x088

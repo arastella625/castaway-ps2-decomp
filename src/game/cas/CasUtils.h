@@ -1,6 +1,7 @@
 #ifndef GAME_CAS_CASUTILS_H
 #define GAME_CAS_CASUTILS_H
 
+#include "common/EGlobal.h"
 #include "common/ERQuickdata.h"
 #include "common/types.h"
 #include "game/cas/CasSimDescription.h"
@@ -35,10 +36,6 @@ public:
     static int cheatIgnoreRequirements;
 };
 
-// The word at 0x514ED8: the Create-a-Sim quickdata once it is loaded. The Wii build keeps
-// it inside _globals; the name here is ours.
-extern ERQuickdata *gCasQuickdata;
-
 namespace Sim {
 
 // Wii: Sim::CostumesTSC6, one row of the costume table. Each list holds one clothing set
@@ -51,6 +48,13 @@ struct CostumesTSC6 {
 
 }  // namespace Sim
 
+// The tattoo a new sim starts with at each location: [location][flag 0 clear]. The eight
+// bytes at 0x4A9950, all zero. The name is ours.
+extern const u8 gDefaultTattooIndices[Sim::TATTOO_LOCATION_COUNT][2];
+
+// Wii: zodiacPersonalityValues, five values per star sign. A new sim gets the first row.
+extern u8 zodiacPersonalityValues[][PERSONALITY_COUNT];
+
 // Static helpers. Only the functions the decompiled code uses are declared so far.
 class CasUtils {
 public:
@@ -60,7 +64,7 @@ public:
     // Inlined on PS2. The quickdata is loaded on first use (0x2A2AF469 is its resource id).
     static ERQuickdata *GetQuickdata()
     {
-        ERQuickdata *data = gCasQuickdata;
+        ERQuickdata *data = _globals.casQuickdata;
         if (data == 0)
             data = _quickdataman.AddRef(0x2A2AF469, 0, 0);
         return data;

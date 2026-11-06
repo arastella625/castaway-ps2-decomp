@@ -3,6 +3,7 @@
 #include "common/EResourceManager.h"
 #include "common/ReconBuffer.h"
 #include "game/cas/CasUtils.h"
+#include "game/cas/LatticeParam.h"
 
 Character::eSpecies CasSimDescription::GetSpecies() const
 {
@@ -12,6 +13,51 @@ Character::eSpecies CasSimDescription::GetSpecies() const
 int CasSimDescription::GetSimType() const
 {
     return 0;
+}
+
+// Resets the sim. `a` becomes flag 0. With `b`, only the clothes from part 0x1d on are
+// reset and the rest of the sim is kept. `c` also gives the sim the default names.
+void CasSimDescription::ClearSim(bool a, bool b, bool c)
+{
+    bool oldFlag = GetFlag(0);
+    if (c) {
+        if (!b) {
+            SetFlag(1, false);
+            SetFlag(0, a);
+            field_0x80 = -1;
+            ewcsncpy(firstName, _globals.GetNewUIString("default_player1_first_name", 0), 32);
+            firstName[31] = 0;
+            ewcsncpy(lastName, _globals.GetNewUIString("default_player1_last_name", 0), 32);
+            lastName[31] = 0;
+        }
+    }
+    if (textureInfo == 0 || oldFlag != GetFlag(0))
+        InitQuickdataPointers();
+    magic = -275;
+    version = 7;
+    for (u8 part = b ? 0x1d : 0x1a; part <= 0x28; part++)
+        bodyParts[part - 0x1a]->SetToDefault(a);
+    if (!b) {
+        BodyType() = 0;
+        SkinColor() = 0;
+        skinTextureOffset = 0;
+        field_0xfe = typeInfo->field_0x2c;
+        int column = a == false;
+        for (int i = 0; i < Sim::TATTOO_LOCATION_COUNT; i++)
+            tattooIndices[i] = gDefaultTattooIndices[i][column];
+        Character::eSpecies species = GetSpecies();
+        LatticeParam *lattice = LatticeParam::Instance();
+        for (int i = 0; i < Sim::LATTICE_MORPH_REGION_COUNT; i++)
+            LatticeMorphValue((Sim::eLatticeMorphRegion)i)
+                = lattice->GetMorphValNormal(species, (Sim::eLatticeMorphRegion)i);
+        MorphTargetParam *morph = MorphTargetParam::Instance();
+        for (int i = 0; i < Sim::MORPH_TARGET_REGION_COUNT; i++)
+            MorphTargetValue((Sim::eMorphTargetRegion)i)
+                = morph->GetMorphValNormal(species, (Sim::eMorphTargetRegion)i);
+        for (u32 i = 0; i < PERSONALITY_COUNT; i++)
+            personalityValues[i] = zodiacPersonalityValues[0][i];
+        archetype = 0;
+    }
 }
 
 // Reads or writes a saved sim. Streams older than version 4 have a different layout and
@@ -35,7 +81,7 @@ void CasSimDescription::DoStream(ReconBuffer *buffer, int unused, bool a)
     if (buffer->IsReading())
         InitQuickdataPointers();
     if (version >= 5)
-        buffer->Recon32((int *)&field_0x80, 1);
+        buffer->Recon32(&field_0x80, 1);
     for (int i = 0; i < Character::BODY_PART_COUNT; i++)
         bodyParts[i]->DoStream(buffer, version);
     buffer->ReconFloat(latticeMorphValues, 4);
@@ -323,6 +369,21 @@ void CasSimDescription::SwitchToFirstAvailableStyle(Character::eBodyPart part)
 void CasSimDescription::AdjustToLegalStyle(Character::eBodyPart part)
 {
     bodyParts[GetBodyPartIndex(part)]->AdjustToLegalStyle();
+}
+
+// Sets lattice regions 1 to 3 from the body type. Region 0 is left alone.
+void CasSimDescription::SetBodyTypeMorphValues()
+{
+    if (GetBodyType() >= Sim::BODY_TYPE_COUNT) {
+        AssertWithInfo("Invalid body type");
+        return;
+    }
+    LatticeMorphValue((Sim::eLatticeMorphRegion)1) = LatticeParam::Instance()->GetMorphValForBodyType(
+        GetSpecies(), (Sim::eLatticeMorphRegion)1, (Sim::eBodyType)bodyType);
+    LatticeMorphValue((Sim::eLatticeMorphRegion)2) = LatticeParam::Instance()->GetMorphValForBodyType(
+        GetSpecies(), (Sim::eLatticeMorphRegion)2, (Sim::eBodyType)bodyType);
+    LatticeMorphValue((Sim::eLatticeMorphRegion)3) = LatticeParam::Instance()->GetMorphValForBodyType(
+        GetSpecies(), (Sim::eLatticeMorphRegion)3, (Sim::eBodyType)bodyType);
 }
 
 void CasSimDescription::InitializeToDefaultCostume(bool a)

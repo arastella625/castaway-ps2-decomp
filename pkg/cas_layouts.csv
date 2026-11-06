@@ -52,7 +52,7 @@ SimBodyPartUnused,0x0,SimBodyPart,base,
 CasSimDescription,size,0x334,,
 CasSimDescription,0x0,char16[32],firstName,Verify checks a null terminator; Wii constructor copies a default name with ewcsncpy
 CasSimDescription,0x40,char16[32],lastName,Verify checks a null terminator; Wii constructor copies a default name with ewcsncpy
-CasSimDescription,0x80,uint,field_0x80,Unknown
+CasSimDescription,0x80,int,field_0x80,ClearSim sets -1; streamed from version 5
 CasSimDescription,0x84,short,magic,DoStream writes -275 (0xfeed) here
 CasSimDescription,0x86,sbyte,version,Stream version; DoStream sets 7 after reading
 CasSimDescription,0x88,uint,flags,Wii constructor builds a BitFlags<uint> here
