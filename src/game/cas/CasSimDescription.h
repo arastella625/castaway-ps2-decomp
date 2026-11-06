@@ -187,6 +187,14 @@ public:
         }
         return result;
     }
+    // The PS2 build inlines these three; the Wii build keeps them as functions.
+    CasSimTextureInfo *GetBodyData() const { return textureInfo; }
+    CasSimTypeInfo *GetBodyPartTypeInfoTable() const { return typeInfo; }
+    void InitBodyPartData()
+    {
+        for (int i = 0; i < Character::BODY_PART_COUNT; i++)
+            bodyParts[i]->Init(this);
+    }
     void DoStreamTSC5(ReconBuffer *buffer);
     void FillInTextureBlendInfo(Character::eBodyPart part, bool a, TextureBlendInfo *info) const;
     void InitQuickdataPointers();

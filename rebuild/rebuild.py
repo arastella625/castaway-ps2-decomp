@@ -198,10 +198,10 @@ def compile_functions(tool_dir, source, addresses, slus):
     base.parent.mkdir(parents=True, exist_ok=True)
     ii, asm, raw, renamed, relinked, settled, obj, stamp = (
         base.with_suffix(e) for e in ('.ii', '.s', '.raw.o', '.link.s', '.link.o', '.data.o', '.o', '.key'))
-    assemble = lambda src, dst: verify.run_tool(tool_dir, verify.ASSEMBLER, verify.ASFLAGS + ['-o', rel(dst), rel(src)])
+    assemble = lambda src, dst: verify.assemble(tool_dir, src, dst)
     # The compile is reused while the source and its headers are unchanged. Everything after
     # it depends on config/symbols.txt too, so it is redone every time; it is quick.
-    key = verify.source_key(source, verify.CPPFLAGS + verify.CFLAGS + verify.ASFLAGS + ['-ffunction-sections'])
+    key = verify.source_key(source, verify.BUILD_KEY + ['-ffunction-sections'])
     if not (raw.is_file() and stamp.is_file() and stamp.read_text() == key):
         stamp.unlink(missing_ok=True)
         verify.run_tool(tool_dir, 'cpp.exe', verify.CPPFLAGS + [rel(source), rel(ii)])

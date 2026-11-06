@@ -102,6 +102,38 @@ void CasSimDescription::DoStream(ReconBuffer *buffer, int unused, bool a)
         version = 7;
 }
 
+// Most values are read through the other sim's virtual getters and written through this
+// sim's virtual accessors, one call each.
+void CasSimDescription::CopyFrom(const CasSimDescription &other)
+{
+    if (this != &other) {
+        magic = other.magic;
+        version = other.version;
+        flags = other.flags;
+        field_0x80 = other.field_0x80;
+        ewcsncpy(firstName, other.firstName, 32);
+        ewcsncpy(lastName, other.lastName, 32);
+        BodyType() = other.GetBodyType();
+        SkinColor() = other.GetSkinColor();
+        textureInfo = other.GetBodyData();
+        typeInfo = other.GetBodyPartTypeInfoTable();
+        InitBodyPartData();
+        skinTextureOffset = other.skinTextureOffset;
+        skinHitPoints = other.skinHitPoints;
+        for (u8 part = 0x1a; part <= 0x28; part++)
+            CopyBodyPart((Character::eBodyPart)part, other);
+        for (int i = 0; i < Sim::TATTOO_LOCATION_COUNT; i++)
+            tattooIndices[i] = other.GetTattooIndex((Sim::eTattooLocation)i);
+        for (int i = 0; i < Sim::LATTICE_MORPH_REGION_COUNT; i++)
+            LatticeMorphValue((Sim::eLatticeMorphRegion)i) = other.GetLatticeMorphValue((Sim::eLatticeMorphRegion)i);
+        for (int i = 0; i < Sim::MORPH_TARGET_REGION_COUNT; i++)
+            MorphTargetValue((Sim::eMorphTargetRegion)i) = other.GetMorphTargetValue((Sim::eMorphTargetRegion)i);
+        for (int i = 0; i < PERSONALITY_COUNT; i++)
+            PersonalityValue((PersonalityEnum)i) = other.GetPersonalityValue((PersonalityEnum)i);
+        Archetype() = other.GetArchetype();
+    }
+}
+
 void CasSimDescription::CopyBodyPart(Character::eBodyPart part, const CasSimDescription &other)
 {
     u8 index = GetBodyPartIndex(part);
@@ -390,12 +422,11 @@ int CasSimDescription::GetClothingTextureInfo(Sim::eSimPartsMapLocation location
 }
 
 #ifdef NON_MATCHING
-// The clear() is a short loop, and short loops don't match yet for two reasons.
-// 1. The assembler pads a short loop with nops, a workaround for a fault in the PS2's
-//    processor. The game's assembler pads until the branch is 4 instructions after the top
-//    of the loop; every assembler build we have pads to 5. So this is one nop too long.
-// 2. The game closes the loop with a "branch likely" (bnel) and keeps the index in a1;
-//    this compiles to a plain bne and a2. The source shape of clear() is still a guess.
+// Three of 63 words differ, all from the loop inside clear(). The game closes it with a
+// "branch likely" (bnel) and keeps the body part index in a1; this compiles to a plain bne
+// and a2. Both say the game's compiler thought the loop's pointer was still needed after
+// the loop, so the source shape of eastl::vector::clear() here is still a guess. The loop's
+// padding itself matches (tools/asm_filter.py).
 bool CasSimDescription::GetValidClothingSetIndexes(
     Character::eBodyPart part, eastl::vector<Sim::ClothingSetIndexInfo, eastl::allocator> &indexes)
 {

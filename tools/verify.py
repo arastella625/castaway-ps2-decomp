@@ -22,6 +22,8 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import asm_filter
+
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / 'src'
 BUILD = ROOT / 'build'
@@ -39,6 +41,8 @@ CFLAGS = ['-quiet', '-O2', '-G0', '-fno-rtti', '-fno-exceptions']
 # It takes few options: -EL, -mips3 and -mcpu make this build crash while reporting them.
 ASSEMBLER = 'Ps2EeAs.exe'
 ASFLAGS = ['-G0']
+# Everything that decides what an object file holds, for the build cache.
+BUILD_KEY = CPPFLAGS + CFLAGS + [ASSEMBLER] + ASFLAGS + ['asm_filter ' + asm_filter.VERSION]
 TOOL_TIMEOUT = 120  # seconds; a hung Wine process must not hang the build
 JOBS = min(8, os.cpu_count() or 1)  # source files compiled at once
 INCLUDE = re.compile(r'^\s*#\s*include\s+"([^"]+)"', re.M)
@@ -178,6 +182,38 @@ def source_key(source, flags):
     return digest.hexdigest()
 
 
+def assemble(tool_dir, asm, obj):
+    """Assemble compiler output, with its short loops padded as the game's are (asm_filter.py)."""
+    r = lambda p: p.relative_to(ROOT).as_posix()
+    run = lambda src, dst: run_tool(tool_dir, ASSEMBLER, ASFLAGS + ['-o', r(dst), r(src)])
+
+    def measure(probe_text, markers):
+        """Assemble a probe copy and return the instruction words after each marker symbol."""
+        probe_asm, probe_obj = asm.with_suffix('.probe.s'), asm.with_suffix('.probe.o')
+        probe_asm.write_bytes(probe_text.encode('latin-1'))
+        run(probe_asm, probe_obj)
+        elf = Elf32(probe_obj)
+        found = {}
+        for name, value, _, _, shndx in elf.symbols():
+            if name in markers and 0 < shndx < len(elf.sections):
+                code = elf.contents(elf.sections[shndx])[value:value + 4 * (asm_filter.BRANCH_DISTANCE + 1)]
+                found[name] = struct.unpack('<%dI' % (len(code) // 4), code[:len(code) // 4 * 4])
+        missing = sorted(set(markers) - set(found))
+        if missing:
+            raise VerifyError('%s: the assembler dropped loop marker %s' % (probe_asm.name, missing[0]))
+        return found
+
+    text = asm.read_bytes().decode('latin-1')
+    try:
+        padded = asm_filter.pad_short_loops(text, measure)
+    except asm_filter.FilterError as error:
+        raise VerifyError('%s: %s' % (asm.name, error))
+    if padded != text:
+        asm = asm.with_suffix('.padded.s')
+        asm.write_bytes(padded.encode('latin-1'))
+    run(asm, obj)
+
+
 def build(tool_dir, source, defines):
     """Preprocess, compile and assemble one source file. Returns the object path.
 
@@ -188,7 +224,7 @@ def build(tool_dir, source, defines):
     out = BUILD / rel.relative_to('src')
     out.parent.mkdir(parents=True, exist_ok=True)
     ii, asm, obj, stamp = (out.with_suffix(e) for e in ('.ii', '.s', '.o', '.key'))
-    key = source_key(source, CPPFLAGS + CFLAGS + ASFLAGS + defines)
+    key = source_key(source, BUILD_KEY + defines)
     if obj.is_file() and stamp.is_file() and stamp.read_text() == key:
         return obj
     stamp.unlink(missing_ok=True)
@@ -196,7 +232,7 @@ def build(tool_dir, source, defines):
     r = lambda p: p.relative_to(ROOT).as_posix()
     run_tool(tool_dir, 'cpp.exe', CPPFLAGS + ['-D' + d for d in defines] + [rel.as_posix(), r(ii)])
     run_tool(tool_dir, 'cc1plus.exe', CFLAGS + [r(ii), '-o', r(asm)])
-    run_tool(tool_dir, ASSEMBLER, ASFLAGS + ['-o', r(obj), r(asm)])
+    assemble(tool_dir, asm, obj)
     stamp.write_text(key)
     return obj
 

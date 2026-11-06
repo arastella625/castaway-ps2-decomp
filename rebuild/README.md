@@ -2,7 +2,7 @@
 
 `rebuild.py` builds the whole executable from a splat split plus the decompiled C++ in `src/`, and checks the result against `pkg/target.sha1`. A passing run means the C++ is linked into a file that is byte-identical to the game.
 
-**Status:** all 825 matched C++ functions are linked in place of their assembly, and the rebuilt file matches. The ELF header, `.vutext`, `.data`, `.rodata` and everything else after `.text` (12.7% of the file) are still raw binary.
+**Status:** all 827 matched C++ functions are linked in place of their assembly, and the rebuilt file matches. The ELF header, `.vutext`, `.data`, `.rodata` and everything else after `.text` (12.7% of the file) are still raw binary.
 
 ## Setup
 
@@ -25,7 +25,7 @@ It takes about a minute. `--asm-only` links no C++, which tells a problem in the
 
 ## How it works
 
-1. Each source file is compiled with `-ffunction-sections`, so every function sits in its own section. The code is the same as `verify.py` builds.
+1. Each source file is compiled with `-ffunction-sections`, so every function sits in its own section. The code is the same as `verify.py` builds, including the short-loop padding from `tools/asm_filter.py`.
 2. Each function is checked for what it refers to. Calls to addresses in `config/symbols.txt` can be linked. A string literal or jump table has no address of its own, because the game's `.rodata` is still raw binary. The game's instruction says where its copy is; if the bytes there equal ours, the reference is pointed at it. The address is taken on trust and the content is checked. A call to another function in the same file is written by the assembler as a reference to that function's section, and is linkable when that function is linked too. A function that fails this, or refers to a symbol with no address, is renamed out of the way, the game's assembly is kept, and the run fails unless `--allow-kept` is given.
 3. The address range of every linked function is cut out of the split assembly, along with the padding after it.
 4. A generated linker script places each assembly piece and each C++ function at its original address. A piece that is too big makes the linker stop at that address.

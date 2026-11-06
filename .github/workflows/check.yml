@@ -13,3 +13,5 @@ jobs:
         run: python3 tools/check_repo.py
       - name: Tools compile
         run: python3 -m compileall -q tools pkg/tools
+      - name: Assembly filter rules
+        run: python3 tools/asm_filter.py --self-test

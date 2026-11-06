@@ -175,6 +175,7 @@ public:
     Sim::BodyPartGeometryTSC6 *GetClothingSetData() const;
     BodyPartTypeInfo *GetBodyPartTypeInfo() const;
     const char *GetCharacterType() const;
+    void Init(CasSimDescription *description);
     // Inlined wherever the degradation state is clamped. The name is ours.
     u8 NumDegradationStates() const
     {

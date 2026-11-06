@@ -51,13 +51,13 @@ def build_probe(tool_dir, name, header):
     src, ii, asm, obj, stamp = (WORK / (safe + e) for e in ('.cpp', '.ii', '.s', '.o', '.key'))
     src.write_text('#include "%s"\n\nstruct Probe : public %s {\n    virtual void probe_();\n};\n\n'
                    'void Probe::probe_()\n{\n}\n' % (header, name))
-    key = verify.source_key(src, verify.CPPFLAGS + verify.CFLAGS + verify.ASFLAGS)
+    key = verify.source_key(src, verify.BUILD_KEY)
     if not (obj.is_file() and stamp.is_file() and stamp.read_text() == key):
         stamp.unlink(missing_ok=True)
         r = lambda p: p.relative_to(verify.ROOT).as_posix()
         verify.run_tool(tool_dir, 'cpp.exe', verify.CPPFLAGS + [r(src), r(ii)])
         verify.run_tool(tool_dir, 'cc1plus.exe', verify.CFLAGS + [r(ii), '-o', r(asm)])
-        verify.run_tool(tool_dir, verify.ASSEMBLER, verify.ASFLAGS + ['-o', r(obj), r(asm)])
+        verify.assemble(tool_dir, asm, obj)
         stamp.write_text(key)
     return obj
 

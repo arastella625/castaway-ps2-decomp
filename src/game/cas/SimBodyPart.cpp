@@ -493,6 +493,49 @@ BitFlags<u32> SimBodyPart::ApplyDamage(const Weather::DamageEvent &event, s16 sc
     return result;
 }
 
+// A texture variation's name is a string of dye letters. Sets dyes[n] for each letter it
+// has: b, g, l, o, p, r, w, y are 1 to 8. The nude set needs none, except on the two types
+// (0x1b and 0x1c) that are never nude.
+void SimBodyPart::GetRequiredDyesForTextureVariation(u8 textureIndex, s16 *dyes)
+{
+    for (int i = 8; i >= 0; i--)
+        dyes[i] = 0;
+    if (GetType() == 0x1c || GetType() == 0x1b
+        || GetClothingSetIndex() != GetNudeClothingSetIndex(GetCharacterFlag(0))) {
+        if (clothingSetData != 0 && textureIndex < clothingSetData->textureVariations.size()) {
+            for (const char *letter = clothingSetData->textureVariations[textureIndex];
+                 letter != 0 && *letter != 0; letter++) {
+                switch (*letter) {
+                case 'b':
+                    dyes[1] = 1;
+                    break;
+                case 'g':
+                    dyes[2] = 1;
+                    break;
+                case 'l':
+                    dyes[3] = 1;
+                    break;
+                case 'o':
+                    dyes[4] = 1;
+                    break;
+                case 'p':
+                    dyes[5] = 1;
+                    break;
+                case 'r':
+                    dyes[6] = 1;
+                    break;
+                case 'w':
+                    dyes[7] = 1;
+                    break;
+                case 'y':
+                    dyes[8] = 1;
+                    break;
+                }
+            }
+        }
+    }
+}
+
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 // Picks the first model the clothing set has, then pulls the texture and the degradation

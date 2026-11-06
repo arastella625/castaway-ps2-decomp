@@ -16,6 +16,12 @@ enforce the parts a machine can check:
 - `tools/check_repo.py` fails when a commit holds game data, binaries or secrets. It runs
   as a pre-commit hook and in CI.
 
+`tools/asm_filter.py` is part of the build, not a check. The game's assembler isn't
+available, and the one we have pads very short loops differently, so the filter pads them
+the game's way before the assembler runs. It is the only place where the build imitates a
+tool instead of running it. Keep it that narrow: a new difference gets its own evidence in
+`HANDOFF.md` before any code.
+
 ## Repo layout
 
 | Path | Holds |
