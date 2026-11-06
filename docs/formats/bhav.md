@@ -43,7 +43,7 @@ Type 4 makes `Gosub` start at the node named by the first parameter, clamped to 
 | 3 | u8 | Target if it returned false |
 | 4 | 8 bytes | Operands |
 
-A target is a node index, or one of three special values. All 123,186 targets on the disc are in range.
+A target is a node index, or one of the special values below. All 123,186 targets on the disc are in range. `DoNodeAction` treats any index from 0xFB up as special, so 0xFB and 0xFC are error 0x44C too. No tree uses them.
 
 | Target | Meaning |
 |---|---|
@@ -81,7 +81,7 @@ The selector decides this, not the running tree's own set. A semi-global tree th
 | 1 | Stop until the next tick | returns 1 |
 | 2 | Failed | returns 0 |
 
-For each node, `DoNodeAction` adds one to the iteration count. At 25,000 in one tick (`sMaxIterations`, `0x492418`) the tree stops with error 0x44D, which catches infinite loops. Then:
+For each node, `DoNodeAction` adds one to the iteration count and then tests it. So 24,999 nodes run in a tick, and the 25,000th stops the tree with error 0x44D (`sMaxIterations`, `0x492418`), which catches infinite loops. Then:
 
 - A call pushes a frame with the callee's parameter and local counts. If that fails, the tree stops with error 0x3E8 when the tree can still be loaded, and 0x44E when it can't.
 - A primitive goes to `TryElement`, the virtual switch below, and the result decides what happens next:
@@ -95,6 +95,12 @@ For each node, `DoNodeAction` adds one to the iteration count. At 25,000 in one 
 | -1, 4, other | Failed |
 
 - A node index of 0xFE or 0xFF pops the frame, sets the last result and takes the caller's true or false target, so a call looks like a primitive to its caller. Popping the last frame is error 0x3E9.
+
+**Proven**, from the matched code, for a port's edge cases:
+
+- A new frame's locals aren't cleared. `StackElem::Setup` copies parameters only, so locals hold whatever was in stack memory. A tree that reads a local before writing it is reading old data; a port should zero them.
+- A root tree under `Simulate` can't return, because popping the last frame is error 0x3E9. Only `RunCheckTree`'s marker frame makes a return safe.
+- `RunCheckTree` leaves the stack and iteration count alone when it fails, and `HandleError` cleans up. A primitive that fails without setting an error, such as 0x26 on a Sim, becomes 0x44F there.
 
 A frame also has a word at `+8`. When a callee returns and it's set, the caller stays on the same node instead of taking a target. **Likely** that's how a primitive that starts a subtree gets run again afterwards; `mWaiting` is our name. Moving to a new node clears it.
 
@@ -112,12 +118,13 @@ Error codes seen so far:
 | 0x006 | Attribute number out of range |
 | 0x007 | Variable doesn't exist, or a bad action queue index |
 | 0x008 | Parameter or local number out of range |
-| 0x009 | Scope out of range, or not writable |
+| 0x009 | Scope out of range, or `InterpWriteValue` given a scope it can't write. Expression can't reach the second: see "Writing" |
 | 0x00A | No stack object |
 | 0x00D | Bit number above 16 in an expression |
 | 0x00F | Scope 0xA with data other than 0 |
 | 0x013 | An expression tried to write to something it can't |
 | 0x015 | No stack object, in scopes that need a Sim or a slot |
+| 0x017 | TestObjectType's object doesn't exist |
 | 0x01A | Motive number out of range, or ad number out of range |
 | 0x01B | No such object slot |
 | 0x01C | Not a Sim |
@@ -126,8 +133,10 @@ Error codes seen so far:
 | 0x026 | Division by zero |
 | 0x028 | No such room |
 | 0x029 | Room data number out of range |
+| 0x01E | SetToNext search type that doesn't exist |
 | 0x02F | Tree constant not found |
 | 0x032 | Indexed data number out of range |
+| 0x033 | SetToNext's current object doesn't exist, in search type 8 |
 | 0x036 | Tutorial mode isn't 0 or 1 |
 | 0x038 | No such Neighbor |
 | 0x03A | Scope 0x21, which always fails |
@@ -275,7 +284,7 @@ It reads the right operand first, then the left. A scope of 7 skips `InterpValue
 
 Rules a port has to copy:
 
-- **Writing.** With an s16 address, the new value goes through `InterpWriteValue`. With no address but a float one (a motive), the sum is done on the float. With neither, it's error 0x13. Operators 8, 9 and 0xA, 0xC, 0xD and 0x12 never use the float: on a motive they're error 0x13.
+- **Writing.** With an s16 address, the new value goes through `InterpWriteValue`. With no address but a float one (a motive), the sum is done on the float. With neither, it's error 0x13. Operators 9, 0xA, 0xC, 0xD and 0x12 never use the float: on a motive they're error 0x13. This test comes first, so **an expression that writes an unwritable scope is error 0x13, not 9**. Error 9 is `InterpWriteValue`'s own default, which Expression never reaches, because every scope that gives an address is one it can write. The two `left = right` on scope 0x2A are 0x13.
 - **Bit numbers.** Anything above 16 is error 0xD. Below 1 isn't checked.
 - **After a write**, for scopes 0xE, 0xF and 0x11, the float is clamped to -100.0 to 100.0. Then if `EdithVariableSet::s_bTaggedGraphicField` is set, it's cleared, and `TagGraphicsField` runs on me (left scope 3) or the stack object (left scope 4).
 - **Operator 0xA doesn't count as a write**, so it does neither of those. That's in the code, and it may be a slip in the original. It changes nothing unless the left scope is a motive, which is error 0x13 anyway, or a variable that sets the tag.
@@ -305,7 +314,7 @@ A value is a scope and a data word. `cXObject::InterpValue` (`0x235968`) reads i
 | 0x06 | Global `data`, below 0x30. 0x20 and 0x2E are the player cheats' high and low 16 bits, 0xB is the home tiki lot, 3 has no address | 0x3F | yes, if it has an address |
 | 0x07 | **Literal**: the data word itself | | no |
 | 0x08 | My temp `data`, below 8 | 2 | yes |
-| 0x09 | Parameter `data` of this tree | 8 | yes |
+| 0x09 | Parameter `data` of this tree. The limit is enforced | 8 | yes |
 | 0x0A | The frame's stack object ID. Data must be 0 | 0xF | yes |
 | 0x0B | My temp, indexed by my temp `data` | 2 | yes |
 | 0x0C | Range of ad `data` of the running check tree. 0 if ads aren't allowed | 0x1A | yes |
@@ -321,9 +330,9 @@ A value is a scope and a data word. `cXObject::InterpValue` (`0x235968`) reads i
 | 0x16 | Stack object's attribute, indexed by parameter `data` | 8, 6 | yes |
 | 0x17 | Data of the room numbered by my temp 0; see below | 0x28, 0x29 | no |
 | 0x18 | A virtual call on the neighbourhood with the stack object's ID and `data` (slot 1); what it holds is open | | yes |
-| 0x19 | **Local** `data` of this tree | 8 | yes |
+| 0x19 | **Local** `data` of this tree. The limit is enforced | 8 | yes |
 | 0x1A | Tree constant; see below. Index 0x7F means temp 0 holds it | 0x2F | no |
-| 0x1B | Stack object's indexed data (`+0x6C`, count at `+0x70`), indexed by my temp `data` | 2, 0x32 | yes |
+| 0x1B | Word of an array at `+0x6C` of the stack object, numbered by my temp `data`. It's its own array with a count at `+0x70`, not the attributes. What fills it is open, and no expression uses this scope | 2, 0x32 | yes |
 | 0x1C | Personality variable of ad `data`, like 0x0C | 0x1A | yes |
 | 0x1D | Minimum of ad `data`, like 0x0C | 0x1A | yes |
 | 0x1E | My person data field, numbered by my temp `data` | 0x1C, 2, 0x21 | yes |
@@ -387,6 +396,8 @@ A `BehaviorConstantValue` is 8 bytes: an s16 value, 2 bytes of 0xFA padding, and
 
 An index at or past the end is error 0x2F, and so is a table that doesn't exist. There are 1,450 tables and 13,911 values. Of the 6,346 scope 0x1A operands in expressions, 6,012 are found in every context their tree can run in, 232 in some, and 102 in none. With private and semi-global swapped, the control, only 1,375 of 3,877 are found. The 102 are in objects this game cut, like `npc_grimreaper`, `npc_repoman` and `car_sg`, whose tables were pruned while their trees stayed, plus `counter_sg` and a few in `bed_sg`, `door_sg`, `food_stove_sg`, `scenario_sg`, `roof_sg`, `wall_sg` and `window_sg`. Reaching one stops the tree with error 0x2F, so a port should do the same.
 
+The limits on scopes 9 and 0x19 are real: `InterpValue` tests them, and past the end is error 8. The disc has 51 local and 2 parameter operands past their tree's counts, 44 of them in `generator_visit/Load - Place Family`. If one is ever reached, the tree stops there.
+
 Person data fields (0x12, 0x13, 0x1E, 0x1F) are split between two arrays. `cXPerson::TranslasteToNewPersonDataIndex` (a table at `0x492350`) gives the index in the Sim's own array at `+0x548`; if that's -1, the table at `0x4925F0` gives the index in the Neighbor's array at `+0x6C`. Neither is error 0x21.
 
 A motive is a float at Sim `+0x180`. The s16 is `x < 0 ? x - 0.5 : x + 0.5`, cut to an integer.
@@ -440,10 +451,51 @@ The full list is `*Param` in the Wii symbols. `tools/bhav.py` doesn't test any o
 
 `cXObject::TryTestObjectType`'s C++ is in `cXObjectPrims.cpp` under `NON_MATCHING`.
 
+## SetToNext (opcode 0x1F)
+
+**Likely**, but strongly: read from the PS2 function (`0x22BF10`) and the Wii build, which agree in structure. It isn't matched yet. 1,248 uses.
+
+It steps a value through a list of things. The value is the target; `+4` is the flags.
+
+| Operand | Meaning |
+|---|---|
+| `+0` s32 | GUID for search types 4 and 7 |
+| `+4` bits 0 to 3 | Search type |
+| `+4` bit 5 | Take the GUID from temps 1 and 2 (high, low) |
+| `+4` bit 6 | Skip non-leads: only stop on objects where `IsInteractionTile(true)` is true. Ignored for search type 12 |
+| `+4` bit 7 | Target given: `+5` is its scope and `+7` its data. Clear means scope 0xA data 0, the stack object |
+| `+6` u8 | For search type 9, the local holding the centre object |
+
+The target is read first, and it must have an address or it's error 0x13. Returning 1 takes the true branch. In each type "writes" means through `InterpWriteValue`. Object IDs and list positions start from 1, and 0 means none.
+
+| Type | Steps through | At the end |
+|---|---|---|
+| 0, 2, 6, 12 | Objects in their linked list, from the first if the target is 0, otherwise from the object after it (object `+0xB8`; the head is ObjectModule `+0x28`). Type 2 skips Sims. Type 6 wants variable 0x3B equal to this tree's parameter 0. Type 12 wants objects in the world, which means both tile coordinates above 0 | False, target unchanged. An object that no longer exists is false |
+| 1 | Sims in ObjectModule's list at `+0x2050`: the one after the target, or the first if it's 0 | Writes 0. Returns target != 0 |
+| 3 | Parts of the multi-tile object holding the target. Not multi-tile: writes the same ID, true. Otherwise child (`+0x13C`) then sibling (`+0x140`) | Writes 0, false. Going all the way round with skipping on is false |
+| 4 | Objects by position (ObjectModule `+0x2088`, then 16 special slots) with the GUID's selector, from the position after the target | Writes 0. Returns target != 0 |
+| 5 | Neighbour IDs: the next with an entry after the target | Writes it, 0 at the end. Returns target != 0 |
+| 7 | Neighbours, as 5, until one has the GUID, or until temps 1 and 2 equal the GUID when bit 5 is set | False |
+| 8 | Objects on the target's tile, wrapping. A target of 0 is false, a missing object is error 0x33, and one not in the world is false. If the target isn't found on its own tile, false. Going round to the target with skipping on is false | False |
+| 9 | The four tiles around the object in local `+6`, in the order (1,0), (0,1), (-1,0), (0,-1). It carries on from the side the target is on; a target of 0 starts at (1,0) | False after (0,-1) |
+| 10 | Nothing | False |
+| 11 | Lots in the neighbourhood list at `+0xA0`: the one after the target, wrapping to the first; the first if it's 0 | False if the target isn't in the list |
+| Others | | Error 0x1E. With skipping on, only 0, 2 and 6 are valid, because 12 turns skipping off |
+
+Search type 9's object has to be in the same room (object variable 0x1D) as the centre object, and off-grid tiles are skipped. A missing centre object is error 0xA, and a local past the tree's count is error 8.
+
+## Animate (opcode 0x2C)
+
+**Likely**, from both builds. `cXObject::TryAnimate` (`0x234558`) is only the case for objects that aren't Sims. The C++ is in `cXObjectPrims.cpp` under `NON_MATCHING`, with 69 of 70 words the same. A Sim's animation is `SAnimator2::TryAnimate`, which hasn't been read.
+
+The behaviour number comes from two bytes: if `+3` & 0x7F is non-zero it's that plus 3, otherwise bit 0 of `+5` is bit 0 and bit 4 of `+5` is bit 1. 7 uses me, 8 the stack object, and anything else is error 5. Then it resolves the skill for passive influence and tells `PassiveInfluenceSystem` the object's skill name. So on an object that isn't a Sim this primitive plays nothing, and a port can return what `resolveSkillForPassiveInfluence` gives once that's read.
+
 ## What's left
 
 **Open:**
-- The bodies of the primitives, except what's above. Each is a function at the address in the table.
+- The bodies of the primitives, except what's above. Each is a function at the address in the table. `CheckObject`, `SAnimator2::TryAnimate` and `resolveSkillForPassiveInfluence` are next.
 - What scope 0x18's virtual call returns, and what reads the flag `0x49DDA4`.
 - What `+4` of an expression is for. No code reads it.
+- Which variables an object has, which decides error 7: `EdithVariableSet::Contains` at `0x2193B8`.
+- What fills the array at object `+0x6C`, scope 0x1B.
 - Header bytes 7 and 8, and type 0x16.

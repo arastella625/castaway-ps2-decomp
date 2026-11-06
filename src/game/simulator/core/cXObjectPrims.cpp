@@ -1,7 +1,32 @@
 #include "game/simulator/core/cXObject.h"
 
+#include "game/simulator/core/Lot.h"
 #include "game/simulator/core2/cXPerson.h"
 #include "game/simulator/objectdata/XObjLang.h"
+
+// Primitive 0x2c. Which behaviour it asks for comes from two bytes.
+class AnimateNewParam {
+public:
+    u8 field_0x0[3];
+    u8 mAnimType; // 0x03  bit 7 mirrored, the rest an animation group
+    u8 field_0x4;
+    u8 mFlags;    // 0x05
+
+    int GetBehavior() const
+    {
+        int behavior = 0;
+        int group = mAnimType & 0x7f;
+        if (group) {
+            behavior = group + 3;
+        } else {
+            if (mFlags & 1)
+                behavior |= 1;
+            if (mFlags & 0x10)
+                behavior |= 2;
+        }
+        return behavior;
+    }
+};
 
 // Primitive 0xf, TreeBreak.
 struct TreeBreakParam {
@@ -68,6 +93,43 @@ long cXObject::TryTestObjectType(StackElem *elem, XPrimParam *primParam)
     if (selector->GetMasterSelector()->GetGUID() == guid)
         return 1;
     return 0;
+}
+#endif
+
+#ifdef NON_MATCHING
+// 69 of the 70 words line up. The game has one more: a nop that aligns the label after the
+// behaviour test to eight bytes. A do/while around the lookup or the range test doesn't give it,
+// and one around the whole test changes the registers.
+class AnimRef;
+class PassiveInfluenceSystem {
+public:
+    void SetSkillNameID(cXObject *object, const AnimRef *anim);
+};
+
+// Wii: resolveSkillForPassiveInfluence.
+long resolveSkillForPassiveInfluence(cXObject *object, StackElem *elem, const AnimateNewParam *param,
+                                     const AnimRef *&anim, bool &a);
+
+// Primitive 0x2c on an object that isn't a Sim. A Sim's animation is SAnimator2::TryAnimate;
+// this only picks me or the stack object and records the skill for passive influence.
+long cXObject::TryAnimate(StackElem *elem, const AnimateNewParam *param)
+{
+    const AnimRef *anim = 0;
+    int behavior = param->GetBehavior();
+    cXObject *object = 0;
+    if (behavior == 7) {
+        object = this;
+    } else if (behavior == 8) {
+        object = GetObjectModule()->GetObjectFromIDInline(elem->mStackObject);
+    } else {
+        TREE_ERROR(5);
+        return -1;
+    }
+    bool skill = 0;
+    long result = resolveSkillForPassiveInfluence(object, elem, param, anim, skill);
+    if (object)
+        GetSimulator()->mPassiveInfluence->SetSkillNameID(object, anim);
+    return result;
 }
 #endif
 

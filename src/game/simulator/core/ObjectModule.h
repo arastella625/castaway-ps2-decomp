@@ -1,6 +1,7 @@
 #ifndef GAME_SIMULATOR_CORE_OBJECTMODULE_H
 #define GAME_SIMULATOR_CORE_OBJECTMODULE_H
 
+#include "common/eastl.h"
 #include "common/types.h"
 
 class cXObject;
@@ -11,8 +12,18 @@ class ObjectModule {
 public:
     u32 pad_0x0[0x820];        // 0x0000
     cXObject *mTutorialObject; // 0x2080
+    u32 pad_0x2084;            // 0x2084
+    eastl::vector<cXObject *, eastl::allocator> mObjects; // 0x2088
 
     cXObject *GetObjectFromID(int id);
+
+    // The game has this as a function and also inlines it in TryAnimate.
+    cXObject *GetObjectFromIDInline(int id)
+    {
+        if (id <= 0 || (int)mObjects.size() < id)
+            return 0;
+        return mObjects[id - 1];
+    }
     void ClearIdleStatus(int id);
 
     cXObject *GetTutorialObject() { return mTutorialObject; }
@@ -41,5 +52,12 @@ public:
         return true;
     }
 };
+
+extern ObjectModule *gObjectModule;
+
+inline ObjectModule *GetObjectModule()
+{
+    return gObjectModule;
+}
 
 #endif

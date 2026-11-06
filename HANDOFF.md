@@ -89,14 +89,16 @@ Creating functions at all vtable slot targets (`tools/CreateFunctionsAt.java`) a
 
 Names now total 2,173 of 13,231 functions (16.4%), including 650 in `game/simulator/core` and `core2`. The jump came from `tools/vtable_order.py`, which pairs tables by order and slot counts (940 names). To rebuild, loop `vtable_order.py`, `vtables.py --all-tiers`, `order_fill.py` and `match.py`, feeding each `castaway_ps2_names.csv` back in, until nothing new appears (5 rounds here). Still open: 2,955 of 4,538 vtable slot targets are unnamed, and Wii seems to combine multiple-inheritance tables that PS2 keeps separate, so those don't match on length.
 
+**Status, 2026-11-06, constants and SetToNext (branch `decomp/operands`):** still 875 functions; this round was about data, because that's what the port needed. Tree constants and the semi-global link are both in the `ResFile` quickdata table: `+0x20` is the constant tables and `+0x34` points at the semi-global row. `tools/bhav.py` tests both on the disc with controls, and has `read_resfiles` for anything that needs the data. `SetToNext` is read and documented, but not matched: at 1,070 instructions it needs `CTilePt` (s8 coordinates from 28.4 fixed point, with a range check), `ObjectIterator` and several neighbour lookups written first. `cXObject::TryAnimate` is parked one `nop` short (69 of 70 words). It's only the non-Sim wrapper; the real one is `SAnimator2::TryAnimate`. `CheckObject` wasn't started.
+
 **Status, 2026-11-06, operands (branch `decomp/operands`):** 875 functions match. `cXObject` now derives from `TreeSim`, with its virtuals in Wii order (`verify_vtables.py` checks them against `0x4BC630`) and its fields at offsets taken from the Wii constructor and the PS2 destructor: past `TreeSim`, a PS2 offset is the Wii offset plus 4. `cXObject::InterpWriteValue` and `TryElement` match. `TryElement` matching proves all 73 primitive numbers and the inlined cases.
 
-Three functions are parked under `NON_MATCHING`, with the differences listed in a comment above each. All three have complete logic, and what's left is compiler detail, so `docs/formats/bhav.md` uses them as strong evidence:
+Four functions are parked under `NON_MATCHING` (`TryAnimate`, from the next round, is one), with the differences listed in a comment above each. All three have complete logic, and what's left is compiler detail, so `docs/formats/bhav.md` uses them as strong evidence:
 - `cXObject::InterpValue`: 2,872 of 3,060 words line up. Register allocation, stack frame and block order agree. Five things differ (`data == 7` test in scope 0x22, `lw`/`move` in the neighbour lookup, a `v0`/`v1` swap in scopes 0x34 to 0x37, a retest in scope 0x1A, a null test in scope 0x2A).
 - `cXObject::TryExpression`: 575 of 628 words line up, and it's four words too long.
 - `cXObject::TryTestObjectType`: 69 of 121 words line up. The logic is complete; most of the rest is registers one along, and one compare the other way round.
 
-Not started from step 4: `Animate`, `SetToNext`, `PlaySound`, `Dialog`.
+Not started then: `PlaySound`, `Dialog`.
 
 More of what the compiler does with source shape, from this round:
 - Only `BLKmode` objects get 16-byte stack alignment, and a class gets `BLKmode` from a user copy constructor (`ConsoleAutoRefCount`, `FTilePt`). A local that's 16-aligned when it looks like it shouldn't be means this.
@@ -180,7 +182,7 @@ For these, a byte match confirms the code and the address, but not the name: any
 
 Still unmatched among small named functions: about 50 with other shapes, and about 30 whose Wii symbol the generator doesn't parse (templates, class or enum parameters passed by value, overloads). Not tried: functions of 17 to 32 bytes, which are too varied for cheap patterns.
 
-Next for object behaviour, in order of what the port needs: primitives by use, `Animate`, `SetToNext`, `PlaySound`, `Dialog`, then finishing the three parked functions (see "operands" above). `TreeStack::ReconStream` (`0x1C30B0`) and `StackElem::ReconStream` are the save-game side and can wait. Reading these functions is worth doing before matching them: `bhav.md` got most of its content from the Wii code, and the port can use that without any byte match.
+Next for object behaviour, in order of what the port needs: `SAnimator2::TryAnimate`, `CheckObject`, a byte match of `SetToNext`, `PlaySound`, `Dialog`, then finishing the parked functions (see "operands" above). `TreeStack::ReconStream` (`0x1C30B0`) and `StackElem::ReconStream` are the save-game side and can wait. Reading these functions is worth doing before matching them: `bhav.md` got most of its content from the Wii code, and the port can use that without any byte match.
 
 Best next seam for count alone: names. 2,955 of 4,538 vtable slot targets are still unnamed, and every newly named one-instruction function can be generated immediately. Tried and rejected: pairing sibling vtables (same base class, same length) in address order. Against tables whose class is already known it was right 12 times in 16, which is too low to name anything from.
 
