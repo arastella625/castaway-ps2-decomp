@@ -133,6 +133,26 @@ const char *SimBodyPartUnused::GetTextureVariationName() const
     return "";
 }
 
+EString SimBodyPartUnused::GetModelName() const
+{
+    return EString("");
+}
+
+EString SimBodyPartUnused::GetTextureName(bool a) const
+{
+    return EString("");
+}
+
+EString SimBodyPartUnused::GetReflectionMaskName(bool a) const
+{
+    return EString("");
+}
+
+EString SimBodyPartUnused::GetIconTextureName() const
+{
+    return EString("");
+}
+
 u32 SimBodyPartUnused::GetModelID() const
 {
     return 0;

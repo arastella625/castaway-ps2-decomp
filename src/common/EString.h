@@ -10,6 +10,8 @@ public:
     // Declared because the game returns EString through a hidden pointer, which this
     // compiler only does for a class with a copy constructor. Not decompiled yet.
     EString(const EString &other);
+    // Wii: __ct__7EStringFPCc.
+    EString(const char *text);
     // The PS2 build inlines the destructor into a call to the function at 0x3DE4A8,
     // passing the string and its characters. The name Release is ours.
     ~EString() { Release(data); }

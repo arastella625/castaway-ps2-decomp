@@ -50,6 +50,16 @@ u8 SimBodyPartSleeves::CalculateModelIndexFromModelCodeIndexAndStyleIndex(u8 mod
     return field_0x24 + styleIndex;
 }
 
+u8 SimBodyPartSleeves::CalculateStyleIndexFromModelIndex(u8 modelIndex) const
+{
+    return (modelIndex - field_0x24) % GetNumPossibleStyles(0);
+}
+
+void SimBodyPartSleeves::SwitchToFirstAvailableDegradationStage()
+{
+    SwitchToMatchTorsoSettings();
+}
+
 s32 SimBodyPartSleeves::GetIsDamaged()
 {
     return 0;

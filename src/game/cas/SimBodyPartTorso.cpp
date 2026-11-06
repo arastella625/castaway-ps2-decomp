@@ -1,5 +1,8 @@
 #include "game/cas/SimBodyPartTorso.h"
 
+#include "game/cas/CasSimDescription.h"
+#include "game/cas/SimBodyPartSleeves.h"
+
 int SimBodyPartTorso::GetType() const
 {
     return 0x1e;
@@ -53,4 +56,27 @@ u8 SimBodyPartTorso::CalculateModelIndexFromModelCodeIndexAndStyleIndex(u8 model
 u8 SimBodyPartTorso::CalculateStyleIndexFromModelIndex(u8 modelIndex) const
 {
     return modelIndex;
+}
+
+void SimBodyPartTorso::UpdateRelatedData()
+{
+    if (description != 0) {
+        // 0x27 is the sleeves.
+        SimBodyPart *sleeves = description->GetBodyPart((Character::eBodyPart)0x27);
+        ((SimBodyPartSleeves *)sleeves)->SwitchToMatchTorsoSettings();
+    }
+}
+
+BitFlags<u32> SimBodyPartTorso::Degrade()
+{
+    BitFlags<u32> result = SimBodyPart::Degrade();
+    UpdateRelatedData();
+    return result;
+}
+
+BitFlags<u32> SimBodyPartTorso::Repair()
+{
+    BitFlags<u32> result = SimBodyPart::Repair();
+    UpdateRelatedData();
+    return result;
 }

@@ -26,6 +26,9 @@ public:
     virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvents &events);
     virtual BitFlags<u32> Degrade();
     virtual BitFlags<u32> Repair();
+
+    // Not virtual.
+    void SwitchToMatchTorsoSettings();
 };
 STATIC_ASSERT(SimBodyPartSleeves_size, sizeof(SimBodyPartSleeves) == 0x28);
 
