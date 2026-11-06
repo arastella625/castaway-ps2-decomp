@@ -167,10 +167,12 @@ public:
     virtual u8 GetClothingSetUIIndex() const;
     virtual u8 GetDegradationModelCodeIndex() const;
 
-    // Not virtual. The PS2 build inlines these three; the Wii build keeps them as functions.
+    // Not virtual. The PS2 build inlines these five; the Wii build keeps them as functions.
     u8 GetClothingSetIndex() { return clothingSetIndex; }
+    u8 &ModelCodeIndex() { return modelCodeIndex; }
     u8 &StyleIndex() { return styleIndex; }
     u8 &TextureIndex() { return textureIndex; }
+    u8 &DegradationState() { return degradationState; }
     Sim::BodyPartGeometryTSC6 *GetClothingSetData() const;
     BodyPartTypeInfo *GetBodyPartTypeInfo() const;
     const char *GetCharacterType() const;

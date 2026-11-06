@@ -1,5 +1,7 @@
 #include "game/cas/SimBodyPartSleeves.h"
 
+#include "game/cas/CasSimDescription.h"
+
 int SimBodyPartSleeves::GetType() const
 {
     return 0x27;
@@ -78,4 +80,39 @@ BitFlags<u32> SimBodyPartSleeves::Degrade()
 BitFlags<u32> SimBodyPartSleeves::Repair()
 {
     return BitFlags<u32>(0);
+}
+
+// Clothing set flag bit 6 marks a sleeveless torso. Sleeves otherwise copy the torso, and
+// their model index has to fall in the block of models that starts at field_0x24.
+void SimBodyPartSleeves::Validate()
+{
+    if (description != 0) {
+        SimBodyPart *torso = description->GetBodyPart((Character::eBodyPart)0x1e);
+        if (torso->flags.bits & 0x40) {
+            if (clothingSetIndex != GetNudeClothingSetIndex(GetCharacterFlag(0))) {
+                char buffer[512];
+                Sprintf(buffer, "Torso is marked as sleeveless, but sleeves are not set to Nude Clothing "
+                                "Index.  Changing Sleeves to Nude.");
+                AssertWithInfo(buffer);
+                SwitchToMatchTorsoSettings();
+            }
+        } else if (clothingSetIndex != torso->GetClothingSetIndex()
+                   || modelCodeIndex != torso->ModelCodeIndex() || styleIndex != torso->StyleIndex()
+                   || textureIndex != torso->TextureIndex()
+                   || degradationState != torso->DegradationState()) {
+            char buffer[512];
+            Sprintf(buffer, "Sleeve settings do not match torso's settings.  Changing Sleeves to match.");
+            AssertWithInfo(buffer);
+            SwitchToMatchTorsoSettings();
+        }
+        u8 count = GetNumPossibleStyles(0);
+        if (modelIndex < field_0x24 || modelIndex >= field_0x24 + count) {
+            char buffer[512];
+            Sprintf(buffer, "Sleeve Model Index %d is invalid.  Must be in the range [%d,%d].", modelIndex,
+                    field_0x24, field_0x24 + count - 1);
+            AssertWithInfo(buffer);
+            SwitchToMatchTorsoSettings();
+        }
+        IsValid(true, false);
+    }
 }

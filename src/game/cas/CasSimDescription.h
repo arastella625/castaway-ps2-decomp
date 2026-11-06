@@ -70,8 +70,8 @@ public:
     u16 firstName[32];                                // 0x000
     u16 lastName[32];                                 // 0x040
     u32 field_0x80;                                   // 0x080
-    u16 field_0x84;                                   // 0x084
-    u8 field_0x86;                                    // 0x086
+    s16 magic;                                        // 0x084  -275 (0xfeed), set by DoStream
+    s8 version;                                       // 0x086  stream version; 7 is current
     BitFlags<u32> flags;                              // 0x088
     CasSimTextureInfo *textureInfo;                   // 0x08c
     CasSimTypeInfo *typeInfo;                         // 0x090
@@ -93,7 +93,7 @@ public:
     virtual ~CasSimDescription();
     virtual Character::eSpecies GetSpecies() const;
     virtual int GetSimType() const;
-    virtual void DoStream(ReconBuffer *buffer, int version, bool a);
+    virtual void DoStream(ReconBuffer *buffer, int unused, bool a);
     virtual void DoStreamTSC5Pet(ReconBuffer *buffer, int version, bool a);
     virtual void Verify();
     virtual void Randomize(Character::eSpecies species, bool a, bool b);
@@ -164,6 +164,8 @@ public:
     bool GetFlag(int index) const { return flags[index]; }
     void SetFlag(int index, bool value) { flags.Set(index, value); }
     void CopyBodyPart(Character::eBodyPart part, const CasSimDescription &other);
+    void DoStreamTSC5(ReconBuffer *buffer);
+    void InitQuickdataPointers();
 
     // Builds "<info> <first name> <last name>" plus a line break for an assert. The release build throws
     // the text away, but the code that builds it is still inlined wherever a body part

@@ -1,6 +1,7 @@
 #include "game/cas/CasSimDescription.h"
 
 #include "common/EResourceManager.h"
+#include "common/ReconBuffer.h"
 #include "game/cas/CasUtils.h"
 
 Character::eSpecies CasSimDescription::GetSpecies() const
@@ -11,6 +12,44 @@ Character::eSpecies CasSimDescription::GetSpecies() const
 int CasSimDescription::GetSimType() const
 {
     return 0;
+}
+
+// Reads or writes a saved sim. Streams older than version 4 have a different layout and
+// go to DoStreamTSC5. The second parameter is not used; the version is the one in the stream.
+void CasSimDescription::DoStream(ReconBuffer *buffer, int unused, bool a)
+{
+    if (a)
+        buffer->Recon16(&magic, 1);
+    else
+        magic = -275;
+    buffer->Recon8(&version, 1);
+    if (version < 7) {
+        if (version < 4) {
+            DoStreamTSC5(buffer);
+            return;
+        }
+    }
+    buffer->Recon16((s16 *)firstName, 32);
+    buffer->Recon16((s16 *)lastName, 32);
+    buffer->Recon32((int *)&flags, 1);
+    if (buffer->IsReading())
+        InitQuickdataPointers();
+    if (version >= 5)
+        buffer->Recon32((int *)&field_0x80, 1);
+    for (int i = 0; i < Character::BODY_PART_COUNT; i++)
+        bodyParts[i]->DoStream(buffer, version);
+    buffer->ReconFloat(latticeMorphValues, 4);
+    buffer->ReconFloat(morphTargetValues, 4);
+    buffer->Recon8((s8 *)tattooIndices, 4);
+    buffer->Recon8((s8 *)personalityValues, 5);
+    buffer->Recon8((s8 *)&archetype, 1);
+    buffer->Recon8((s8 *)&bodyType, 1);
+    buffer->Recon8((s8 *)&skinColor, 1);
+    buffer->Recon8((s8 *)&skinTextureOffset, 1);
+    if (version >= 6)
+        buffer->Recon16((s16 *)&field_0xfe, 1);
+    if (buffer->IsReading())
+        version = 7;
 }
 
 void CasSimDescription::CopyBodyPart(Character::eBodyPart part, const CasSimDescription &other)
