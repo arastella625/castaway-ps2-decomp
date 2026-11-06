@@ -1,6 +1,6 @@
 # Project standards
 
-These rules keep the decompilation trustworthy and the repo safe to publish. Three scripts
+These rules keep the decompilation trustworthy and the repo safe to publish. Four scripts
 enforce the parts a machine can check:
 
 - `tools/verify.py` builds `src/` with the game's compiler and fails unless every function
@@ -9,6 +9,10 @@ enforce the parts a machine can check:
   is the game's. It catches what `verify.py` can't: a wrong address in `config/symbols.txt`,
   a function whose size or neighbours are wrong, or a string literal that differs from the
   game's.
+- `tools/verify_vtables.py` checks the virtual functions each class declares against the
+  game's vtable, slot by slot. A byte match proves a function's code, not its name; a
+  function sitting in the right slot of the right class's vtable is the evidence for the
+  name. Add a class to `config/vtables.txt` once its vtable address is known.
 - `tools/check_repo.py` fails when a commit holds game data, binaries or secrets. It runs
   as a pre-commit hook and in CI.
 
@@ -151,8 +155,9 @@ CASTAWAY_COMPILERS=/mnt/d/tools/castaway_work/compilers CASTAWAY_SLUS=/mnt/d/too
 
 ## Git
 
-- `main` always passes `tools/verify.py`, `rebuild/rebuild.py` and `tools/check_repo.py`.
-  CI can only run the last one, because it has no game file, so run the first two locally.
+- `main` always passes `tools/verify.py`, `tools/verify_vtables.py`, `rebuild/rebuild.py` and
+  `tools/check_repo.py`. CI can only run the last one, because it has no game file, so run
+  the others locally.
 - One topic per commit. The subject line says what changed, in the imperative.
 - A commit that adds matched functions says how many and in which class.
 - Commit or push only with the owner's go-ahead while the repo's publication status is open.

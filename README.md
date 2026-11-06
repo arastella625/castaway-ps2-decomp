@@ -22,6 +22,8 @@ A hobby reverse-engineering project for the US PS2 build, `SLUS_216.64`. The goa
 
 `tools/verify.py` builds `src/` with the game's compiler and compares each function with your copy of the game. It needs WSL with Wine, the compiler from decompme/compilers, and the game executable; [docs/STANDARDS.md](docs/STANDARDS.md) has the command.
 
+`tools/verify_vtables.py` checks names: each class's declared virtual functions must sit in the same vtable slots as in the game. It confirms 809 slots across the 16 Create-a-Sim classes.
+
 `rebuild/rebuild.py` goes further: it links the C++ into a complete executable and checks its SHA-1. [rebuild/README.md](rebuild/README.md) has the setup.
 
 ## Credits
