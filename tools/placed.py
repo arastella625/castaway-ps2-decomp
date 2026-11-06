@@ -1,0 +1,392 @@
+#!/usr/bin/env python3
+"""Read the objects placed on each lot, from DEFAULT.NGH on your own disc image.
+
+Usage:
+  python -I tools/placed.py check <game.iso>
+  python -I tools/placed.py list  <game.iso> <lot_01>
+  python -I tools/placed.py lot   <game.iso> <out.glb> <lot_01>
+
+check decodes every object of every house. list prints one lot's objects. lot writes the lot's
+terrain and every placed object that has a model to one .glb, which is game data: keep it out of
+the repo. docs/formats/world.md has the format.
+"""
+import collections
+import math
+import os
+import struct
+import sys
+from dataclasses import dataclass
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I leaves this out
+import arc  # noqa: E402
+import gamedata as gd  # noqa: E402
+import gltf  # noqa: E402
+import model as mdl  # noqa: E402
+
+# Bit widths ReconCmprInt picks between, from the Scheme objects built at startup.
+SCHEMES = {8: (2, 4, 6, 8), 16: (5, 8, 13, 16), 32: (6, 11, 21, 32)}
+MARK_BASE = 12  # marks count from just after the chunk's own 12-byte header
+COUNTED_ARRAYS = 3
+FIXED_SHORTS = 8
+VARIABLE_KEYS = 72
+DIRECTION_KEY = 1
+UNITS_PER_TILE = 16
+EIGHTH_TURN = math.pi / 4
+FIRST_LOT_OFFSET = 1  # section 0 is lot_01: HouseData's row 0 is a placeholder
+DEF_GUID = 0x1C
+RES_MODELS_FROM = 7  # the first word of ResData that may hold a resource hash
+MISSING_TEXTURE = 'missingshader'  # the purple 16x16 behind Maya's default materials
+
+
+class BitReader:
+    """ReconBuffer in read mode: most significant bit first, with marks at byte boundaries."""
+
+    def __init__(self, data, pos):
+        self.data = data
+        self.pos = pos
+        self.mask = 0
+        self.compressed = False
+
+    def bits(self, count):
+        value = 0
+        for _ in range(count):
+            if self.mask == 0:
+                if self.pos >= len(self.data):
+                    raise arc.FormatError('an object stream runs off its chunk')
+                self.mask = 0x80
+                self.pos += 1
+            value = value << 1 | (1 if self.data[self.pos - 1] & self.mask else 0)
+            self.mask >>= 1
+        return value
+
+    def compressed_int(self, width):
+        """ReconCmprInt: a bit for non-zero, two bits picking a width, then a signed value."""
+        if not self.bits(1):
+            return 0
+        size = SCHEMES[width][self.bits(2)]
+        value = self.bits(size)
+        return value - (1 << size) if value >> (size - 1) & 1 else value
+
+    def integer(self, width):
+        if self.compressed:
+            return self.compressed_int(width)
+        size = width // 8
+        if self.pos + size > len(self.data):
+            raise arc.FormatError('an object stream runs off its chunk')
+        self.mask = 0
+        raw = self.data[self.pos:self.pos + size]
+        self.pos += size
+        return int.from_bytes(raw, 'little', signed=True)
+
+    def mark(self):
+        """ReconMark: drop to a byte boundary and read where the next mark is."""
+        self.mask = 0
+        if self.pos + 4 > len(self.data):
+            raise arc.FormatError('an object stream has no mark')
+        value = struct.unpack_from('<I', self.data, self.pos)[0]
+        self.pos += 4
+        return value
+
+    def jump(self, pos):
+        self.pos = pos
+        self.mask = 0
+
+
+@dataclass
+class PlacedObject:
+    object_id: int
+    guid: int
+    name: str
+    box: tuple  # minimum x, minimum y, maximum x, maximum y, in sixteenths of a tile
+    centre: tuple
+    level: int
+    variables: dict
+
+    @property
+    def on_lot(self):
+        return self.box[0] >= 0  # controllers sit at -16, -16
+
+    @property
+    def metres(self):
+        return self.centre[0] / UNITS_PER_TILE, self.centre[1] / UNITS_PER_TILE
+
+    @property
+    def direction(self):
+        return self.variables.get(DIRECTION_KEY, 0)
+
+
+def read_variables(reader):
+    """EdithVariableSet::ReconStream: a 72-bit set of keys, then one value for each."""
+    words = [reader.integer(32) & 0xFFFFFFFF, reader.integer(32) & 0xFFFFFFFF,
+             reader.integer(8) & 0xFF]
+    keys = words[0] | words[1] << 32 | words[2] << 64
+    return {k: reader.integer(16) for k in range(VARIABLE_KEYS) if keys >> k & 1}
+
+
+def read_object(reader, object_id, kind):
+    """cXObject::ReconHeader and the start of ReconStream, as far as the variables."""
+    values = [reader.integer(32) for _ in range(6)]
+    level = reader.integer(32)
+    reader.integer(16)
+    reader.integer(32)
+    for _ in range(COUNTED_ARRAYS):
+        for _ in range(reader.integer(16)):
+            reader.integer(16)
+    for _ in range(FIXED_SHORTS):
+        reader.integer(16)
+    variables = read_variables(reader)
+    return PlacedObject(object_id, kind[0], kind[2], tuple(values[:4]), (values[5], values[4]),
+                        level, variables)
+
+
+def read_objm(data, types):
+    """ObjectModule::DoStream: a list of ids and types, then each object between two marks."""
+    if data[8:12] != b'MjbO':
+        raise arc.FormatError('ObjM: bad tag')
+    reader = BitReader(data, MARK_BASE)
+    reader.compressed = reader.integer(8) != 0
+    listed = []
+    object_id = reader.integer(16)
+    while object_id:
+        kind = reader.integer(16)
+        if not 0 < kind <= len(types):
+            raise arc.FormatError('ObjM: type %d is not in the list' % kind)
+        listed.append((object_id, types[kind - 1]))
+        object_id = reader.integer(16)
+    next_mark = reader.mark()
+    objects = []
+    for object_id, kind in listed:
+        end = next_mark + MARK_BASE
+        if not reader.pos < end <= len(data) - 4:
+            raise arc.FormatError('ObjM: a mark is out of order')
+        objects.append(read_object(reader, object_id, kind))
+        if reader.pos > end:
+            raise arc.FormatError('ObjM: an object runs past its mark')
+        reader.jump(end)
+        next_mark = reader.mark()
+    if next_mark != 0:
+        raise arc.FormatError('ObjM: the last mark is not zero')
+    return objects
+
+
+def house_streams(disc):
+    """Return (object types, ObjM chunk) for each house, in file order."""
+    entry = disc.find(gd.NGH_FILE)
+    sections = gd.read_ngh_sections(disc.read(entry.lba, 0, entry.size))
+    streams = []
+    for house in (s for s in sections if s.kind == gd.NGH_KIND_HOUSE):
+        chunks = {(kind, number): data for kind, number, data in gd.house_chunks(house)}
+        streams.append((gd.read_objt(chunks[('objt', 0)]), chunks[('ObjM', 1)]))
+    return streams
+
+
+def read_houses(disc):
+    """Return {lot name: placed objects}."""
+    return {'lot_%02d' % (index + FIRST_LOT_OFFSET): read_objm(data, types)
+            for index, (types, data) in enumerate(house_streams(disc))}
+
+
+def model_table(disc):
+    """Return {GUID: (resource file name, [resource names])}, through the three tables."""
+    quickdata = gd.load_quickdata(disc)
+    names = gd.resource_names(disc)
+    data, definitions = gd.find_table(quickdata, 'SimsObjects/ObjDefinition')
+    _, files = gd.find_table(quickdata, 'SimsObjects/ResFile')
+    _, resources = gd.find_table(quickdata, 'SimsObjects/ObjDefinition::ResData')
+    guids = {}
+    for index in range(definitions.count):
+        pos = definitions.rows + index * definitions.stride
+        guids[pos] = data.word(pos + DEF_GUID)
+    rows = {}
+    for index in range(resources.count):
+        pos = resources.rows + index * resources.stride
+        words = [data.word(pos + o) for o in range(RES_MODELS_FROM * 4, resources.stride, 4)]
+        rows[data.row_name(resources, index)] = [names[w] for w in words if w in names]
+    table = {}
+    for index in range(files.count):
+        pos = files.rows + index * files.stride
+        name = data.row_name(files, index)
+        start, count = data.vector(pos)
+        for item in range(count):
+            guid = guids.get(data.word(start + 4 * item))
+            if guid is not None:
+                table[guid] = (name, rows.get(name, []))
+    return table
+
+
+def object_model(placed, table, available):
+    entry = table.get(placed.guid)
+    if entry is None:
+        return None
+    return next((name for name in entry[1] if name in available), None)
+
+
+def lot_fit(objects, level):
+    """The share of a lot's objects on set cells of whichever of its grids suits them best."""
+    points = [o.metres for o in objects if o.on_lot]
+    grids = [g for g in level.grids if g.width]
+    if not points or not grids:
+        return 0.0
+    return max(sum(bool(g.get(math.floor(x), math.floor(y))) for x, y in points)
+               for g in grids) / len(points)
+
+
+def fit_at_offset(houses, levels, offset):
+    """Mean fit when house N is paired with lot N + offset. The wrong offsets are the control."""
+    fits = [lot_fit(objects, levels['lot_%02d' % (index + offset)])
+            for index, objects in enumerate(houses) if 'lot_%02d' % (index + offset) in levels]
+    return sum(fits) / len(fits)
+
+
+def check(disc):
+    streams = house_streams(disc)
+    houses = [read_objm(data, types) for types, data in streams]
+    table = model_table(disc)
+    models = {e.name for e in arc.read_toc(disc, arc.find_archive(disc, mdl.MODEL_ARCHIVE))}
+    totals = collections.Counter()
+    for objects in houses:
+        for placed in objects:
+            totals['objects'] += 1
+            totals['on a lot'] += placed.on_lot
+            totals['with a type in ResFile'] += placed.guid in table
+            totals['with a model'] += object_model(placed, table, models) is not None
+            totals['turned'] += placed.direction != 0
+    for key, value in sorted(totals.items()):
+        print('%-26s %6d' % (key, value))
+    passed = gd.report('houses end on a zero mark', len(houses), len(streams))
+
+    types, data = streams[0]
+    print('controls:')
+    passed &= gd.expect_failure('a stream one byte out of place',
+                                lambda: read_objm(data[:MARK_BASE] + data[MARK_BASE + 1:], types))
+    passed &= gd.expect_failure('a stream cut short', lambda: read_objm(data[:-8], types))
+    passed &= gd.expect_failure('an empty type list', lambda: read_objm(data, []))
+
+    archive = arc.find_archive(disc, 'LEVELS')
+    levels = {e.name: gd.read_level(disc.read(archive.lba, e.offset, e.size), e.name)
+              for e in arc.read_toc(disc, archive)}
+    print('house N against lot N + offset:')
+    scores = {offset: fit_at_offset(houses, levels, offset) for offset in (1, 0, 2, -1, 3, 7, 13)}
+    for offset, score in scores.items():
+        print('  offset %+3d: mean fit %.3f' % (offset, score))
+    best = max(scores, key=scores.get)
+    passed &= best == FIRST_LOT_OFFSET
+    print('failures: %d' % (not passed))
+    return 0 if passed else 1
+
+
+def list_lot(disc, lot):
+    objects = read_houses(disc).get(lot)
+    if objects is None:
+        raise arc.FormatError('no placed objects for %s' % lot)
+    table = model_table(disc)
+    models = {e.name for e in arc.read_toc(disc, arc.find_archive(disc, mdl.MODEL_ARCHIVE))}
+    for placed in objects:
+        x, y = placed.metres
+        print('%7.2f %7.2f turn %d  %-30s %s' % (x, y, placed.direction, placed.name[:30],
+                                                 object_model(placed, table, models) or '-'))
+    return 0
+
+
+def ground_heights(meshes):
+    """Return {(x, y): height} on a one-metre grid: the highest surface over each cell."""
+    cells = {}
+    for mesh in meshes:
+        for batch in mesh.batches:
+            points = [[c * mesh.scale for c in p] for p in batch.positions]
+            for a, b, c in (tuple(points[i] for i in t) for t in mdl.triangles(batch)):
+                add_triangle(cells, a, b, c)
+    return cells
+
+
+def add_triangle(cells, a, b, c):
+    area = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1])
+    if abs(area) < 1e-9:
+        return
+    for y in range(math.floor(min(a[1], b[1], c[1])), math.ceil(max(a[1], b[1], c[1])) + 1):
+        for x in range(math.floor(min(a[0], b[0], c[0])), math.ceil(max(a[0], b[0], c[0])) + 1):
+            px, py = x + 0.5, y + 0.5
+            u = ((b[1] - c[1]) * (px - c[0]) + (c[0] - b[0]) * (py - c[1])) / area
+            v = ((c[1] - a[1]) * (px - c[0]) + (a[0] - c[0]) * (py - c[1])) / area
+            if u >= 0 and v >= 0 and u + v <= 1:
+                z = u * a[2] + v * b[2] + (1 - u - v) * c[2]
+                cells[(x, y)] = max(z, cells.get((x, y), z))
+
+
+def textured(meshes, library):
+    """Leave out meshes on the purple placeholder. How the game draws them is open."""
+    def is_placeholder(mesh):
+        texture = library.texture_for(mesh.shader_hash)
+        return texture is not None and texture.name == MISSING_TEXTURE
+    return [mesh for mesh in meshes if not is_placeholder(mesh)]
+
+
+def add_mesh(builder, library, name, meshes, cache):
+    primitives = []
+    for mesh in textured(meshes, library):
+        material = gltf.add_material(builder, library, mesh.shader_hash, cache)
+        primitive = gltf.add_primitive(builder, mesh, material, False)
+        if primitive:
+            primitives.append(primitive)
+    builder.gltf['meshes'].append({'name': name, 'primitives': primitives})
+    return len(builder.gltf['meshes']) - 1
+
+
+def export_lot(disc, out_path, lot):
+    objects = read_houses(disc).get(lot)
+    if objects is None:
+        raise arc.FormatError('no placed objects for %s' % lot)
+    library = gltf.Library(disc)
+    table = model_table(disc)
+    available = {e.name: (e, raw) for e, raw in mdl.each_model(disc, library.shaders)}
+    terrain = mdl.parse_model(available[lot][1], library.shaders, lot)
+    heights = ground_heights(textured(terrain, library))
+    builder = gltf.GlbBuilder()
+    cache = {}
+    meshes = {}
+    ground = add_mesh(builder, library, lot, terrain, cache)
+    nodes = [builder.add_node({'name': lot, 'mesh': ground})]
+    placed_count = 0
+    for placed in objects:
+        name = object_model(placed, table, available) if placed.on_lot else None
+        if name is None:
+            continue
+        if name not in meshes:
+            parsed = mdl.parse_model(available[name][1], library.shaders, name)
+            meshes[name] = add_mesh(builder, library, name, parsed, cache) if parsed else None
+        if meshes[name] is None:
+            continue
+        x, y = placed.metres
+        z = heights.get((math.floor(x), math.floor(y)), 0.0)
+        half = placed.direction * EIGHTH_TURN / 2
+        nodes.append(builder.add_node({
+            'name': '%s %d' % (placed.name, placed.object_id), 'mesh': meshes[name],
+            'translation': list(gltf.to_y_up((x, y, z))),
+            'rotation': [0.0, math.sin(half), 0.0, math.cos(half)]}))
+        placed_count += 1
+    builder.gltf['scenes'][0]['nodes'] = nodes
+    with open(out_path, 'wb') as out:
+        out.write(builder.to_bytes())
+    print('wrote %s: %d of %d objects placed, %d models' % (out_path, placed_count, len(objects),
+                                                            len(meshes)))
+    return 0
+
+
+def main(argv):
+    if len(argv) == 3 and argv[1] == 'check':
+        return check(arc.Disc(argv[2]))
+    if len(argv) == 4 and argv[1] == 'list':
+        return list_lot(arc.Disc(argv[2]), argv[3])
+    if len(argv) == 5 and argv[1] == 'lot':
+        return export_lot(arc.Disc(argv[2]), argv[3], argv[4])
+    print(__doc__)
+    return 2
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main(sys.argv))
+    except (arc.FormatError, OSError) as error:
+        print('error: %s' % error, file=sys.stderr)
+        print('Check that the path points at an unmodified copy of the game.', file=sys.stderr)
+        sys.exit(1)
