@@ -168,8 +168,8 @@ public:
     virtual const char *GetBodyPartName(Character::eBodyPart part) const;
     virtual u8 GetNumBodyParts() const;
     virtual u8 GetBodyPartIndex(Character::eBodyPart part) const;
-    virtual void CreateWornClothingItemsInInventory(InventoryItems *items, s16 a, int b);
-    virtual void SetAllClothingItemsFromInventory(s16 a);
+    virtual void CreateWornClothingItemsInInventory(InventoryItems *items, s16 neighborID, int count);
+    virtual void SetAllClothingItemsFromInventory(s16 neighborID);
     virtual u8 GetClothingSetUIIndex(Character::eBodyPart part) const;
 
     // Not virtual. The PS2 build inlines GetFlag.

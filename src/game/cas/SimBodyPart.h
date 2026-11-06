@@ -11,6 +11,7 @@
 #include "common/types.h"
 
 class CasSimDescription;
+class ClothingItem;
 class ReconBuffer;
 class SimModelTSC6;
 
@@ -65,14 +66,6 @@ struct BodyPartTypeInfo {
 };
 STATIC_ASSERT(BodyPartTypeInfo_size, sizeof(BodyPartTypeInfo) == 0x18);
 
-struct BodyPartDamageState {
-    u32 field_0x0;         // 0x00
-    u32 field_0x4;         // 0x04
-    s32 currentHitPoints;  // 0x08
-    u32 field_0xc[4];      // 0x0c
-    s32 isDamaged;         // 0x1c
-};
-
 // The virtual functions are in vtable order, which the Wii and PS2 builds share.
 // Return types of functions that aren't decompiled yet are guesses.
 class SimBodyPart {
@@ -82,7 +75,7 @@ public:
     VECTOR<Sim::BodyPartGeometryTSC6> *geometryVector; // 0x08
     BodyPartTypeInfo *bodyPartTypeInfo;               // 0x0c
     Sim::BodyPartGeometryTSC6 *clothingSetData;       // 0x10  &(*geometryVector)[clothingSetIndex]
-    BodyPartDamageState *damageState;                 // 0x14
+    ClothingItem *clothingItem;                       // 0x14  the inventory item being worn, or null
     u8 clothingSetIndex;                              // 0x18
     u8 modelCodeIndex;                                // 0x19
     u8 modelIndex;                                    // 0x1a
@@ -169,6 +162,7 @@ public:
 
     // Not virtual. The PS2 build inlines these five; the Wii build keeps them as functions.
     u8 GetClothingSetIndex() { return clothingSetIndex; }
+    void SetClothingItem(ClothingItem *item) { clothingItem = item; }
     u8 &ModelCodeIndex() { return modelCodeIndex; }
     u8 &StyleIndex() { return styleIndex; }
     u8 &TextureIndex() { return textureIndex; }

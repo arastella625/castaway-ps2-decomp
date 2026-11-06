@@ -4,6 +4,10 @@
 #include "common/ReconBuffer.h"
 #include "game/cas/CasUtils.h"
 #include "game/cas/LatticeParam.h"
+#include "game/simulator/core/ClothingItem.h"
+#include "game/simulator/core/Family.h"
+#include "game/simulator/core/InventoryItems.h"
+#include "game/simulator/core/Neighborhood.h"
 
 Character::eSpecies CasSimDescription::GetSpecies() const
 {
@@ -493,4 +497,57 @@ u8 CasSimDescription::GetClothingSetUIIndex(Character::eBodyPart part) const
     if (index == 0x7f)
         return 0;
     return bodyParts[index]->GetClothingSetUIIndex();
+}
+
+// Makes an inventory item for each piece of clothing the sim wears, worn down by `count`
+// steps first. ClothingItem derives from InventoryItem, which isn't declared yet, hence
+// the cast.
+void CasSimDescription::CreateWornClothingItemsInInventory(InventoryItems *items, s16 neighborID, int count)
+{
+    if (items != 0) {
+        bool male = GetFlag(0);
+        for (u8 part = 0x1d; part <= 0x26; part++) {
+            SimBodyPart *bodyPart = bodyParts[GetBodyPartIndex((Character::eBodyPart)part)];
+            if (bodyPart->GetClothingSetIndex() != bodyPart->GetNudeClothingSetIndex(male)) {
+                s16 id = ClothingItem::FindClothingItemID(
+                    CasUtils::GetBodyPartName((Character::eBodyPart)part), bodyPart->GetClothingSetData()->name);
+                if (id > 0) {
+                    for (int i = 0; i < count; i++)
+                        bodyPart->Degrade();
+                    ClothingItem *item = new ClothingItem(id, male);
+                    items->AddItem((InventoryItem *)item);
+                    bodyPart->SetClothingItem(item);
+                    item->SetNeighborID(neighborID);
+                    item->CopyFromSimBodyPart(bodyPart);
+                }
+            }
+        }
+    }
+}
+
+// Ties each piece of clothing the sim wears to the matching item in the family's
+// inventory, so that damage to one shows on the other.
+void CasSimDescription::SetAllClothingItemsFromInventory(s16 neighborID)
+{
+    Neighbor *neighbor = GetNeighborhood()->FindNeighborByID(neighborID);
+    if (neighbor != 0) {
+        Family *family = neighbor->GetFamily();
+        if (family != 0) {
+            InventoryItems *items = family->GetInventory();
+            if (items != 0) {
+                bool male = GetFlag(0);
+                for (u8 part = 0x1d; part <= 0x26; part++) {
+                    SimBodyPart *bodyPart = bodyParts[GetBodyPartIndex((Character::eBodyPart)part)];
+                    if (bodyPart->GetClothingSetIndex() != bodyPart->GetNudeClothingSetIndex(male)) {
+                        ClothingItem *item = items->GetClothingItem(neighborID, (Character::eBodyPart)part);
+                        if (item != 0 && item->IsMale() == male && part == (u8)item->GetBodyPart()
+                            && item->GetClothingSetIndex() == bodyPart->GetClothingSetIndex()) {
+                            item->CopyFromSimBodyPart(bodyPart);
+                            bodyPart->SetClothingItem(item);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

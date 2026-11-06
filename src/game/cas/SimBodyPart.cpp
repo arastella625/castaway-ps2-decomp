@@ -4,6 +4,7 @@
 #include "common/ReconBuffer.h"
 #include "game/cas/CasSimDescription.h"
 #include "game/cas/CasUtils.h"
+#include "game/simulator/core/ClothingItem.h"
 
 void SimBodyPart::DoStream(ReconBuffer *buffer, int version)
 {
@@ -29,7 +30,7 @@ void SimBodyPart::CopyFrom(const SimBodyPart *other)
     styleIndex = other->styleIndex;
     textureIndex = other->textureIndex;
     degradationState = other->degradationState;
-    damageState = other->damageState;
+    clothingItem = other->clothingItem;
     UpdateRelatedData();
 }
 
@@ -423,28 +424,28 @@ s32 SimBodyPart::GetHitPointsPerDegradationState()
 
 s32 SimBodyPart::GetIsDamaged()
 {
-    if (damageState != 0)
-        return damageState->isDamaged;
+    if (clothingItem != 0)
+        return clothingItem->isDamaged;
     return 0;
 }
 
 void SimBodyPart::SetIsDamaged(bool damaged)
 {
-    if (damageState != 0)
-        damageState->isDamaged = damaged;
+    if (clothingItem != 0)
+        clothingItem->isDamaged = damaged;
 }
 
 s32 SimBodyPart::GetCurrentHitPoints()
 {
-    if (damageState != 0)
-        return damageState->currentHitPoints;
+    if (clothingItem != 0)
+        return clothingItem->currentHitPoints;
     return 0;
 }
 
 void SimBodyPart::SetCurrentHitPoints(int hitPoints)
 {
-    if (damageState != 0)
-        damageState->currentHitPoints = hitPoints;
+    if (clothingItem != 0)
+        clothingItem->currentHitPoints = hitPoints;
 }
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))

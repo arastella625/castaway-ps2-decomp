@@ -57,6 +57,7 @@ class CasUtils {
 public:
     static Character::eBodyPart GetS2CEquivalentBodyPart(Character::eBodyPart part);
     static u8 GetClothingSetIndexByName(bool a, Character::eBodyPart part, const char *name);
+    static const char *GetBodyPartName(Character::eBodyPart part);
 
     // Inlined on PS2. The quickdata is loaded on first use (0x2A2AF469 is its resource id).
     static ERQuickdata *GetQuickdata()

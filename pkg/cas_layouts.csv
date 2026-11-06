@@ -5,7 +5,7 @@ SimBodyPart,0x4,uint,flags,BitFlags; SetClothingSetIndex copies the clothing set
 SimBodyPart,0x8,ptr,geometryVector,Wii IsGeneric passes this to VECTOR<Sim::BodyPartGeometryTSC6>::size
 SimBodyPart,0xc,ptr,bodyPartTypeInfo,Direct getter GetBodyPartTypeInfo
 SimBodyPart,0x10,ptr,clothingSetData,Direct getter GetClothingSetData
-SimBodyPart,0x14,ptr,damageState,Null-checked by GetIsDamaged and GetCurrentHitPoints; +0x8 hit points and +0x1c damaged flag
+SimBodyPart,0x14,ptr,clothingItem,The ClothingItem being worn or null (SetClothingItem); GetIsDamaged reads its +0x1c and GetCurrentHitPoints its +0x8
 SimBodyPart,0x18,byte,clothingSetIndex,SetClothingSetIndex and IsValidClothingSetIndex
 SimBodyPart,0x19,byte,modelCodeIndex,IsValidModelCodeIndex
 SimBodyPart,0x1a,byte,modelIndex,IsValidModelIndex

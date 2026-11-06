@@ -32,7 +32,7 @@ void SimBodyPartFacialFeature::CopyFrom(const SimBodyPart *other)
     styleIndex = other->styleIndex;
     textureIndex = other->textureIndex;
     degradationState = other->degradationState;
-    damageState = other->damageState;
+    clothingItem = other->clothingItem;
     if (other->GetType() == 0x1b) {
         const SimBodyPartFacialFeature *source = (const SimBodyPartFacialFeature *)other;
         currentHitPoints = source->currentHitPoints;

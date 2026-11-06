@@ -32,7 +32,7 @@ void SimBodyPartHair::CopyFrom(const SimBodyPart *other)
     styleIndex = other->styleIndex;
     textureIndex = other->textureIndex;
     degradationState = other->degradationState;
-    damageState = other->damageState;
+    clothingItem = other->clothingItem;
     // BUG: 0x1b is the facial feature's type; the hair's own is 0x1c. So hit points are
     // copied from a facial feature and never from another hair.
     if (other->GetType() == 0x1b) {
