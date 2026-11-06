@@ -18,7 +18,12 @@ class SimModelTSC6;
 
 namespace Weather {
 enum eDamageType { DAMAGE_TYPE_COUNT = 3 };
-struct DamageEvents;
+// Wii: Weather::DamageEvent. One amount per damage type for the clothes, and one for the
+// skin. Nothing else is known.
+struct DamageEvent {
+    s16 amounts[DAMAGE_TYPE_COUNT]; // 0x00
+    s16 skinAmount;                 // 0x06
+};
 }
 
 namespace Sim {
@@ -149,7 +154,7 @@ public:
     virtual void SetIsDamaged(bool damaged);
     virtual s32 GetCurrentHitPoints();
     virtual void SetCurrentHitPoints(int hitPoints);
-    virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvents &events);
+    virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvent &event, s16 scale);
     virtual BitFlags<u32> Degrade();
     virtual BitFlags<u32> Repair();
     virtual void CreateIcon(SimModelTSC6 *model, EVec3 *cameraPos, EVec3 *cameraTarget, f32 a, u32 b,

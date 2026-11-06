@@ -23,7 +23,7 @@ public:
     virtual u8 CalculateStyleIndexFromModelIndex(u8 modelIndex) const;
     virtual void SwitchToFirstAvailableDegradationStage();
     virtual s32 GetIsDamaged();
-    virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvents &events);
+    virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvent &event, s16 a);
     virtual BitFlags<u32> Degrade();
     virtual BitFlags<u32> Repair();
 

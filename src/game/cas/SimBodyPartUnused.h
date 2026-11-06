@@ -59,7 +59,7 @@ public:
     virtual s32 GetHitPointsPerDegradationState();
     virtual s32 GetIsDamaged();
     virtual s32 GetCurrentHitPoints();
-    virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvents &events);
+    virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvent &event, s16 a);
     virtual BitFlags<u32> Degrade();
     virtual BitFlags<u32> Repair();
     virtual u8 GetClothingSetUIIndex() const;

@@ -67,7 +67,7 @@ CasSimDescription,0xf9,byte,archetype,GetArchetype
 CasSimDescription,0xfa,byte,bodyType,GetBodyType
 CasSimDescription,0xfb,byte,skinColor,GetSkinColor
 CasSimDescription,0xfc,byte,skinTextureOffset,Added to the skin texture index in GetSkinTextureID (matched)
-CasSimDescription,0xfe,ushort,field_0xfe,Unknown
+CasSimDescription,0xfe,short,skinHitPoints,ApplyDamage takes skin damage off this; DegradeSkin refills it
 CasSimDescription,0x100,SimBodyPartHead,head,Wii constructor
 CasSimDescription,0x124,SimBodyPartFacialFeature,facialFeature,Wii constructor
 CasSimDescription,0x150,SimBodyPartHair,hair,Wii constructor

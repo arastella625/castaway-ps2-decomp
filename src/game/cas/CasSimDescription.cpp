@@ -45,7 +45,7 @@ void CasSimDescription::ClearSim(bool a, bool b, bool c)
         BodyType() = 0;
         SkinColor() = 0;
         skinTextureOffset = 0;
-        field_0xfe = typeInfo->field_0x2c;
+        skinHitPoints = typeInfo->skinHitPointsPerState;
         int column = a == false;
         for (int i = 0; i < Sim::TATTOO_LOCATION_COUNT; i++)
             tattooIndices[i] = gDefaultTattooIndices[i][column];
@@ -97,7 +97,7 @@ void CasSimDescription::DoStream(ReconBuffer *buffer, int unused, bool a)
     buffer->Recon8((s8 *)&skinColor, 1);
     buffer->Recon8((s8 *)&skinTextureOffset, 1);
     if (version >= 6)
-        buffer->Recon16((s16 *)&field_0xfe, 1);
+        buffer->Recon16(&skinHitPoints, 1);
     if (buffer->IsReading())
         version = 7;
 }
@@ -550,4 +550,64 @@ void CasSimDescription::SetAllClothingItemsFromInventory(s16 neighborID)
             }
         }
     }
+}
+
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+
+// Damages every body part, then the skin. The clothes from part 0x1d on shield the skin:
+// when the hit points they have left add up to more than the type's threshold, twice the
+// scale comes off the skin's share.
+BitFlags<u32> CasSimDescription::ApplyDamage(s16 neighborID, const Weather::DamageEvent &event, s16 scale)
+{
+    BitFlags<u32> result(0);
+    Neighbor *neighbor = GetNeighborhood()->FindNeighborByID(neighborID);
+    if (neighbor == 0)
+        return result;
+    Family *family = neighbor->GetFamily();
+    if (family == 0)
+        return result;
+    if (family->GetInventory() == 0)
+        return result;
+    u32 clothingHitPoints = 0;
+    for (u8 part = 0x1a; part <= 0x26; part++) {
+        u8 index = GetBodyPartIndex((Character::eBodyPart)part);
+        if (part >= 0x1d && event.skinAmount > 0) {
+            u8 states = bodyParts[index]->GetNumPossibleDegradationStates();
+            int statesLeft = bodyParts[index]->GetNumValidStyles(bodyParts[index]->ModelCodeIndex()) * states
+                             - (bodyParts[index]->StyleIndex() * states + bodyParts[index]->DegradationState())
+                             - 1;
+            statesLeft = MAX(0, statesLeft);
+            int perState = bodyParts[index]->GetHitPointsPerDegradationState();
+            clothingHitPoints += perState * statesLeft + bodyParts[index]->GetCurrentHitPoints();
+        }
+        result.setMask(bodyParts[index]->ApplyDamage(event, scale));
+    }
+    if (event.skinAmount > 0) {
+        s16 shield = 0;
+        if (clothingHitPoints > typeInfo->field_0x30)
+            shield = scale * 2;
+        s16 damage = MAX(0, event.skinAmount - shield);
+        while (damage > 0) {
+            if (skinHitPoints - damage <= 0) {
+                damage -= skinHitPoints;
+                s16 perState = typeInfo->skinHitPointsPerState;
+                BitFlags<u32> degraded = DegradeSkin();
+                if (degraded[1]) {
+                    result.setFlag(1, true);
+                    if (perState - damage > 0) {
+                        skinHitPoints = perState - damage;
+                        damage = 0;
+                    } else {
+                        damage -= perState;
+                    }
+                } else {
+                    damage = 0;
+                }
+            } else {
+                skinHitPoints = MAX(0, skinHitPoints - damage);
+                damage = 0;
+            }
+        }
+    }
+    return result;
 }

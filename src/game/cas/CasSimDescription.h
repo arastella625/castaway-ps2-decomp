@@ -63,8 +63,8 @@ struct CasSimTypeInfo {
     VECTOR<BodyPartTypeInfo> bodyPartTypes; // 0x00  one per body part index
     const char **typeCodes;                 // 0x04  [0] when flag 0 is set, else [1]
     u8 field_0x8[0x24];                     // 0x08
-    u16 field_0x2c;                         // 0x2c  copied to CasSimDescription 0xfe by ClearSim
-    u8 field_0x2e[6];                       // 0x2e
+    s16 skinHitPointsPerState;              // 0x2c  what the skin starts with after each degrade
+    f32 field_0x30;                         // 0x30  clothing hit points above this shield the skin
     u8 skinTexturesPerLocation;             // 0x34  multiplies the parts-map location in GetSkinTextureID
 };
 
@@ -96,7 +96,7 @@ public:
     u8 bodyType;                                      // 0x0fa
     u8 skinColor;                                     // 0x0fb
     u8 skinTextureOffset;                             // 0x0fc  added to the index in GetSkinTextureID
-    u16 field_0xfe;                                   // 0x0fe
+    s16 skinHitPoints;                                // 0x0fe
     // The 15 SimBodyPart subclass objects, head first. pkg/cas_layouts.csv lists them;
     // they become real members once the subclasses are declared.
     u8 bodyPartStorage[0x230];                        // 0x100
@@ -164,7 +164,7 @@ public:
     virtual bool ChangeEventTypeHasMoreThanOneOption(CasEventChangeCharacter::CharacterPart part);
     virtual bool UseDyesForTextureVariation(Character::eBodyPart part);
     virtual bool ChangeToCostume(const char *name);
-    virtual void ApplyDamage(s16 a, const Weather::DamageEvents &events);
+    virtual BitFlags<u32> ApplyDamage(s16 neighborID, const Weather::DamageEvent &event, s16 scale);
     virtual const char *GetBodyPartName(Character::eBodyPart part) const;
     virtual u8 GetNumBodyParts() const;
     virtual u8 GetBodyPartIndex(Character::eBodyPart part) const;
@@ -174,8 +174,19 @@ public:
 
     // Not virtual. The PS2 build inlines GetFlag.
     bool GetFlag(int index) const { return flags[index]; }
-    void SetFlag(int index, bool value) { flags.Set(index, value); }
+    void SetFlag(int index, bool value) { flags.setFlag(index, value); }
     void CopyBodyPart(Character::eBodyPart part, const CasSimDescription &other);
+    // Moves the skin to its next, more worn texture, if there is one, and reports that with
+    // bit 1. The PS2 build inlines this; the Wii build keeps it as a function.
+    BitFlags<u32> DegradeSkin()
+    {
+        BitFlags<u32> result(0);
+        if (skinTextureOffset + 1 < typeInfo->skinTexturesPerLocation) {
+            skinTextureOffset++;
+            result.setFlag(1, true);
+        }
+        return result;
+    }
     void DoStreamTSC5(ReconBuffer *buffer);
     void FillInTextureBlendInfo(Character::eBodyPart part, bool a, TextureBlendInfo *info) const;
     void InitQuickdataPointers();
@@ -220,7 +231,7 @@ inline void SimBodyPart::SetCharacterFlag(int index, bool value)
     if (description != 0)
         description->SetFlag(index, value);
     else
-        characterFlags.Set(index, value);
+        characterFlags.setFlag(index, value);
 }
 
 #endif

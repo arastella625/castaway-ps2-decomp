@@ -57,7 +57,7 @@ def build_probe(tool_dir, name, header):
         r = lambda p: p.relative_to(verify.ROOT).as_posix()
         verify.run_tool(tool_dir, 'cpp.exe', verify.CPPFLAGS + [r(src), r(ii)])
         verify.run_tool(tool_dir, 'cc1plus.exe', verify.CFLAGS + [r(ii), '-o', r(asm)])
-        verify.run_tool(tool_dir, 'as.exe', verify.ASFLAGS + ['-o', r(obj), r(asm)])
+        verify.run_tool(tool_dir, verify.ASSEMBLER, verify.ASFLAGS + ['-o', r(obj), r(asm)])
         stamp.write_text(key)
     return obj
 

@@ -448,6 +448,51 @@ void SimBodyPart::SetCurrentHitPoints(int hitPoints)
         clothingItem->currentHitPoints = hitPoints;
 }
 
+// Takes what the armor doesn't stop off the hit points. Each time they run out the part
+// degrades one state and starts again with a full set, until the damage is used up.
+// The result has the bits of every Degrade call.
+BitFlags<u32> SimBodyPart::ApplyDamage(const Weather::DamageEvent &event, s16 scale)
+{
+    BitFlags<u32> result(0);
+    if (!(bodyPartTypeInfo->field_0xc & 2))
+        return result;
+    int max = scale * 255;
+    s16 damage = 0;
+    for (int type = 0; type < Weather::DAMAGE_TYPE_COUNT; type++) {
+        s16 armor = GetArmorValue((Weather::eDamageType)type) * scale;
+        if (armor < max) {
+            s16 excess = event.amounts[type] - armor;
+            if (excess > 0)
+                damage += excess;
+        }
+    }
+    while (damage > 0) {
+        SetIsDamaged(true);
+        if (GetCurrentHitPoints() - damage <= 0) {
+            damage -= GetCurrentHitPoints();
+            s16 perState = GetHitPointsPerDegradationState();
+            BitFlags<u32> degraded = Degrade();
+            if (degraded != 0) {
+                result.setMask(degraded);
+                if (clothingItem != 0)
+                    clothingItem->CopyFromSimBodyPart(this);
+                if (perState - damage > 0) {
+                    SetCurrentHitPoints(perState - damage);
+                    damage = 0;
+                } else {
+                    SetCurrentHitPoints(perState);
+                }
+            } else {
+                damage = 0;
+            }
+        } else {
+            SetCurrentHitPoints(GetCurrentHitPoints() - damage);
+            damage = 0;
+        }
+    }
+    return result;
+}
+
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 // Picks the first model the clothing set has, then pulls the texture and the degradation

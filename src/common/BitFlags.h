@@ -15,8 +15,11 @@ struct BitFlags {
     BitFlags(const BitFlags &other) : bits(other.bits) {}
     // Wii: __vc__12BitFlags<Ui>CFi. Defined in BitFlags.cpp; the game keeps one copy per T.
     bool operator[](int index) const;
-    // Inlined everywhere in the game. The name is ours.
-    void Set(int index, bool value)
+    // Wii: __opUi__12BitFlags<Ui>CFv and setMask__12BitFlags<Ui>FUi.
+    operator T() const { return bits; }
+    void setMask(T mask) { bits |= mask; }
+    // Wii: setFlag__12BitFlags<Ui>Fib. Inlined everywhere in the PS2 game.
+    void setFlag(int index, bool value)
     {
         if (value)
             bits |= 1 << index;

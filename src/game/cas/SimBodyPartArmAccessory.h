@@ -18,7 +18,7 @@ public:
     virtual u8 CalculateModelIndexFromModelCodeIndexAndStyleIndex(u8 modelCodeIndex, u8 styleIndex) const;
     virtual u8 CalculateStyleIndexFromModelIndex(u8 modelIndex) const;
     virtual s32 GetIsDamaged();
-    virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvents &events);
+    virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvent &event, s16 a);
 };
 STATIC_ASSERT(SimBodyPartArmAccessory_size, sizeof(SimBodyPartArmAccessory) == 0x24);
 

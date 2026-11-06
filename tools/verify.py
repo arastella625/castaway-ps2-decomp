@@ -34,7 +34,11 @@ CPPFLAGS = ['-lang-c++', '-nostdinc', '-Isrc']
 # -fno-exceptions: the game has no cleanup code around calls made while a temporary is alive
 # (SimBodyPart::GetIconTextureID), which the compiler adds when exceptions are on.
 CFLAGS = ['-quiet', '-O2', '-G0', '-fno-rtti', '-fno-exceptions']
-ASFLAGS = ['-EL', '-mips3', '-mcpu=r5900', '-G0']
+# SN's own assembler, not the GNU as that ships beside it. The two differ where the game's
+# code shows it: SN's puts a nop after mtc1, GNU's never does (CasSimDescription::ApplyDamage).
+# It takes few options: -EL, -mips3 and -mcpu make this build crash while reporting them.
+ASSEMBLER = 'Ps2EeAs.exe'
+ASFLAGS = ['-G0']
 TOOL_TIMEOUT = 120  # seconds; a hung Wine process must not hang the build
 JOBS = min(8, os.cpu_count() or 1)  # source files compiled at once
 INCLUDE = re.compile(r'^\s*#\s*include\s+"([^"]+)"', re.M)
@@ -192,7 +196,7 @@ def build(tool_dir, source, defines):
     r = lambda p: p.relative_to(ROOT).as_posix()
     run_tool(tool_dir, 'cpp.exe', CPPFLAGS + ['-D' + d for d in defines] + [rel.as_posix(), r(ii)])
     run_tool(tool_dir, 'cc1plus.exe', CFLAGS + [r(ii), '-o', r(asm)])
-    run_tool(tool_dir, 'as.exe', ASFLAGS + ['-o', r(obj), r(asm)])
+    run_tool(tool_dir, ASSEMBLER, ASFLAGS + ['-o', r(obj), r(asm)])
     stamp.write_text(key)
     return obj
 

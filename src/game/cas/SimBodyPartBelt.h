@@ -16,7 +16,7 @@ public:
     virtual int GetImageModelSetType() const;
     virtual u32 GetModelID() const;
     virtual s32 GetIsDamaged();
-    virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvents &events);
+    virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvent &event, s16 a);
 };
 STATIC_ASSERT(SimBodyPartBelt_size, sizeof(SimBodyPartBelt) == 0x24);
 
