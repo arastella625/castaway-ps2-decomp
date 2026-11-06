@@ -15,6 +15,16 @@ void SimBodyPart::CopyFrom(const SimBodyPart *other)
     UpdateRelatedData();
 }
 
+bool SimBodyPart::IsValid(bool a, bool b)
+{
+    bool valid = false;
+    if (geometryVector != 0 && bodyPartTypeInfo != 0 && IsValidClothingSetIndex(a, b)
+        && IsValidModelIndex(a, b) && IsValidModelCodeIndex(a, b) && IsValidStyleIndex(a, b)
+        && IsValidTextureIndex(a, b) && IsValidDegradationState(a, b))
+        valid = true;
+    return valid;
+}
+
 void SimBodyPart::Validate()
 {
     IsValid(true, false);
@@ -76,6 +86,20 @@ u8 SimBodyPart::GetNumPossibleStyles(u8 modelCodeIndex) const
     return bodyPartTypeInfo->modelCodes[modelCodeIndex].styles.size();
 }
 
+u8 SimBodyPart::GetNumValidStyles(u8 modelCodeIndex) const
+{
+    u8 count = GetNumPossibleStyles(modelCodeIndex);
+    int total = count;
+    for (int i = 0; i < total; i++) {
+        u8 model = CalculateModelIndexFromModelCodeIndexAndStyleIndex(modelCodeIndex, i);
+        if (clothingSetData == 0)
+            count--;
+        else if (model >= clothingSetData->field_0x4.size() || clothingSetData->field_0x4[model] == 0)
+            count--;
+    }
+    return count;
+}
+
 u8 SimBodyPart::GetNumPossibleModels() const
 {
     return GetNumPossibleModelCodes() * GetNumPossibleStyles(0);
@@ -109,6 +133,15 @@ const char *SimBodyPart::GetModelCode() const
 {
     if (modelCodeIndex < bodyPartTypeInfo->modelCodes.size())
         return bodyPartTypeInfo->modelCodes[modelCodeIndex].code;
+    return "";
+}
+
+const char *SimBodyPart::GetStyleCode() const
+{
+    if (modelCodeIndex < bodyPartTypeInfo->modelCodes.size()) {
+        if (styleIndex < bodyPartTypeInfo->modelCodes[modelCodeIndex].styles.size())
+            return bodyPartTypeInfo->modelCodes[modelCodeIndex].styles[styleIndex].code;
+    }
     return "";
 }
 

@@ -10,7 +10,6 @@ public:
     s32 currentHitPoints; // 0x24
     s32 isDamaged;        // 0x28
 
-    virtual ~SimBodyPartHair();
     virtual void DoStream(ReconBuffer *buffer, int version);
     virtual void CopyFrom(const SimBodyPart *other);
     virtual void Validate();

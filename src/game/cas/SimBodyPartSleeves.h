@@ -9,7 +9,6 @@ class SimBodyPartSleeves : public SimBodyPart {
 public:
     u8 field_0x24; // 0x24
 
-    virtual ~SimBodyPartSleeves();
     virtual void Validate();
     virtual int GetType() const;
     virtual int GetBodyPartIndex() const;

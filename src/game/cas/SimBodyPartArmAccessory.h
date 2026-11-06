@@ -7,7 +7,6 @@
 // The ones not defined in the .cpp are not decompiled yet.
 class SimBodyPartArmAccessory : public SimBodyPart {
 public:
-    virtual ~SimBodyPartArmAccessory();
     virtual int GetType() const;
     virtual int GetBodyPartIndex() const;
     virtual int GetBodyPartDBIndex() const;

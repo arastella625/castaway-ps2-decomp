@@ -56,7 +56,7 @@ CasSimDescription,0x80,uint,field_0x80,Unknown
 CasSimDescription,0x84,ushort,field_0x84,Unknown
 CasSimDescription,0x86,byte,field_0x86,Unknown
 CasSimDescription,0x88,uint,flags,Wii constructor builds a BitFlags<uint> here
-CasSimDescription,0x8c,uint,field_0x8c,Unknown
+CasSimDescription,0x8c,ptr,textureInfo,Tattoo texture lists at +0x34 (one per location) and skin list at +0x44; GetTattooTextureID and GetSkinTextureID (matched)
 CasSimDescription,0x90,ptr,typeInfo,GetBodyPartName indexes a table at +0x0; GetTypeCode reads through +0x4
 CasSimDescription,0x94,SimBodyPart*[15],bodyParts,GetBodyPartByIndex; GetNumBodyParts returns 15
 CasSimDescription,0xd0,float[4],latticeMorphValues,GetLatticeMorphValue
@@ -66,7 +66,7 @@ CasSimDescription,0xf4,byte[5],personalityValues,GetPersonalityValue and GetPers
 CasSimDescription,0xf9,byte,archetype,GetArchetype
 CasSimDescription,0xfa,byte,bodyType,GetBodyType
 CasSimDescription,0xfb,byte,skinColor,GetSkinColor
-CasSimDescription,0xfc,byte,field_0xfc,Unknown
+CasSimDescription,0xfc,byte,skinTextureOffset,Added to the skin texture index in GetSkinTextureID (matched)
 CasSimDescription,0xfe,ushort,field_0xfe,Unknown
 CasSimDescription,0x100,SimBodyPartHead,head,Wii constructor
 CasSimDescription,0x124,SimBodyPartFacialFeature,facialFeature,Wii constructor

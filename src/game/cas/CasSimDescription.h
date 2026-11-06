@@ -28,10 +28,39 @@ public:
     enum CharacterPart { CHARACTER_PART_0 };
 };
 
+namespace Sim {
+
+// Wii names, from the VECTOR instantiations CasSimDescription's texture functions use.
+struct BodyPartTextureTSC6 {
+    u32 field_0x0; // 0x00
+    u32 textureID; // 0x04
+    u32 field_0x8; // 0x08
+    u32 field_0xc; // 0x0c
+};
+STATIC_ASSERT(BodyPartTextureTSC6_size, sizeof(BodyPartTextureTSC6) == 0x10);
+
+struct BodyPartSkinTSC6 {
+    u32 field_0x0;          // 0x00
+    VECTOR<u32> textureIDs; // 0x04
+    u32 field_0x8;          // 0x08
+};
+STATIC_ASSERT(BodyPartSkinTSC6_size, sizeof(BodyPartSkinTSC6) == 0xc);
+
+}  // namespace Sim
+
 // No known Wii name; this name is ours.
 struct CasSimTypeInfo {
     VECTOR<BodyPartTypeInfo> bodyPartTypes; // 0x00  one per body part index
     u32 *typeCodes;                         // 0x04  [0] when flag 0 is set, else [1]
+    u8 field_0x8[0x2c];                     // 0x08
+    u8 skinTexturesPerLocation;             // 0x34  multiplies the parts-map location in GetSkinTextureID
+};
+
+// No known Wii name; this name is ours.
+struct CasSimTextureInfo {
+    u8 field_0x0[0x34];                                                         // 0x00
+    VECTOR<Sim::BodyPartTextureTSC6> tattooTextures[Sim::TATTOO_LOCATION_COUNT]; // 0x34
+    VECTOR<Sim::BodyPartSkinTSC6> skins;                                        // 0x44  one per skin colour
 };
 
 // The virtual functions are in vtable order, which the Wii and PS2 builds share.
@@ -44,7 +73,7 @@ public:
     u16 field_0x84;                                   // 0x084
     u8 field_0x86;                                    // 0x086
     BitFlags<u32> flags;                              // 0x088
-    u32 field_0x8c;                                   // 0x08c
+    CasSimTextureInfo *textureInfo;                   // 0x08c
     CasSimTypeInfo *typeInfo;                         // 0x090
     SimBodyPart *bodyParts[Character::BODY_PART_COUNT]; // 0x094  point into bodyPartStorage
     f32 latticeMorphValues[Sim::LATTICE_MORPH_REGION_COUNT]; // 0x0d0
@@ -54,7 +83,7 @@ public:
     u8 archetype;                                     // 0x0f9
     u8 bodyType;                                      // 0x0fa
     u8 skinColor;                                     // 0x0fb
-    u8 field_0xfc;                                    // 0x0fc
+    u8 skinTextureOffset;                             // 0x0fc  added to the index in GetSkinTextureID
     u16 field_0xfe;                                   // 0x0fe
     // The 15 SimBodyPart subclass objects, head first. pkg/cas_layouts.csv lists them;
     // they become real members once the subclasses are declared.
@@ -108,7 +137,7 @@ public:
     virtual void GetTattooTextureInfo(Sim::eSimPartsMapLocation location, TextureBlendInfo *info, bool a) const;
     virtual void GetClothingTextureInfo(Sim::eSimPartsMapLocation location, TextureBlendInfo *info, bool a) const;
     virtual void GetCompositeTextureBaseName() const;
-    virtual void GetCompositeTextureName(const char *base, Sim::eSimPartsMapLocation location) const;
+    virtual EString GetCompositeTextureName(const char *base, Sim::eSimPartsMapLocation location) const;
     virtual u32 GetCompositeTextureID(const char *base, Sim::eSimPartsMapLocation location) const;
     virtual void GetValidClothingSetIndexes(
         Character::eBodyPart part, eastl::vector<Sim::ClothingSetIndexInfo, eastl::allocator> &indexes);
@@ -131,8 +160,9 @@ public:
     virtual void SetAllClothingItemsFromInventory(s16 a);
     virtual u8 GetClothingSetUIIndex(Character::eBodyPart part) const;
 
-    // Not virtual. The PS2 build inlines it.
+    // Not virtual. The PS2 build inlines GetFlag.
     bool GetFlag(int index) const { return flags[index]; }
+    void CopyBodyPart(Character::eBodyPart part, const CasSimDescription &other);
 };
 STATIC_ASSERT(CasSimDescription_size, sizeof(CasSimDescription) == 0x334);
 

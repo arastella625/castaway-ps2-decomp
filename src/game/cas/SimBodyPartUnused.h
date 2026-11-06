@@ -7,7 +7,6 @@
 // The ones not defined in the .cpp are not decompiled yet.
 class SimBodyPartUnused : public SimBodyPart {
 public:
-    virtual ~SimBodyPartUnused();
     virtual bool IsValid(bool a, bool b);
     virtual bool IsValidClothingSetIndex(bool a, bool b);
     virtual bool IsValidModelIndex(bool a, bool b);

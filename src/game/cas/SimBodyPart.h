@@ -29,7 +29,7 @@ struct ClothingSetIndexInfo;
 // One clothing set of a body part. SimBodyPart::geometryVector holds these.
 struct BodyPartGeometryTSC6 {
     const char *name;                       // 0x00
-    u32 field_0x4;                          // 0x04
+    VECTOR<u32> field_0x4;                  // 0x04  one per model index; zero rules that style out
     VECTOR<const char *> textureVariations; // 0x08
     u32 flags;                              // 0x0c  bits 1-5: generic for style 1-5
     s32 hitPointsPerDegradationState;       // 0x10
@@ -41,7 +41,7 @@ STATIC_ASSERT(BodyPartGeometryTSC6_size, sizeof(BodyPartGeometryTSC6) == 0x18);
 
 // The three structs below have no known Wii names; these names are ours.
 struct BodyPartStyleInfo {
-    u32 field_0x0;           // 0x00
+    const char *code;        // 0x00  returned by SimBodyPart::GetStyleCode
     u8 numDegradationStates; // 0x04
 };
 STATIC_ASSERT(BodyPartStyleInfo_size, sizeof(BodyPartStyleInfo) == 0x8);

@@ -7,7 +7,6 @@
 // The ones not defined in the .cpp are not decompiled yet.
 class SimBodyPartBelt : public SimBodyPart {
 public:
-    virtual ~SimBodyPartBelt();
     virtual int GetType() const;
     virtual int GetBodyPartIndex() const;
     virtual int GetBodyPartDBIndex() const;
