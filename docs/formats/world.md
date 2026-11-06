@@ -23,7 +23,7 @@ mean what they say.
    them and can write a lot with its objects. `Arry` (floors, walls, tile flags) is still open.
 6. **`SimsObjects`, `SimsTiles`, `world`.** Object definitions, wall and floor tiles, lighting and
    weather. Tables read, most columns unnamed.
-7. **`EDITHTRE`.** Object behaviour: 5,396 SimAntics BHAVs. Chunks decoded, instructions not. This
+7. **`EDITHTRE`.** Object behaviour: 5,396 SimAntics BHAVs. Chunks and instruction fields decoded; see [bhav.md](bhav.md). This
    is needed for gameplay, not for showing a lot, and needs a VM, so it comes last.
 8. **Not needed:** `DATASETS` (copies of other archives, useful only as preload lists) and the
    `.IND` files.
@@ -123,10 +123,11 @@ file: the 64-byte banner `IFF FILE 2.5:TYPE FOLLOWED BY SIZE`, then chunks:
 | char[64] | Name, like `Function - Init` |
 
 BHAV body, little-endian: u16 signature (0x8002 on 5,390; 0x8001 and 0x8000 on 3 each), u16
-instruction count, 8 more header bytes, then instructions. An instruction is u16 opcode, then 10
-bytes. **Likely** true target, false target and 8 operand bytes, as on PC The Sims; only the size is
-tested. 587 different opcodes occur, the most common being 2 (36,093 uses). The set's name matches
-the object's `ResFile` row (below).
+instruction count, 8 more header bytes, then instructions. An instruction is u16 opcode, u8 true
+target, u8 false target and 8 operand bytes. **Proven**: `tools/bhav.py` tests this on every tree,
+and the interpreter is matched. 587 different opcodes occur, the most common being 2, Expression
+(36,093 uses). The set's name matches the object's `ResFile` row (below). What the instructions
+mean is in [bhav.md](bhav.md).
 
 ## Model scale: how objects get their true size
 
@@ -659,6 +660,6 @@ Open:
 - How palm leaves attach, and which objects block a Sim.
 - Scale for rigged mid-lot objects.
 - ObjDefinition, ResFile and most `world` columns. `ERLevel`'s submodel list groups.
-- BHAV instruction fields and opcodes, including the many above 256 and 8192 (globals and semi-globals, likely).
+- The bodies of most BHAV primitives and some expression scopes; see [bhav.md](bhav.md).
 - Kinds 0 and 1 of `DEFAULT.NGH`: kind 0 holds `TATT`, `SIMI` and `HOUS` chunks and kind 1 `NGBH`, `NBRS` and `FAMI`. Those are likely the neighbourhood, neighbours and families.
 - Which of languages 0 and 1 is the US text. Sample word bit 31.

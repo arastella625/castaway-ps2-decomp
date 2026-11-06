@@ -10,6 +10,7 @@
 // vtable pairing tiers; a one-instruction body cannot confirm that a name is right.
 class cXObject {
 public:
+    void HandleError();
     u8 pad_0x0[0x110];
     u32 field_0x110; // 0x110
     u8 pad_0x114[0x20];

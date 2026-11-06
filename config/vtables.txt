@@ -20,3 +20,6 @@
 0x004AD2D8 SimBodyPartAddonLowerBody  game/cas/SimBodyPartAddonLowerBody.h
 0x004AD088 SimBodyPartSleeves         game/cas/SimBodyPartSleeves.h
 0x004ACE38 SimBodyPartUnused          game/cas/SimBodyPartUnused.h
+
+# The tree interpreter. TreeSim's constructor stores this address.
+0x004B8220 TreeSim game/simulator/core2/TreeSim.h
