@@ -4,6 +4,7 @@
 #include "common/BitFlags.h"
 #include "common/EString.h"
 #include "common/EVec3.h"
+#include "common/StringFunctions.h"
 #include "common/TRect.h"
 #include "common/Vector.h"
 #include "common/types.h"
@@ -170,6 +171,28 @@ public:
     u8 &TextureIndex() { return textureIndex; }
     Sim::BodyPartGeometryTSC6 *GetClothingSetData() const;
     BodyPartTypeInfo *GetBodyPartTypeInfo() const;
+    const char *GetCharacterType() const;
+    // The PS2 build inlines these five into the name functions; the Wii build keeps them.
+    void CalculateNameBase(char *buffer) const
+    {
+        Sprintf(buffer, "%s_%s_%s", GetCharacterType(), GetModelCode(), GetClothingSetName());
+    }
+    void CalculateNameStyle(char *buffer) const
+    {
+        const char *style = GetStyleCode();
+        if (*style != 0)
+            Sprintf(buffer, "_%s", style);
+    }
+    void CalculateNameTextureVariation(char *buffer) const
+    {
+        const char *variation = GetTextureVariationName();
+        if (variation != 0 && strlen(variation) != 0 && *variation != 0)
+            Sprintf(buffer, "_%s", variation);
+        else
+            Sprintf(buffer, "_n");
+    }
+    void CalculateNameDegradationState(char *buffer) const { Sprintf(buffer, "_%i", degradationState + 1); }
+    void CalculateNameLowRes(char *buffer) const { Sprintf(buffer, "_GAME"); }
     // Defined in CasSimDescription.h, because it needs that class. The PS2 build inlines it.
     inline bool GetCharacterFlag(int index) const;
     inline void SetCharacterFlag(int index, bool value);

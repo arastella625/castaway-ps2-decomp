@@ -2,6 +2,7 @@
 
 #include "common/EResourceManager.h"
 #include "common/ReconBuffer.h"
+#include "game/cas/CasSimDescription.h"
 
 void SimBodyPart::DoStream(ReconBuffer *buffer, int version)
 {
@@ -325,4 +326,63 @@ Sim::BodyPartGeometryTSC6 *SimBodyPart::GetClothingSetData() const
 BodyPartTypeInfo *SimBodyPart::GetBodyPartTypeInfo() const
 {
     return bodyPartTypeInfo;
+}
+
+EString SimBodyPart::GetModelName() const
+{
+    char buffer[256];
+    CalculateNameBase(buffer);
+    CalculateNameStyle(buffer + strlen(buffer));
+    EString name;
+    name.Format("%s", buffer);
+    return name;
+}
+
+// An empty name while the part is the nude set. The texture's name is the model's, plus
+// the texture variation and the degradation state; `a` asks for the in-game copy.
+EString SimBodyPart::GetTextureName(bool a) const
+{
+    if (clothingSetIndex == GetNudeClothingSetIndex(GetCharacterFlag(0)))
+        return "";
+    char buffer[256];
+    CalculateNameBase(buffer);
+    if (UseStyleCodeInTextureName())
+        CalculateNameStyle(buffer + strlen(buffer));
+    CalculateNameTextureVariation(buffer + strlen(buffer));
+    CalculateNameDegradationState(buffer + strlen(buffer));
+    if (a)
+        CalculateNameLowRes(buffer + strlen(buffer));
+    EString name;
+    name.Format("%s", buffer);
+    return name;
+}
+
+EString SimBodyPart::GetReflectionMaskName(bool a) const
+{
+    if (clothingSetIndex == GetNudeClothingSetIndex(GetCharacterFlag(0)))
+        return "";
+    char buffer[256];
+    CalculateNameBase(buffer);
+    if (UseStyleCodeInTextureName())
+        CalculateNameStyle(buffer + strlen(buffer));
+    CalculateNameDegradationState(buffer + strlen(buffer));
+    Sprintf(buffer + strlen(buffer), "_RFL");
+    if (a)
+        CalculateNameLowRes(buffer + strlen(buffer));
+    EString name;
+    name.Format("%s", buffer);
+    return name;
+}
+
+EString SimBodyPart::GetIconTextureName() const
+{
+    char buffer[256];
+    CalculateNameBase(buffer);
+    CalculateNameStyle(buffer + strlen(buffer));
+    CalculateNameTextureVariation(buffer + strlen(buffer));
+    CalculateNameDegradationState(buffer + strlen(buffer));
+    Sprintf(buffer + strlen(buffer), "_ICON");
+    EString name;
+    name.Format("%s", buffer);
+    return name;
 }

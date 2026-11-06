@@ -165,7 +165,7 @@ u8 &CasSimDescription::SkinColor()
     return skinColor;
 }
 
-u32 CasSimDescription::GetTypeCode() const
+const char *CasSimDescription::GetTypeCode() const
 {
     if (flags[0])
         return typeInfo->typeCodes[0];
@@ -195,6 +195,19 @@ u32 CasSimDescription::GetSkinTextureID(Sim::eSimPartsMapLocation location, bool
     return CasUtils::GetGameStateTextureID(skin->textureIDs[index], a);
 }
 
+EString CasSimDescription::GetSkinTextureName(Sim::eSimPartsMapLocation location, bool a) const
+{
+    EString name;
+    if (skinColor >= textureInfo->skins.size())
+        return 0;
+    u8 index = skinTextureOffset + typeInfo->skinTexturesPerLocation * location;
+    Sim::BodyPartSkinTSC6 *skin = &textureInfo->skins[skinColor];
+    if (skin == 0 || index >= skin->textureIDs.size())
+        return 0;
+    name.Format("%s_%u%s", skin->name, skinTextureOffset, a ? "_GAME" : "");
+    return name;
+}
+
 u32 CasSimDescription::GetTattooTextureID(Sim::eTattooLocation location, bool a) const
 {
     if (tattooIndices[location] >= (u8)textureInfo->tattooTextures[(u8)location].size())
@@ -203,18 +216,42 @@ u32 CasSimDescription::GetTattooTextureID(Sim::eTattooLocation location, bool a)
         textureInfo->tattooTextures[(u8)location][tattooIndices[location]].textureID, a);
 }
 
-#ifdef NON_MATCHING
-// Two of 30 words differ, both around the last constructor call: the game sets the second
-// argument before the first (move a1,v0 / jal / move a0,s1) and this does the reverse.
-// Three phrasings of the return statement gave the same code.
+EString CasSimDescription::GetTattooClothingSetName(Sim::eTattooLocation location) const
+{
+    EString name;
+    if (tattooIndices[location] < (u8)textureInfo->tattooTextures[(u8)location].size())
+        name.Format("%s", textureInfo->tattooTextures[(u8)location][tattooIndices[location]].name);
+    return name;
+}
+
 EString CasSimDescription::GetCompositeTextureBaseName() const
 {
     EString name;
     name.Format("%S_%S", firstName, lastName);
     name.MakeLegalSymbolName();
-    return EString(name.GetCharacters());
+    return name;
 }
-#endif
+
+EString CasSimDescription::GetCompositeTextureName(const char *base, Sim::eSimPartsMapLocation location) const
+{
+    EString name;
+    switch (location) {
+    case 1:
+        name.Format("%s_cur_%s", GetTypeCode(), base);
+        break;
+    case 2:
+        name.Format("%s_cll_%s", GetTypeCode(), base);
+        break;
+    case 3:
+        name.Format("%s_clr_%s", GetTypeCode(), base);
+        break;
+    case 0:
+    default:
+        name.Format("%s_cul_%s", GetTypeCode(), base);
+        break;
+    }
+    return name;
+}
 
 u32 CasSimDescription::GetCompositeTextureID(const char *base, Sim::eSimPartsMapLocation location) const
 {

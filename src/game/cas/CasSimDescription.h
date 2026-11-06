@@ -32,15 +32,15 @@ namespace Sim {
 
 // Wii names, from the VECTOR instantiations CasSimDescription's texture functions use.
 struct BodyPartTextureTSC6 {
-    u32 field_0x0; // 0x00
-    u32 textureID; // 0x04
+    const char *name; // 0x00  the tattoo's clothing set name
+    u32 textureID;    // 0x04
     u32 field_0x8; // 0x08
     u32 field_0xc; // 0x0c
 };
 STATIC_ASSERT(BodyPartTextureTSC6_size, sizeof(BodyPartTextureTSC6) == 0x10);
 
 struct BodyPartSkinTSC6 {
-    u32 field_0x0;          // 0x00
+    const char *name;       // 0x00
     VECTOR<u32> textureIDs; // 0x04
     u32 field_0x8;          // 0x08
 };
@@ -51,7 +51,7 @@ STATIC_ASSERT(BodyPartSkinTSC6_size, sizeof(BodyPartSkinTSC6) == 0xc);
 // No known Wii name; this name is ours.
 struct CasSimTypeInfo {
     VECTOR<BodyPartTypeInfo> bodyPartTypes; // 0x00  one per body part index
-    u32 *typeCodes;                         // 0x04  [0] when flag 0 is set, else [1]
+    const char **typeCodes;                 // 0x04  [0] when flag 0 is set, else [1]
     u8 field_0x8[0x2c];                     // 0x08
     u8 skinTexturesPerLocation;             // 0x34  multiplies the parts-map location in GetSkinTextureID
 };
@@ -127,12 +127,12 @@ public:
     virtual u8 &BodyType();
     virtual u8 GetSkinColor() const;
     virtual u8 &SkinColor();
-    virtual u32 GetTypeCode() const;
+    virtual const char *GetTypeCode() const;
     virtual SimBodyPart *GetBodyPart(Character::eBodyPart part) const;
     virtual SimBodyPart *GetBodyPartByIndex(u8 index) const;
     virtual u32 GetSkinTextureID(Sim::eSimPartsMapLocation location, bool a) const;
-    virtual void GetSkinTextureName(Sim::eSimPartsMapLocation location, bool a) const;
-    virtual void GetTattooClothingSetName(Sim::eTattooLocation location) const;
+    virtual EString GetSkinTextureName(Sim::eSimPartsMapLocation location, bool a) const;
+    virtual EString GetTattooClothingSetName(Sim::eTattooLocation location) const;
     virtual u32 GetTattooTextureID(Sim::eTattooLocation location, bool a) const;
     virtual void GetTattooTextureInfo(Sim::eSimPartsMapLocation location, TextureBlendInfo *info, bool a) const;
     virtual void GetClothingTextureInfo(Sim::eSimPartsMapLocation location, TextureBlendInfo *info, bool a) const;
