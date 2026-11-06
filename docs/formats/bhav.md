@@ -611,7 +611,7 @@ An object can sleep if it isn't a Sim, its variable 0x19 is 0, and no sprite slo
 
 ## Random (opcode 8)
 
-**Likely**, from both builds; the C++ is under `NON_MATCHING`, 108 of 118 words.
+**Proven:** `cXObject::TryRandom` byte-matches.
 
 | Operand | Meaning |
 |---|---|

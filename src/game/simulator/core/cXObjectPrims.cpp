@@ -66,10 +66,6 @@ long cXObject::TryIdle(StackElem *elem, XPrimParam *primParam)
     return 2;
 }
 
-#ifdef NON_MATCHING
-// The logic of these two is complete. TryRandom has 108 of 118 words lined up: the game tests the
-// limit with lh and reloads it with lhu, which this doesn't reproduce. TryCheckObject has 131 of
-// 189: the gotos give the game's shared return blocks, but the hoisted locals change registers.
 // Wii: GetNextRandomNumber, and SRand, which the PS2 build inlines.
 u32 GetNextRandomNumber();
 
@@ -93,25 +89,30 @@ long cXObject::TryRandom(StackElem *elem, XPrimParam *primParam)
     RandomParam param = *(RandomParam *)primParam;
     const s16 *ref;
     f32 *floatRef;
-    u16 limit;
+    s16 limit;
 
     if (InterpValue((s16)param.mScope, param.mData, &ref, &floatRef, 0, 0) == -1)
         return -1;
-    if (InterpValue((s16)param.mLimitScope, (s16)param.mLimitData, 0, 0, (s16 *)&limit, 0) == -1)
+    if (InterpValue((s16)param.mLimitScope, (s16)param.mLimitData, 0, 0, &limit, 0) == -1)
         return -1;
-    TREE_CHECK(this, (s16)limit, 4, return -1);
+    TREE_CHECK(this, limit, 4, return -1);
     if (ref) {
-        InterpWriteValue((s16)param.mScope, param.mData, &ref, SRand((s16)limit));
+        // Read as a u16 and narrowed, which is why the game loads the limit a second time here.
+        InterpWriteValue((s16)param.mScope, param.mData, &ref, SRand((s16)*(u16 *)&limit));
         return 1;
     }
     if (floatRef) {
-        *floatRef = (int)SRand((s16)limit);
-        return 1;
+        *floatRef = (int)SRand(limit);
+    } else {
+        TREE_ERROR(0x13);
+        return -1;
     }
-    TREE_ERROR(0x13);
-    return -1;
+    return 1;
 }
 
+#ifdef NON_MATCHING
+// The logic is complete, and 131 of the 189 words line up: the gotos give the game's shared
+// return blocks, but the hoisted locals change registers.
 // Primitive 0x35: questions about the object in an operand.
 struct CheckObjectParam {
     s16 mData;  // 0x00
