@@ -69,3 +69,24 @@ BitFlags<u32> SimBodyPartHat::ApplyDamage(const Weather::DamageEvents &events)
 {
     return BitFlags<u32>(0);
 }
+
+// Character flag 2 is kHairBottomDisplayed, going by these messages. It has to agree with
+// whether the hat has a model.
+void SimBodyPartHat::Validate()
+{
+    if (IsValid(true, false) && description != 0) {
+        if (GetModelID() != 0) {
+            if (!GetCharacterFlag(2)) {
+                char buffer[512];
+                Sprintf(buffer, "Hat is being worn, but kHairBottomDisplayed is not set correctly");
+                AssertWithInfo(buffer);
+                SetCharacterFlag(2, true);
+            }
+        } else if (GetCharacterFlag(2)) {
+            char buffer[512];
+            Sprintf(buffer, "Hat is not being worn, but kHairBottomDisplayed is set");
+            AssertWithInfo(buffer);
+            SetCharacterFlag(2, false);
+        }
+    }
+}

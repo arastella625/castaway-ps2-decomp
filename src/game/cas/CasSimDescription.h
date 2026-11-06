@@ -151,7 +151,7 @@ public:
     virtual void HandleEventChangeCharacter(const CasEventChangeCharacter &event, u8 &a, u8 &b);
     virtual bool ChangeEventTypeHasMoreThanOneOption(CasEventChangeCharacter::CharacterPart part);
     virtual bool UseDyesForTextureVariation(Character::eBodyPart part);
-    virtual void ChangeToCostume(const char *name);
+    virtual bool ChangeToCostume(const char *name);
     virtual void ApplyDamage(s16 a, const Weather::DamageEvents &events);
     virtual const char *GetBodyPartName(Character::eBodyPart part) const;
     virtual u8 GetNumBodyParts() const;

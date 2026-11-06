@@ -310,6 +310,26 @@ bool CasSimDescription::UseDyesForTextureVariation(Character::eBodyPart part)
     return !CasUtils::UseArchetype();
 }
 
+// Puts on every clothing set the named costume lists. False when there is no such costume.
+bool CasSimDescription::ChangeToCostume(const char *name)
+{
+    const Sim::CostumesTSC6 *costume = CasUtils::GetCostumeData(name);
+    if (costume == 0)
+        return false;
+    const VECTOR<char *> *names = GetFlag(0) ? &costume->flagSetNames : &costume->flagClearNames;
+    for (u8 part = 0x1a; part <= 0x26; part++) {
+        u8 index = CasUtils::GetBodyPartIndex((Character::eBodyPart)part);
+        if (strlen((*names)[index]) != 0) {
+            u8 setIndex = CasUtils::GetClothingSetIndexByName(GetFlag(0), (Character::eBodyPart)part,
+                                                              (*names)[index]);
+            bodyParts[index]->SetClothingSetIndex(setIndex);
+            bodyParts[index]->SwitchToFirstAvailableDegradationStage();
+        }
+    }
+    Verify();
+    return true;
+}
+
 const char *CasSimDescription::GetBodyPartName(Character::eBodyPart part) const
 {
     return typeInfo->bodyPartTypes[GetBodyPartIndex(part)].name;

@@ -447,6 +447,58 @@ void SimBodyPart::SetCurrentHitPoints(int hitPoints)
         damageState->currentHitPoints = hitPoints;
 }
 
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+
+// Picks the first model the clothing set has, then pulls the texture and the degradation
+// state back into range.
+void SimBodyPart::SwitchToFirstAvailableStyle()
+{
+    if (IsValidClothingSetIndex(false, true)) {
+        flags.bits = clothingSetData->flags;
+        for (u8 i = 0; i < (u8)clothingSetData->modelIDs.size(); i++) {
+            if (clothingSetData->modelIDs[i] != 0) {
+                modelIndex = i;
+                modelCodeIndex = CalculateModelCodeIndexFromModelIndex(i);
+                styleIndex = CalculateStyleIndexFromModelIndex(i);
+                break;
+            }
+        }
+        if (textureIndex >= clothingSetData->textureVariations.size())
+            textureIndex = 0;
+        if (degradationState >= NumDegradationStates())
+            degradationState = MAX(0, NumDegradationStates() - 1);
+        UpdateRelatedData();
+    }
+}
+
+// Like SwitchToFirstAvailableStyle, but keeps the current model when it exists, and
+// otherwise takes the next one after it.
+void SimBodyPart::AdjustToLegalStyle()
+{
+    if (IsValidClothingSetIndex(false, true)) {
+        flags.bits = clothingSetData->flags;
+        bool found = false;
+        for (u8 i = 0; i < (u8)clothingSetData->modelIDs.size(); i++) {
+            if (clothingSetData->modelIDs[i] != 0 && i >= modelIndex) {
+                modelIndex = i;
+                modelCodeIndex = CalculateModelCodeIndexFromModelIndex(i);
+                styleIndex = CalculateStyleIndexFromModelIndex(i);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            SwitchToFirstAvailableStyle();
+            return;
+        }
+        if (textureIndex >= clothingSetData->textureVariations.size())
+            textureIndex = 0;
+        if (degradationState >= NumDegradationStates())
+            degradationState = MAX(0, NumDegradationStates() - 1);
+        UpdateRelatedData();
+    }
+}
+
 u8 SimBodyPart::GetDegradationModelCodeIndex() const
 {
     return modelCodeIndex;
@@ -520,3 +572,24 @@ EString SimBodyPart::GetIconTextureName() const
     name.Format("%s", buffer);
     return name;
 }
+
+#ifdef NON_MATCHING
+// Six of 53 words differ, all in the inlined CasUtils::GetBodyPartTypeInfoTable. The game
+// tests the table pointer and reads its count through one register, and reads the rows
+// through a copy; this uses one register for all three and comes out a word shorter.
+// Tried: early return, nested ifs, ?:, an inline wrapper, and a Wii-style out-parameter.
+// A part that belongs to a sim asks the sim. One on its own looks its type up in the
+// quickdata: the table's first row holds one code per value of character flag 0.
+const char *SimBodyPart::GetCharacterType() const
+{
+    if (description != 0)
+        return description->GetTypeCode();
+    const CasSimTypeInfo *info = CasUtils::GetBodyPartTypeInfoTable();
+    if (info != 0) {
+        if (characterFlags[0])
+            return info->typeCodes[0];
+        return info->typeCodes[1];
+    }
+    return "";
+}
+#endif

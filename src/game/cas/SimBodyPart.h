@@ -174,6 +174,12 @@ public:
     Sim::BodyPartGeometryTSC6 *GetClothingSetData() const;
     BodyPartTypeInfo *GetBodyPartTypeInfo() const;
     const char *GetCharacterType() const;
+    // Inlined wherever the degradation state is clamped. The name is ours.
+    u8 NumDegradationStates() const
+    {
+        return bodyPartTypeInfo->modelCodes[GetDegradationModelCodeIndex()].styles[styleIndex]
+            .numDegradationStates;
+    }
     // The PS2 build inlines these five into the name functions; the Wii build keeps them.
     void CalculateNameBase(char *buffer) const
     {

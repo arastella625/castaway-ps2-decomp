@@ -66,6 +66,15 @@ public:
         return data;
     }
 
+    // Also inlined on PS2. The first row of the table, or null when it has none.
+    static const CasSimTypeInfo *GetBodyPartTypeInfoTable()
+    {
+        const ERQTable *table = GetQuickdata()->GetTable("Sim::BodyPartTypeInfoTableTSC6");
+        if (table == 0 || table->count == 0)
+            return 0;
+        return (const CasSimTypeInfo *)table->rows;
+    }
+
     // Also inlined on PS2.
     static const Sim::CostumesTSC6 *GetCostumeData(const char *name)
     {
