@@ -115,9 +115,9 @@ void TreeSim::Reset(Behavior *behavior, s16 treeID)
     }
 }
 
-int TreeSim::RunOneTickTree(Behavior *behavior, s16 a, s16 treeID, s16 *params)
+int TreeSim::RunOneTickTree(Behavior *behavior, s16 stackObject, s16 treeID, s16 *params)
 {
-    return RunCheckTree(behavior, a, treeID, params);
+    return RunCheckTree(behavior, stackObject, treeID, params);
 }
 
 int TreeSim::HandleBreakpoint(StackElem *elem, BehaviorNode *node)
@@ -149,9 +149,9 @@ int TreeSim::Gosub(Behavior *behavior, const s16 *params, s16 treeID)
     frame.mWaiting = 0;
     frame.SetTreeID(treeID);
     if (top != 0)
-        frame.field_0x4 = top->field_0x4;
+        frame.mStackObject = top->mStackObject;
     else
-        frame.field_0x4 = 0;
+        frame.mStackObject = 0;
     if (params == 0)
         params = mDefaultParams;
 
@@ -321,7 +321,7 @@ StackElem *TreeSim::GetHighLevelAction()
     return GetNthElem(0);
 }
 
-int TreeSim::RunCheckTree(Behavior *behavior, s16 a, s16 treeID, s16 *params)
+int TreeSim::RunCheckTree(Behavior *behavior, s16 stackObject, s16 treeID, s16 *params)
 {
     if (mError != 0)
         return 0;
@@ -333,13 +333,13 @@ int TreeSim::RunCheckTree(Behavior *behavior, s16 a, s16 treeID, s16 *params)
     frame.mNodeIndex = 0;
     frame.mBehavior = 0;
     frame.SetTreeID(-1);
-    frame.field_0x4 = 0;
+    frame.mStackObject = 0;
     frame.mNumLocals = 0;
     frame.mNumParams = 0;
     mStack.Push(&frame, 0);
 
     if (Gosub(behavior, params, treeID)) {
-        GetCurElem()->field_0x4 = a;
+        GetCurElem()->mStackObject = stackObject;
         int inMainSim = sInMainSim;
         sInMainSim = 0;
         int iterations = mIterations;

@@ -60,7 +60,7 @@ inline void StackElem::Setup(const StackElem *frame, const s16 *params)
 {
     mTreeID = frame->GetTreeID();
     mNodeIndex = frame->mNodeIndex;
-    field_0x4 = frame->field_0x4;
+    mStackObject = frame->mStackObject;
     mNumLocals = frame->mNumLocals;
     mNumParams = frame->mNumParams;
     mWaiting = frame->mWaiting;

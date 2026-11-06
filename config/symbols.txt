@@ -995,6 +995,15 @@
 0x001E37B0 GetMainSimElem__7TreeSim
 0x001C2FB8 GetHighLevelAction__7TreeSim
 0x0050A900 g_bTreeAssert
+0x00510758 _8Behavior$s_cachedTrees
+0x0025C600 __eq__C12ObjectDataIDRC12ObjectDataID
+0x00492898 sGlobNamespaceID
+0x00246200 GetNamespaceID__8Behavior
+0x00246218 GetGlobNamespaceID__8Behavior
+0x002462A0 GetResFileID__8Behaviors
+0x0025C000 GetNode__C22ObjectDataBehaviorTreeUi
+0x0025C5B8 __12ObjectDataIDUiUs
+0x0025CB68 GetSmartDataFactory__Fv
 0x00254488 HandleError__8cXObject
 0x00492418 _7TreeSim$sMaxIterations
 0x00492414 _7TreeSim$sInMainSim

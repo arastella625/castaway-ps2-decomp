@@ -11,7 +11,7 @@ class StackElem {
 public:
     s16 mTreeID;       // 0x00  low 15 bits the tree, bit 15 the break flag; -1 means no tree
     s16 mNodeIndex;    // 0x02  the node about to run, or a transition (0xfd to 0xff)
-    s16 field_0x4;     // 0x04  copied from the calling frame by TreeSim::Gosub
+    s16 mStackObject;  // 0x04  object ID: scope 0xa reads it, other scopes pass it to GetObjectFromID
     u8 mNumLocals;     // 0x06
     u8 mNumParams;     // 0x07
     u32 mWaiting;      // 0x08  name is ours: a primitive that moves on clears it; a transition

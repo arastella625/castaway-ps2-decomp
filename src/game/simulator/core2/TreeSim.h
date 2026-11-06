@@ -87,7 +87,8 @@ public:
     virtual void Error(s16 code) = 0;
     virtual void StackJustPopped();
     virtual int HandleBreakpoint(StackElem *elem, BehaviorNode *node);
-    virtual int RunCheckTree(Behavior *behavior, s16 a, s16 treeID, s16 *params);
+    // Runs a tree to its end in one go. Returns 1 if it returned true, 0 if false or on error.
+    virtual int RunCheckTree(Behavior *behavior, s16 stackObject, s16 treeID, s16 *params);
     virtual void Initialize(int stackSize, s16 *defaultParams);
     virtual int Simulate(int a);
     virtual StackElem *GetHighLevelAction();
@@ -109,7 +110,7 @@ public:
     // cXObject derives from TreeSim. Its generated header doesn't say so yet, so this is the cast.
     TreeSim *ObjectAsTreeSim() const { return (TreeSim *)mObject; }
     void Reset(Behavior *behavior, s16 treeID);
-    int RunOneTickTree(Behavior *behavior, s16 a, s16 treeID, s16 *params);
+    int RunOneTickTree(Behavior *behavior, s16 stackObject, s16 treeID, s16 *params);
     int Gosub(Behavior *behavior, const s16 *params, s16 treeID);
     int DoNodeAction(StackElem *elem);
     int DoNodeActionNormal(StackElem *elem, BehaviorNode *node);
