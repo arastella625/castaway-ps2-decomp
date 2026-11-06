@@ -102,10 +102,36 @@ Error codes seen so far:
 
 | Code | Meaning |
 |---|---|
+| 0x001 | Expression operator above 0x12 |
+| 0x002 | Temp number out of range |
 | 0x005 | Primitive not in the `TryElement` switch |
+| 0x006 | Attribute number out of range |
+| 0x007 | Variable doesn't exist, or a bad action queue index |
+| 0x008 | Parameter or local number out of range |
+| 0x009 | Scope out of range, or not writable |
+| 0x00A | No stack object |
 | 0x00D | Bit number above 16 in an expression |
+| 0x00F | Scope 0xA with data other than 0 |
 | 0x013 | An expression tried to write to something it can't |
+| 0x015 | No stack object, in scopes that need a Sim or a slot |
+| 0x01A | Motive number out of range, or ad number out of range |
+| 0x01B | No such object slot |
+| 0x01C | Not a Sim |
+| 0x021 | Person data field doesn't exist |
+| 0x023 | Definition word number out of range |
 | 0x026 | Division by zero |
+| 0x028 | No such room |
+| 0x029 | Room data number out of range |
+| 0x02F | Tree constant not found |
+| 0x032 | Indexed data number out of range |
+| 0x036 | Tutorial mode isn't 0 or 1 |
+| 0x038 | No such Neighbor |
+| 0x03A | Scope 0x21, which always fails |
+| 0x03C | Neighbourhood variable or goal number out of range |
+| 0x03E | TreeBreak stopped the tree |
+| 0x03F | Global number out of range |
+| 0x040 | Type attribute number out of range |
+| 0x05D | No such ingredient, token or plan |
 | 0x3E8 | A call failed, though its tree loads |
 | 0x3E9 | Stack underflow |
 | 0x44C | Target 0xFD reached, or a bad transition |
@@ -115,11 +141,16 @@ Error codes seen so far:
 
 ## Primitives
 
-**Proven** for the numbers and addresses, and for the switch as a whole; the name is the Wii function at the same place.
+**Proven** for the numbers and addresses: `cXObject::TryElement` byte-matches, so each number goes to the function at that address, and the three inlined cases below are exact. The name is the Wii function at the same place.
 
-The switch is `cXObject::TryElement` (`0x234678`), 73 cases, and `cXPerson::TryElement` (`0x1AD720`), which handles the Sim-only opcodes and passes everything else to the first. The names are from pairing the two platforms' jump tables, and they hold up: of the 56 cases that call a function, 53 keep exactly the same order in the Wii and PS2 binaries. The other three are explained: `TreeBreak`'s case is inlined, and `KillSounds` and `HUDData` are tiny functions placed elsewhere. Nine names also agree with the name list, which was made from different evidence.
+The switch is `cXObject::TryElement` (`0x234678`), 73 cases, and `cXPerson::TryElement` (`0x1AD720`), which handles the Sim-only opcodes and passes everything else to the first. It isn't matched yet, so its column below is still **Likely**. The names are from pairing the two platforms' jump tables, and they hold up: of the 56 cases that call a function, 53 keep exactly the same order in the Wii and PS2 binaries. The other three are explained: `TreeBreak`'s case is inlined, and `KillSounds` and `HUDData` are tiny functions placed elsewhere. Nine names also agree with the name list, which was made from different evidence.
 
-On a non-Sim object, an opcode with no `cXObject` handler is error 5. Opcode 0x26 on a Sim returns -1 at once. Five primitives are inlined in the switch rather than being functions; `WantsAndFearsNotify` and `ChangeWantFearTree` do nothing on Wii.
+On a non-Sim object, an opcode with no `cXObject` handler is error 5. Opcode 0x26 on a Sim returns -1 at once. Five primitives are inlined in the switch rather than being functions. **Proven:**
+
+- `WantsAndFearsNotify` and `ChangeWantFearTree` return 1 and do nothing else.
+- `TreeBreak` reads a value (`+0` data, `+2` scope) and returns 1 if it's 0. Otherwise `+4` bit 0 returns 1 (log only), bit 1 stops the tree with error 0x3E, and neither returns 1.
+- `Tutorial` claims the tutorial for this object (`+0` is 0) or releases it (1). Only one object has it at a time: claiming fails if another has it, releasing fails if this one doesn't. Any other value is error 0x36.
+- `ParticleEffect` needs a Sim (error 0x1C). It passes the operands as two words to a virtual on what's at Sim `+0x5F0` and returns 1 if that returned 1, otherwise 0. No tree uses it.
 
 | Opcode | Primitive | Address | Sim override | Address | Uses |
 |---|---|---|---|---|---|
@@ -203,79 +234,147 @@ Numbers in common with PC *The Sims* are a useful lead for what a primitive does
 
 59% of all instructions, so this is the one to get right first. `TryExpression` is `0x234F90`.
 
-**Proven** for the layout: all 36,093 are in range, and the PS2 code reads these offsets directly.
+**Proven** for the layout: all 36,093 are in range, and `TryElement` passes the operands straight to it. **Likely** for the rest, but strongly: it's read from the PS2 code itself, and the C++ in `cXObjectInterp.cpp` (under `NON_MATCHING`) has 575 of the game's 628 words the same. What differs is register choice and scheduling, not behaviour.
 
 | Operand offset | Type | Meaning |
 |---|---|---|
-| 0 | s16 | Left value |
-| 2 | s16 | Right value |
-| 4 | u8 | Not read by `TryExpression` on Wii. 0, 0xFE or 0xFF on disc |
-| 5 | s8 | Operator, 0 to 0x12 |
+| 0 | s16 | Left data |
+| 2 | s16 | Right data |
+| 4 | u8 | No code reads it. 0, 0xFE or 0xFF on disc |
+| 5 | s8 | Operator, 0 to 0x12. Above that is error 1 |
 | 6 | s8 | Left scope |
 | 7 | s8 | Right scope |
 
-**Likely** for what each operator does. The Wii code is read case by case, and the order of the cases in the jump table is the same on both platforms for all 19.
+It reads the right operand first, then the left. A scope of 7 skips `InterpValue` and takes the data word, so a literal left has no address: anything that writes it is error 0x13.
 
-| Op | Meaning | Returns | Uses |
-|---|---|---|---|
-| 0x00 | left > right | the comparison | 1,441 |
-| 0x01 | left < right | the comparison | 901 |
-| 0x02 | left == right | the comparison | 7,905 |
-| 0x03 | left += right | true | 1,125 |
-| 0x04 | left -= right | true | 403 |
-| 0x05 | left = right | true | 19,584 |
-| 0x06 | left *= right | true | 209 |
-| 0x07 | left /= right; right 0 is error 0x26 | true | 192 |
-| 0x08 | Test bit `right` of left; bits count from 1 | the bit | 545 |
-| 0x09 | Set bit `right` of left | true | 880 |
-| 0x0A | Clear bit `right` of left | true | 435 |
-| 0x0B | ++left, then left < right | the comparison | 194 |
-| 0x0C | left %= right; both made positive first | true | 104 |
-| 0x0D | left &= right | true | 11 |
-| 0x0E | left >= right | the comparison | 806 |
-| 0x0F | left <= right | the comparison | 568 |
-| 0x10 | left != right | the comparison | 549 |
-| 0x11 | --left, then left > right | the comparison | 239 |
-| 0x12 | left \|= right | true | 2 |
+| Op | Meaning | Returns | Writes? | Uses |
+|---|---|---|---|---|
+| 0x00 | left > right | the comparison | | 1,441 |
+| 0x01 | left < right | the comparison | | 901 |
+| 0x02 | left == right | the comparison | | 7,905 |
+| 0x03 | left += right | 1 | yes | 1,125 |
+| 0x04 | left -= right | 1 | yes | 403 |
+| 0x05 | left = right | 1 | yes | 19,584 |
+| 0x06 | left *= right | 1 | yes | 209 |
+| 0x07 | left /= right; right 0 is error 0x26 | 1 | yes | 192 |
+| 0x08 | Test bit `right` of left, counting from 1 | the bit | | 545 |
+| 0x09 | Set bit `right` of left | 1 | yes | 880 |
+| 0x0A | Clear bit `right` of left | 1 | see below | 435 |
+| 0x0B | ++left, then left < right | the comparison | yes | 194 |
+| 0x0C | left %= right; both made positive first; right 0 is error 0x26 | 1 | yes | 104 |
+| 0x0D | left &= right | 1 | yes | 11 |
+| 0x0E | left >= right | the comparison | | 806 |
+| 0x0F | left <= right | the comparison | | 568 |
+| 0x10 | left != right | the comparison | | 549 |
+| 0x11 | --left, then left > right | the comparison | yes | 239 |
+| 0x12 | left \|= right | 1 | yes | 2 |
 
-Comparisons don't write. Everything else writes through `InterpWriteValue`, and a scope that can't be written is error 0x13. Scope 0xE, 0xF and 0x11 (motives) are floats underneath: arithmetic goes through the float, and the result is clamped to a limit of 100.0 at the top; the bottom limit is likely -100.0.
+Rules a port has to copy:
+
+- **Writing.** With an s16 address, the new value goes through `InterpWriteValue`. With no address but a float one (a motive), the sum is done on the float. With neither, it's error 0x13. Operators 8, 9 and 0xA, 0xC, 0xD and 0x12 never use the float: on a motive they're error 0x13.
+- **Bit numbers.** Anything above 16 is error 0xD. Below 1 isn't checked.
+- **After a write**, for scopes 0xE, 0xF and 0x11, the float is clamped to -100.0 to 100.0. Then if `EdithVariableSet::s_bTaggedGraphicField` is set, it's cleared, and `TagGraphicsField` runs on me (left scope 3) or the stack object (left scope 4).
+- **Operator 0xA doesn't count as a write**, so it does neither of those. That's in the code, and it may be a slip in the original. It changes nothing unless the left scope is a motive, which is error 0x13 anyway, or a variable that sets the tag.
+- **Operators 9 and 0xA with left data 8** also set a global (`0x49DDA4`, Wii `OnEdithSetFlagField1`) when bit 0x2000 changes. What reads it is open.
+- **++ and -- on a motive** would read the s16 afterwards through a null pointer. No tree does it, so a port can leave that out.
+
+Checked against all 36,093 expressions on the disc (a one-off query, not part of `tools/bhav.py`). A motive on the left only meets operators 0 to 5 and 0xE to 0x10. Nothing writes a literal. Every literal bit number is 1 to 16. Two `left = right` have left scope 0x2A, which can't be written, so those two would stop with error 0x13 if they ever ran. Every operator 9 and 0xA with left data 8 has left scope 3 or 4 but one, so that's object variable 8, a flags word.
 
 ## Scopes
 
-A value is a scope and a data word, read by `cXObject::InterpValue` (`0x235968`) and written by `InterpWriteValue` (`0x238860`). There are 69 scopes. Scope 7 is the commonest, at 17,203 of 72,186 operands.
+A value is a scope and a data word. `cXObject::InterpValue` (`0x235968`) reads it, returning 1, or -1 once it has stopped the tree. `InterpWriteValue` (`0x238860`) writes it back.
 
-**Likely** for these, read from the Wii code. The PS2 jump table has 69 entries in the same order, except that 0x27, 0x2A, 0x42 and 0x43 sit elsewhere, so don't trust those four from Wii alone.
+**Proven** for writing: `InterpWriteValue` byte-matches. A write goes through the address `InterpValue` gave, for the scopes marked yes below. Scopes 3 and 4 use `EdithVariableSet::WriteVar` (error 7 if the variable doesn't exist), and every other scope is error 9. A write through a scope 6 data word that has no address would crash; no tree should do that.
 
-| Scope | Value | Limit on data |
-|---|---|---|
-| 0x00 | My attribute | object's attribute count |
-| 0x01 | Stack object's attribute | its count |
-| 0x02 | My semi-global attribute | its count |
-| 0x03 | My object variable (`EdithVariableSet`) | known variable |
-| 0x04 | Stack object's variable | known variable |
-| 0x05 | Stack object's semi-global attribute | its count |
-| 0x06 | Global (`cSimulator::GetGlobalRef`) | below 0x30 |
-| 0x07 | **Literal**: the data word itself | none |
-| 0x08 | My temp | below 8 |
-| 0x09 | Parameter of this tree | parameter count |
-| 0x0A | Stack object's ID. Data must be 0 | 0 |
-| 0x0B | My temp, indexed by temp `data` | below 8, both times |
-| 0x0E | My motive. Sims only (object type 2) | below 16 |
-| 0x0F | Stack object's motive | below 16 |
-| 0x10 | Stack object's slot contents, as an object ID | |
-| 0x11 | Motive indexed by temp `data` | temp below 8, motive below 16 |
-| 0x14 | My slot contents, as an object ID | |
-| 0x19 | **Local** of this tree | local count |
-| 0x1A | Tree constant (`XObjLang::GetConstantsID`); data is the constant's ID | |
-| 0x1B | Attribute of the stack object, indexed by temp `data` | |
-| 0x12, 0x13 | Sim data fields, mine and the stack object's | |
-| 0x20, 0x26, 0x2E | Neighbour data, through `Neighborhood::FindNeighborByID` | |
-| 0x24, 0x25 | Type attributes, mine and the stack object's | |
-| 0x28 | Whether a lot has been visited (`LotManager`) | |
-| 0x29 | Goal and unlock data | |
-| 0x40, 0x41 | Static attributes, mine and the stack object's | |
+**Likely**, but strongly, for reading: this is read from the PS2 code, not the Wii build, and 2,872 of its 3,060 words line up, with the same register allocation and block order. The C++ is in `cXObjectInterp.cpp` under `NON_MATCHING`. Where the two builds differ the PS2 behaviour is what's written here. Wii calls `ObjectModule::PersonalityAccessed`, `SkillAccessed` and `MotiveAccessed` when a value is read; PS2 has none of those. Scopes 0x27, 0x2A, 0x42 and 0x43 are placed differently in the two jump tables, and the PS2 cases are what's listed.
 
-**Open:** the other scopes. They are all in the switch at `0x4BACB0`, and 0x2F to 0x3F look like tile and room data.
+"Stack object" is the object whose ID is in the frame. If there's no such object it's error 0xA, except where the table says otherwise. Above scope 0x44 is error 9.
+
+| Scope | Value | Errors | Write |
+|---|---|---|---|
+| 0x00 | My attribute `data` | 6 range | yes |
+| 0x01 | Stack object's attribute | 6 | yes |
+| 0x02 | My semi-global attribute | 6 | yes |
+| 0x03 | My object variable; reading variable 0x19 clears my idle status | 7 no such variable | WriteVar |
+| 0x04 | Stack object's variable; the same for 0x19 | | WriteVar |
+| 0x05 | Stack object's semi-global attribute | 6 | yes |
+| 0x06 | Global `data`, below 0x30. 0x20 and 0x2E are the player cheats' high and low 16 bits, 0xB is the home tiki lot, 3 has no address | 0x3F | yes, if it has an address |
+| 0x07 | **Literal**: the data word itself | | no |
+| 0x08 | My temp `data`, below 8 | 2 | yes |
+| 0x09 | Parameter `data` of this tree | 8 | yes |
+| 0x0A | The frame's stack object ID. Data must be 0 | 0xF | yes |
+| 0x0B | My temp, indexed by my temp `data` | 2 | yes |
+| 0x0C | Range of ad `data` of the running check tree. 0 if ads aren't allowed | 0x1A | yes |
+| 0x0D | Stack object's temp | 2 | yes |
+| 0x0E | My motive `data`, below 16, rounded half away from zero | 0x1A, 0x1C not a Sim | float |
+| 0x0F | Stack object's motive | 0x1A, 0x15, 0x1C | float |
+| 0x10 | ID of the object in stack object's slot `data` | 0x15, 0x1B no slot | no |
+| 0x11 | Stack object's motive, indexed by my temp `data` | 2, 0x1A, 0x15, 0x1C | float |
+| 0x12 | My person data field | 0x1C, 0x21 | yes |
+| 0x13 | Stack object's person data field | 0x21, 0x15, 0x1C | yes |
+| 0x14 | ID of the object in my slot `data` | 0x1B | no |
+| 0x15 | Word `data` of stack object's definition, below 0x62 | 0x23 | no |
+| 0x16 | Stack object's attribute, indexed by parameter `data` | 8, 6 | yes |
+| 0x17 | Data of the room numbered by my temp 0; see below | 0x28, 0x29 | no |
+| 0x18 | A virtual call on the neighbourhood with the stack object's ID and `data` (slot 1); what it holds is open | | yes |
+| 0x19 | **Local** `data` of this tree | 8 | yes |
+| 0x1A | Tree constant: `XObjLang::GetConstantsID` splits `data` into table and index, and index 0x7F means temp 0 | 0x2F | no |
+| 0x1B | Stack object's indexed data (`+0x6C`, count at `+0x70`), indexed by my temp `data` | 2, 0x32 | yes |
+| 0x1C | Personality variable of ad `data`, like 0x0C | 0x1A | yes |
+| 0x1D | Minimum of ad `data`, like 0x0C | 0x1A | yes |
+| 0x1E | My person data field, numbered by my temp `data` | 0x1C, 2, 0x21 | yes |
+| 0x1F | Stack object's person data field, numbered by my temp `data` | 0x15, 0x1C, 2, 0x21 | yes |
+| 0x20 | Person data of the Neighbor whose ID is the stack object | 0x38, 0x21 | no |
+| 0x21 | Always error 0x3A | 0x3A | no |
+| 0x22 | Neighbourhood variable `data`, 1 to 0x23 | 0x3C | yes |
+| 0x23 | 1 if the stack object's type has function `data` | | no |
+| 0x24 | My type attribute | 0x40 | yes |
+| 0x25 | Stack object's type attribute | 0x40 | yes |
+| 0x26 | Definition word of the Neighbor whose ID is the stack object | 0x38, 0x23 | no |
+| 0x27 | Always 0 | | no |
+| 0x28 | Bit 0 of lot `data`'s flags: visited. 1 to 0x1B, otherwise 0 | | no |
+| 0x29 | Whether goal entry `data` of kind 4 is set | 0x3C | no |
+| 0x2A | Column `data` of the Ingredient row with the ID in my temp 0; see below | 0x5D | no |
+| 0x2B | 9, if the stack object is a Sim with a description | 0x15, 0x1C | no |
+| 0x2C | 0, with the same tests | 0x15, 0x1C | no |
+| 0x2D | Tree constant in table temp 0, index `data`; index 0x7F means temp 1 | 0x2F | no |
+| 0x2E | Variable `data` of the family of the Neighbor whose ID is the stack object; 0 if there's none | 0x38 | yes |
+| 0x2F | Stack object's action queue: data 0 and 2 the stack object ID of the action, 1 and 3 its tree table index. Action number is `data` / 2, and -1 if it isn't there | 0x1C, 7 | no |
+| 0x30 | My raw person data word `data`, below 0x24 | 0x1C, 0x21 | yes |
+| 0x31 | My raw person data word, numbered by my temp `data` | 0x1C, 2, 0x21 | yes |
+| 0x32 | Stack object's raw person data word | 0x21, 0x15, 0x1C | yes |
+| 0x33 | Stack object's, numbered by my temp `data` | 2, 0x21, 0x15, 0x1C | yes |
+| 0x34, 0x3A | My Neighbor data word `data`, below 0x31 | 0x1C, 0x21 | yes |
+| 0x35, 0x3B | The same, numbered by my temp `data` | 2, 0x1C, 0x21 | yes |
+| 0x36, 0x3C | Stack object's Neighbor data word | 0x21, 0x15, 0x1C | yes |
+| 0x37, 0x3D | The same, numbered by my temp `data` | 2, 0x21, 0x15, 0x1C | yes |
+| 0x38, 0x3E | Data word of the Neighbor whose ID is the stack object | 0x21, 0x38 | yes |
+| 0x39, 0x3F | The same, numbered by my temp `data` | 2, 0x21, 0x38 | yes |
+| 0x40 | My static attribute | 6 | yes |
+| 0x41 | Stack object's static attribute | 6 | yes |
+| 0x42 | Column `data` of the InventoryTokens row with the ID in my temp 0; see below | 0x5D | no |
+| 0x43 | Column `data` of the plan with the ID in my temp 0; see below | 0x5D | no |
+| 0x44 | Lot transition in my temp 0, 1 to 0x47: data 0 bit 0 of its flags, 1 bits 0 and 1 both set, 2 bit 2 | | no |
+
+Person data fields (0x12, 0x13, 0x1E, 0x1F) are split between two arrays. `cXPerson::TranslasteToNewPersonDataIndex` (a table at `0x492350`) gives the index in the Sim's own array at `+0x548`; if that's -1, the table at `0x4925F0` gives the index in the Neighbor's array at `+0x6C`. Neither is error 0x21.
+
+A motive is a float at Sim `+0x180`. The s16 is `x < 0 ? x - 0.5 : x + 0.5`, cut to an integer.
+
+Room data (0x17). Room 0xFFFB is outside; it gives 0, 1, 0, 0 for data 0 to 3 and has no room to look up otherwise.
+
+| Data | Value |
+|---|---|
+| 0 | Ambient light x 100 |
+| 1 | 1 if outside |
+| 2 | 1 (the room exists) |
+| 3 | Area |
+| 4 | Environment score: the room's score, or the manager's outside score if the room is outside |
+
+Ingredient columns (0x2A, a 0x44-byte row): 0 `+2`, 1 `+0x38`, 2 `+0xC`, 3 `+0x10`, 4 `+0x14`, 5 `+0x18`, 6 `+0x1C`. Above 6 gives 0.
+
+Token columns (0x42, a 0x24-byte row, ID at `+0xC`): 0 `+0x1C`, 1 `+0x20`, 2 `+0x10`, 3 `+0x1E`, 4 `+0x22`, 5 `+0x14`, 6 always 0, 7 `+0xE`, 8 `+4`, 9 `+6`, 10 `+0`, 11 `+2`, 12 the token's index in the tribe inventory or -1, 13 `+0x18`, 14 `+0x1A`, 15 the harvest tool, 16 whether it's ever been collected. Above 16 gives 0.
+
+Plan columns (0x43): 0 unlocked, 1 `+2`, 2 `+8`, 3 `+4`, 4 `+6`, 5 put in hand, 6 put on ground, 7 put in inventory, 8 add token to inventory, 9 construction motion, 10 the tool resolved to a token, 11 resource pile, 12 tool used, 13 time to make, 14 to 22 the first three build motives as motive, minimum, maximum, 23 skill to improve, 24 `+0x5E`. Above 24 gives 0.
 
 The stack object is the frame's object ID. A call passes it on to the called tree; `RunCheckTree` takes it as a parameter.
 
@@ -303,14 +402,18 @@ The stack object is the frame's object ID. A call passes it on to the called tre
 | SetMotiveDelta | `+3`: bit 0 clear all, bit 1 influence on me, bit 2 influence on stack object |
 | SetToNext | `+4` low 4 bits search type, bit 5 GUID from temps, bit 6 skip non-leads; bit 7 means `+5` and `+7` give target owner and data, otherwise it's the stack object |
 | Snap | `+4` bit 0 origin only, 1 ask person to move, 2 use footprint |
+| TestObjectType | Read from the PS2 code. `+0` s32 GUID; `+4` s16 data and `+6` u8 scope give the object to test, a missing object being error 0x17; `+7` flags. Bit 2: true if its GUID is the one in temps 1 and 2 (high, low). Else bit 0: true if the GUID's selector has the same semi-global namespace. Else bit 1: store the GUID in temps 1 and 2, true. Else: true if its GUID or its master selector's GUID is the one given. An object with no selector is false |
 | TreeBreak | `+4` bit 0 log only, bit 1 break all |
 
 The full list is `*Param` in the Wii symbols. `tools/bhav.py` doesn't test any of this table.
 
+`cXObject::TryTestObjectType`'s C++ is in `cXObjectPrims.cpp` under `NON_MATCHING`.
+
 ## What's left
 
 **Open:**
-- The bodies of the primitives themselves, except what's above. Each is a function at the address in the table.
-- `InterpValue` scopes not listed, and what `+4` of an expression is for.
+- The bodies of the primitives, except what's above. Each is a function at the address in the table.
+- What scope 0x18's virtual call returns, and what reads the flag `0x49DDA4`.
+- What `+4` of an expression is for. No code reads it.
 - Header bytes 7 and 8, and type 0x16.
 - Tree constants: how `GetConstantsID` finds them, and whether a set holds any on PS2.

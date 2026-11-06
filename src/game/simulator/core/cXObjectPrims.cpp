@@ -1,6 +1,7 @@
 #include "game/simulator/core/cXObject.h"
 
 #include "game/simulator/core2/cXPerson.h"
+#include "game/simulator/objectdata/XObjLang.h"
 
 // Primitive 0xf, TreeBreak.
 struct TreeBreakParam {
@@ -17,6 +18,58 @@ public:
     TreeBreakValue() {}
     TreeBreakValue(const TreeBreakValue &other);
 };
+
+#ifdef NON_MATCHING
+// The logic is all here, and 69 of the 121 words line up. Still different: the registers of the
+// selector and the hash lookup's variables are one along from the game's, and the compare in
+// the bit 2 case branches the other way round.
+// Primitive 0x20: is the object in an operand of a given type?
+struct TestObjectTypeParam {
+    int mGUID;  // 0x00
+    s16 mData;  // 0x04
+    u8 mScope;  // 0x06
+    u8 mFlags;  // 0x07  bit 0 same semi-global group, bit 1 store the GUID, bit 2 GUID from temps
+};
+
+long cXObject::TryTestObjectType(StackElem *elem, XPrimParam *primParam)
+{
+    TestObjectTypeParam *param = (TestObjectTypeParam *)primParam;
+    s16 id;
+    int guid = param->mGUID;
+
+    if (InterpValue(param->mScope, param->mData, 0, 0, &id, 0) == -1)
+        return -1;
+    cXObject *object = GetObjectFromID(id);
+    TREE_CHECK(this, object, 0x17, return -1);
+    ObjSelector *selector = object->mSelector;
+    if (!selector)
+        return 0;
+    u8 flags = param->mFlags;
+    if (flags & 4) {
+        int wanted = (mTemps[1] << 16) | (u16)mTemps[2];
+        if (selector->GetGUID() != wanted)
+            return 0;
+        goto matched;
+    }
+    if (flags & 1) {
+        ObjSelector *other = GetObjectFolder()->GetSelectorByGUID(guid);
+        if (other && selector->mSemiNamespaceID == other->mSemiNamespaceID)
+            return 1;
+        return 0;
+    }
+    if (flags & 2) {
+        mTemps[2] = guid;
+        mTemps[1] = guid >> 16;
+    matched:
+        return 1;
+    }
+    if (selector->GetGUID() == guid)
+        return 1;
+    if (selector->GetMasterSelector()->GetGUID() == guid)
+        return 1;
+    return 0;
+}
+#endif
 
 // Primitive 0x3d. Wii keeps this as a function; PS2 inlines it.
 inline void cXObject::TryParticleEffect(ParticleEffectParam effect, long &result)

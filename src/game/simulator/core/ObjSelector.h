@@ -34,8 +34,12 @@ public:
     s16 *mDefinition;      // 0x38
     u8 pad_0x3c[0x80];     // 0x3c
     void *mSimDescription; // 0xbc
+    u32 pad_0xc0[5];       // 0xc0
+    ObjSelector *mNext;    // 0xd4  the next selector in ObjectFolder's hash bucket
 
     ObjectFunctionTable *GetFnTable();
+    int GetGUID() const;
+    ObjSelector *GetMasterSelector();
     int CountTypeAttributes();
     s16 *GetTypeAttributes();
 };

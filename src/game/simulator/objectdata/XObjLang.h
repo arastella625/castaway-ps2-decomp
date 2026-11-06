@@ -4,6 +4,7 @@
 #include "common/ERQuickdata.h"
 #include "common/types.h"
 #include "game/simulator/core/Behavior.h"
+#include "game/simulator/core/ObjSelector.h"
 
 // A tree constant table. Wii: ObjectDataBehaviorConstants; slots run in Wii vtable order.
 class ObjectDataBehaviorConstants : public IConsoleUnknown {
@@ -28,11 +29,38 @@ public:
     ObjectDataBehaviorConstants *GetBehaviorConstants(s16 id);
 };
 
+// Wii: HashList<ObjSelector, int, 256>. A find moves what it finds to the front of its bucket.
+class SelectorHashList {
+public:
+    ObjSelector *mBuckets[256];
+
+    ObjSelector *findItem(const int &key)
+    {
+        ObjSelector **bucket = &mBuckets[key & 0xff];
+        ObjSelector *previous = 0;
+        ObjSelector *selector = *bucket;
+        while (selector && key != selector->GetGUID()) {
+            previous = selector;
+            selector = selector->mNext;
+        }
+        if (selector && previous) {
+            previous->mNext = selector->mNext;
+            selector->mNext = *bucket;
+            *bucket = selector;
+        }
+        return selector;
+    }
+};
+
 // Wii: ObjectFolder, reached through a global on PS2.
 class ObjectFolder {
 public:
-    u32 pad_0x0[0x1b2];       // 0x000
-    ERQuickdata *mDatabase;   // 0x6c8  Wii: GetObjectsDatabase()
+    u32 pad_0x0[0x15];          // 0x000
+    SelectorHashList mSelectors; // 0x054
+    u32 pad_0x454[0x9d];        // 0x454
+    ERQuickdata *mDatabase;     // 0x6c8  Wii: GetObjectsDatabase()
+
+    ObjSelector *GetSelectorByGUID(int guid) { return mSelectors.findItem(guid); }
 
     NamespaceSelector *GetNamespaceSelector(u32 namespaceID);
 };

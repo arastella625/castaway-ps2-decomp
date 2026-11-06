@@ -42,7 +42,7 @@ inline int fround(f32 value)
     REF_VALUE(person->GetPersonDataArray() + data);
 
 #ifdef NON_MATCHING
-// About 2,900 of the 3,060 words line up; the register allocation, stack frame and block order
+// 2,872 of the 3,060 words line up; the register allocation, stack frame and block order
 // all agree with the game, so what follows reads the same as the game's code. What still differs:
 // - Scope 0x22: the game has a compare with 7 and a branch to the end, then v0 = 1 in a delay
 //   slot, though neither does anything. Wii has the same compare. Nothing tried here keeps it.
@@ -993,8 +993,8 @@ inline void OnEdithSetFlagField1(int mask, bool wasSet, bool isSet)
 }
 
 #ifdef NON_MATCHING
-// The size is exact and about 575 of 628 words line up; the rest is alignment that follows
-// from these. What differs:
+// 575 of the 628 words line up, and this is four words too long; much of the rest is alignment
+// that follows from these. What differs:
 // - Where the left operand might be a motive, the game tests the float pointer in a0 and takes
 //   a branch-likely with its delay slot from the target. OBJECT_CHECK gets a0 but not the
 //   branch-likely; a plain if gets the branch-likely but puts the pointer in v0.
