@@ -45,7 +45,7 @@ The owner chose PS2 over Wii on purpose. As far as we know nobody has decompiled
 
 **Compiler (step 5, done for `game/cas`):** SN Systems ee-gcc 2.95.3 build 1.36 at `-O2` (`ee-gcc2.95.3-136` in decompme/compilers). Three `SimBodyPart` methods compiled and assembled with its own `as.exe` are byte-identical to the game: 115 of 115 comparable words, with 3 relocated words excluded. SN 2.95.3 v1.14 and 2.95.2 v2.73a do not match. Sony 2.96 was not fairly tested, because my flags didn't target the R5900.
 
-Flags, from 70 matched functions: `-O2 -G0 -fno-rtti`. `-G0` is proven: float constants assemble to `lui`/`ori`/`mtc1` only when `as` gets `-G0`, and string addresses are `lui`/`addiu`, not gp-relative. `-fno-rtti` is likely, because slot 0 of every vtable is null. Still open: `-O2` and `-O3` gave the same code, and `-fno-exceptions` made no difference. Only one source module has been tested; other modules may use other flags, and EA and Sony libraries may have been built separately.
+Flags, from 315 matched functions: `-O2 -G0 -fno-rtti -fno-exceptions`. `-G0` is proven: float constants assemble to `lui`/`ori`/`mtc1` only when `as` gets `-G0`, and string addresses are `lui`/`addiu`, not gp-relative. `-fno-rtti` is likely, because slot 0 of every vtable is null. `-fno-exceptions` is proven: with exceptions on, the compiler adds cleanup code around a call made while a temporary is alive, and the game has none (`SimBodyPart::GetIconTextureID`). Still open: `-O2` and `-O3` gave the same code. Only one source module has been tested; other modules may use other flags, and EA and Sony libraries may have been built separately.
 
 **Matching workflow:** decompiled code is in `src/`, addresses in `config/symbols.txt`, and `tools/verify.py` builds and byte-compares every function. `docs/STANDARDS.md` has the rules and the command. `pkg/tools/matching` is the older harness that compared four compilers and twelve flag sets; keep it for testing other modules.
 
@@ -74,17 +74,35 @@ Creating functions at all vtable slot targets (`tools/CreateFunctionsAt.java`) a
 
 Names now total 2,173 of 13,231 functions (16.4%), including 650 in `game/simulator/core` and `core2`. The jump came from `tools/vtable_order.py`, which pairs tables by order and slot counts (940 names). To rebuild, loop `vtable_order.py`, `vtables.py --all-tiers`, `order_fill.py` and `match.py`, feeding each `castaway_ps2_names.csv` back in, until nothing new appears (5 rounds here). Still open: 2,955 of 4,538 vtable slot targets are unnamed, and Wii seems to combine multiple-inheritance tables that PS2 keeps separate, so those don't match on length.
 
-**Status, 2026-11-05, matching:** 70 functions match (33 in `SimBodyPart`, 37 in `CasSimDescription`). Both classes have their full virtual tables declared in order: the Wii vtables in ts2c `asm/data.s` list every slot by name, and the PS2 tables have the same slots in the same order (72 for `SimBodyPart`, 67 for `CasSimDescription`), so any class's virtual layout can be read off the Wii data.
+**Status, 2026-11-05, matching:** 315 functions match: 44 in `SimBodyPart`, 45 in `CasSimDescription`, 224 across the 15 `SimBodyPart` subclasses, and both `BitFlags::operator[]` instantiations. Two near misses sit under `NON_MATCHING`, each with a note on what differs: `SimBodyPart::GetModelID` (one word) and `SimBodyPartHead::CalculateModelIndexFromModelCodeIndexAndStyleIndex` (two words). Both base classes have their full virtual tables declared in order: the Wii vtables in ts2c `asm/data.s` list every slot by name, and the PS2 tables have the same slots in the same order (72 for `SimBodyPart`, 67 for `CasSimDescription`), so any class's virtual layout can be read off the Wii data.
 
 What the compiler does with source shape, learned while matching:
 - `if (ok) return a; return b;` puts `a` at the branch target. Swap the two when the branch sense is reversed.
 - `x == false` on a `bool` gives `sltiu`; `!x` gives `xori`.
 - Indexing through an inline accessor (`VECTOR::operator[]`) picks different registers from indexing a raw pointer.
 - A callee declared to return `bool` avoids an extra `sltu` at the call site.
+- An early `if (bad) return 0;` puts the return-0 block in the middle of the function. `return ok ? x : 0;` puts it at the end.
+- A class is returned through a hidden pointer only if it has its own copy constructor. A destructor alone doesn't do it. `BitFlags` and `EString` both need one declared.
+- Small accessors that the Wii build calls are inlined on PS2. Writing the call instead of the field access changes when the value is loaded (`SimBodyPartHair::UpdateRelatedData`).
+- Two separate `count--` statements allocate registers differently from one statement behind a combined condition (`SimBodyPart::GetNumValidStyles`).
+- Template instantiations go in linkonce sections, which `verify.py` doesn't check. Write them as explicit specialisations (`src/common/BitFlags.cpp`).
 
-Next targets in `game/cas`: `CasSimDescription::GetBodyPartIndex` (calls a switch helper at `0x129E30`), the texture-name functions (they need the string class at `0x3DE498`–`0x3DED30`), then the 15 `SimBodyPart` subclasses, whose small overrides sit at `0x141DC0`–`0x142450`.
+A byte match proves the code, not the name. `0x14A050` matched as `SimBodyPart::GetCharacterFlag`, which is what the name list calls it, but its callers pass `this + 0x1E`: it is `BitFlags<unsigned short>::operator[]`, and `GetCharacterFlag` is inlined. The source is corrected; the name list and Ghidra still have the wrong name. Check how a function is called before trusting a propagated-tier name.
 
-**Status, 2026-11-05, rebuild (step 6):** `rebuild/rebuild.py` reproduces the `pkg/target.sha1` checksum exactly from a splat split plus the C++ in `src/`. 66 of the 70 matched functions are linked in place of their assembly; see `rebuild/README.md` for how. Breaking one C++ function on purpose changes one word and the report names the function, so the check is real. Four functions stay as assembly because they use string literals or a jump table: `IsGeneric`, `GetModelCode`, `GetClothingSetName` and `GetTextureVariationName` in `SimBodyPart`. Linking those needs the game's `.rodata` split, which is the next rebuild milestone, followed by `.data` (vtables) and a decomp.me workflow. Still raw binary: the ELF header, `.vutext`, `.data`, `.rodata` and the rest (12.7% of the file). The original linker is still unidentified, and the rebuild doesn't need it.
+How the subclasses were done: the `CasSimDescription` destructor writes each member's vtable pointer, which gives the PS2 vtable address of every `SimBodyPart` subclass, and the Wii vtable of the same class names every slot. That gave a name and address for 249 overrides, most of them one instruction long. The same method should work for any class whose vtable address is known.
+
+Not matched yet in `game/cas`, with the reason:
+- `SimBodyPart::IsValidClothingSetIndex` and its five siblings: each inlines `AssertWithInfo`, which formats a message into 0x600 bytes of stack buffers and copies the sim's name.
+- `CasSimDescription::UseDyesForTextureVariation`: reads `PlanManager::cheatIgnoreRequirements` at `0x4923B0` and inlines `CasUtils::UseArchetype`.
+- `CasUtils::GetNumTattooTextures`: inlines `CasUtils::GetBodyData`, a resource lookup through several unmapped globals.
+- Subclass destructors: the compiler doesn't emit its implicit destructors as standalone functions in this build.
+- The name functions (`GetModelName`, `GetTextureName` and so on): they build `EString` values, so the string class needs more of its members first.
+
+Follow-ups: `Sim::BodyPartModelInfoTSC6` and `Sim::BodyPartStyleInfoTSC6` are the Wii names of the structs called `BodyPartModelCodeInfo` and `BodyPartStyleInfo` in `SimBodyPart.h`. `GetType` returns `Character::eBodyPart` values but is declared `int`.
+
+Best next seam: the name list has about 1,400 vtable-tier names, and many of those functions are one or two instructions. Their Wii symbols encode the class, method and parameter types, so trivial bodies could be generated for many classes at once, the way the subclasses were. That needs a decision on how to lay out hundreds of small classes in `src/`.
+
+**Status, 2026-11-05, rebuild (step 6):** `rebuild/rebuild.py` reproduces the `pkg/target.sha1` checksum exactly from a splat split plus the C++ in `src/`. 303 of the 315 matched functions are linked in place of their assembly; see `rebuild/README.md` for how. Breaking one C++ function on purpose changes one word and the report names the function, so the check is real. Twelve functions stay as assembly because they use string literals or a jump table; `rebuild.py` lists them on every run. Linking those needs the game's `.rodata` split, which is the next rebuild milestone, followed by `.data` (vtables) and a decomp.me workflow. Still raw binary: the ELF header, `.vutext`, `.data`, `.rodata` and the rest (12.7% of the file). The original linker is still unidentified, and the rebuild doesn't need it.
 
 ## Known weaknesses
 
