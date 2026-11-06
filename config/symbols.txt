@@ -1029,3 +1029,4 @@
 0x002193B8 Contains__16EdithVariableSeti
 0x00215D90 WriteVar__16EdithVariableSetis
 0x00215868 __vc__C16EdithVariableSeti
+0x00235968 InterpValue__8cXObjectssPPCsPPfPsPPs

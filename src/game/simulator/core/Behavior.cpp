@@ -1,12 +1,6 @@
 #include "game/simulator/core/Behavior.h"
 
-// The namespace IDs that a tree's ID range selects. Only the fields these functions read.
-class ObjSelector {
-public:
-    u32 field_0x0;       // 0x00
-    u32 mNamespaceID;    // 0x04
-    u32 mSemiNamespaceID; // 0x08
-};
+#include "game/simulator/core/ObjSelector.h"
 
 // Wii: ObjectFolder's global namespace ID, a static read by GetGlobNamespaceID.
 extern u32 sGlobNamespaceID;

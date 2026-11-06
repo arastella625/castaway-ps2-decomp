@@ -9,7 +9,7 @@ class EdithVariableSet {
 public:
     u32 pad_0x0[0xc];
 
-    const s16 *operator[](int index) const;
+    const s16 &operator[](int index) const;
     int Contains(int index);
     const s16 *WriteVar(int index, s16 value);
 };

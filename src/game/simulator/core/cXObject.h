@@ -4,6 +4,7 @@
 // The vtable stays an external symbol, so the rebuild links to the game's copy at 0x4BC630.
 #pragma interface
 
+#include "common/eastl.h"
 #include "common/types.h"
 #include "game/simulator/core/EdithVariableSet.h"
 #include "game/simulator/core/Neighborhood.h"
@@ -12,7 +13,6 @@
 
 class FTilePt;
 class FTileRect;
-class ObjectDefinition;
 class ObjSelector;
 class ReconBuffer;
 class RelMatrix;
@@ -21,6 +21,15 @@ namespace Weather {
 class DamageEvent;
 class Armor;
 }
+
+// Wii: ObjectSlot. Slot 0 is the object's own; the slots a tree sees start at 1.
+class ObjectSlot {
+public:
+    u32 field_0x0;       // 0x00
+    s16 mObjectID;       // 0x04
+    u8 pad_0x6[0x1e];    // 0x06
+};
+STATIC_ASSERT(ObjectSlot_size, sizeof(ObjectSlot) == 0x24);
 
 // The base of everything in the world that runs trees. The layout comes from the Wii
 // constructor and the PS2 destructor: past TreeSim, a PS2 offset is the Wii offset plus 4,
@@ -47,11 +56,9 @@ public:
     u8 mRect[0x10];            // 0xd0  an FTileRect
     u32 field_0xe0;            // 0xe0
     u32 field_0xe4;            // 0xe4
-    ObjectDefinition *mDef;    // 0xe8
+    s16 *mDef;                 // 0xe8  a word of it is scope 0x15; word 9 is the object's type
     ObjSelector *mSelector;    // 0xec
-    u8 *mObjectSlots;          // 0xf0  eastl::vector<ObjectSlot>, 0x24 bytes each
-    u8 *mObjectSlotsEnd;       // 0xf4
-    u8 pad_0xf8[8];            // 0xf8
+    eastl::vector<ObjectSlot, eastl::allocator> mObjectSlots; // 0xf0
     u8 mRoutingSlots[0x10];    // 0x100 eastl::vector<RoutingSlot>
     u32 mSpriteSlots;          // 0x110 eastl::vector<SpriteSlot>, its first word
     u8 pad_0x114[0xc];         // 0x114
@@ -103,6 +110,14 @@ public:
     virtual u32 ReconType();
 
     void HandleError();
+    s16 GetType() const { return mDef[9]; }
+    int CountObjectSlots() { return mObjectSlots.size() - 1; }
+    ObjectSlot *GetObjectSlot(int index)
+    {
+        if (index < 0 || index >= CountObjectSlots())
+            return 0;
+        return &mObjectSlots[index + 1];
+    }
     cXObject *GetObjectFromID(s16 id) { return mModule->GetObjectFromID(id); }
 
     // Reads and writes one operand of an instruction: bhav.md lists the scopes. InterpValue

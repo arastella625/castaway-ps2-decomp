@@ -48,6 +48,7 @@ public:
     T *mpCapacity;        // 0x08
     Allocator mAllocator; // 0x0c
 
+    vector() : mpBegin(0), mpEnd(0), mpCapacity(0) {}
     vector(const Allocator &allocator) : mpBegin(0), mpEnd(0), mpCapacity(0), mAllocator(allocator) {}
     ~vector()
     {
