@@ -40,7 +40,7 @@ s32 SimBodyPartNecklaceEarring::GetIsDamaged()
     return 0;
 }
 
-BitFlags SimBodyPartNecklaceEarring::ApplyDamage(const Weather::DamageEvents &events)
+BitFlags<u32> SimBodyPartNecklaceEarring::ApplyDamage(const Weather::DamageEvents &events)
 {
-    return BitFlags(0);
+    return BitFlags<u32>(0);
 }

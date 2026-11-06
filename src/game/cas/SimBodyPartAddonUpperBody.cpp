@@ -40,7 +40,7 @@ s32 SimBodyPartAddonUpperBody::GetIsDamaged()
     return 0;
 }
 
-BitFlags SimBodyPartAddonUpperBody::ApplyDamage(const Weather::DamageEvents &events)
+BitFlags<u32> SimBodyPartAddonUpperBody::ApplyDamage(const Weather::DamageEvents &events)
 {
-    return BitFlags(0);
+    return BitFlags<u32>(0);
 }

@@ -55,17 +55,17 @@ s32 SimBodyPartSleeves::GetIsDamaged()
     return 0;
 }
 
-BitFlags SimBodyPartSleeves::ApplyDamage(const Weather::DamageEvents &events)
+BitFlags<u32> SimBodyPartSleeves::ApplyDamage(const Weather::DamageEvents &events)
 {
-    return BitFlags(0);
+    return BitFlags<u32>(0);
 }
 
-BitFlags SimBodyPartSleeves::Degrade()
+BitFlags<u32> SimBodyPartSleeves::Degrade()
 {
-    return BitFlags(0);
+    return BitFlags<u32>(0);
 }
 
-BitFlags SimBodyPartSleeves::Repair()
+BitFlags<u32> SimBodyPartSleeves::Repair()
 {
-    return BitFlags(0);
+    return BitFlags<u32>(0);
 }

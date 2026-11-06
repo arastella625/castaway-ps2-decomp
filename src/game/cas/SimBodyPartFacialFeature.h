@@ -20,7 +20,7 @@ public:
     virtual int GetLayoutMapNumber() const;
     virtual TRect<u16> GetLayoutMapRect() const;
     virtual int GetImageModelSetType() const;
-    virtual void GetTextureName(bool a) const;
+    virtual EString GetTextureName(bool a) const;
     virtual u32 GetReflectionMaskID(bool a) const;
     virtual u8 CalculateModelIndexFromModelCodeIndexAndStyleIndex(u8 modelCodeIndex, u8 styleIndex) const;
     virtual u8 CalculateStyleIndexFromModelIndex(u8 modelIndex) const;

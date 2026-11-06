@@ -16,7 +16,7 @@ public:
     virtual TRect<u16> GetLayoutMapRect() const;
     virtual int GetImageModelSetType() const;
     virtual s32 GetIsDamaged();
-    virtual BitFlags ApplyDamage(const Weather::DamageEvents &events);
+    virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvents &events);
 };
 STATIC_ASSERT(SimBodyPartNecklaceEarring_size, sizeof(SimBodyPartNecklaceEarring) == 0x24);
 

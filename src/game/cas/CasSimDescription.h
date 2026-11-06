@@ -43,7 +43,7 @@ public:
     u32 field_0x80;                                   // 0x080
     u16 field_0x84;                                   // 0x084
     u8 field_0x86;                                    // 0x086
-    BitFlags flags;                                   // 0x088
+    BitFlags<u32> flags;                              // 0x088
     u32 field_0x8c;                                   // 0x08c
     CasSimTypeInfo *typeInfo;                         // 0x090
     SimBodyPart *bodyParts[Character::BODY_PART_COUNT]; // 0x094  point into bodyPartStorage
@@ -130,7 +130,18 @@ public:
     virtual void CreateWornClothingItemsInInventory(InventoryItems *items, s16 a, int b);
     virtual void SetAllClothingItemsFromInventory(s16 a);
     virtual u8 GetClothingSetUIIndex(Character::eBodyPart part) const;
+
+    // Not virtual. The PS2 build inlines it.
+    bool GetFlag(int index) const { return flags[index]; }
 };
 STATIC_ASSERT(CasSimDescription_size, sizeof(CasSimDescription) == 0x334);
+
+// A body part asks its sim for a flag, and falls back to its own copy when it has no sim.
+inline bool SimBodyPart::GetCharacterFlag(int index) const
+{
+    if (description != 0)
+        return description->GetFlag(index);
+    return characterFlags[index];
+}
 
 #endif

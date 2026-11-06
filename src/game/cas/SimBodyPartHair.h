@@ -23,9 +23,9 @@ public:
     virtual TRect<u16> GetLayoutMapRect() const;
     virtual int GetImageModelSetType() const;
     virtual const char *GetModelCode() const;
-    virtual void GetTextureName(bool a) const;
-    virtual void GetReflectionMaskName(bool a) const;
-    virtual void GetIconTextureName() const;
+    virtual EString GetTextureName(bool a) const;
+    virtual EString GetReflectionMaskName(bool a) const;
+    virtual EString GetIconTextureName() const;
     virtual u32 GetModelID() const;
     virtual u32 GetReflectionMaskID(bool a) const;
     virtual u8 CalculateModelIndexFromModelCodeIndexAndStyleIndex(u8 modelCodeIndex, u8 styleIndex) const;

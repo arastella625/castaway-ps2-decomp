@@ -21,8 +21,8 @@ public:
     virtual u8 CalculateModelIndexFromModelCodeIndexAndStyleIndex(u8 modelCodeIndex, u8 styleIndex) const;
     virtual u8 CalculateStyleIndexFromModelIndex(u8 modelIndex) const;
     virtual void UpdateRelatedData();
-    virtual BitFlags Degrade();
-    virtual BitFlags Repair();
+    virtual BitFlags<u32> Degrade();
+    virtual BitFlags<u32> Repair();
 };
 STATIC_ASSERT(SimBodyPartTorso_size, sizeof(SimBodyPartTorso) == 0x24);
 

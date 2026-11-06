@@ -40,7 +40,7 @@ s32 SimBodyPartBelt::GetIsDamaged()
     return 0;
 }
 
-BitFlags SimBodyPartBelt::ApplyDamage(const Weather::DamageEvents &events)
+BitFlags<u32> SimBodyPartBelt::ApplyDamage(const Weather::DamageEvents &events)
 {
-    return BitFlags(0);
+    return BitFlags<u32>(0);
 }

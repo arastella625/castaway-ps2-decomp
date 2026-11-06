@@ -1,5 +1,20 @@
 #include "game/cas/SimBodyPart.h"
 
+#include "common/EResourceManager.h"
+
+void SimBodyPart::CopyFrom(const SimBodyPart *other)
+{
+    flags = other->flags;
+    SetClothingSetIndex(other->clothingSetIndex);
+    modelCodeIndex = other->modelCodeIndex;
+    modelIndex = other->modelIndex;
+    styleIndex = other->styleIndex;
+    textureIndex = other->textureIndex;
+    degradationState = other->degradationState;
+    damageState = other->damageState;
+    UpdateRelatedData();
+}
+
 void SimBodyPart::Validate()
 {
     IsValid(true, false);
@@ -8,7 +23,7 @@ void SimBodyPart::Validate()
 void SimBodyPart::SetClothingSetIndex(u8 index)
 {
     if (clothingSetIndex >= geometryVector->size())
-        index = GetNudeClothingSetIndex(flags.Get(0));
+        index = GetNudeClothingSetIndex(flags[0]);
     clothingSetIndex = index;
     clothingSetData = &(*geometryVector)[clothingSetIndex];
     flags.bits = clothingSetData->flags;
@@ -115,6 +130,21 @@ const char *SimBodyPart::GetTextureVariationName() const
     return "";
 }
 
+u32 SimBodyPart::GetTextureID(bool a) const
+{
+    return GetModelID() != 0 ? EResourceManager::CalcId(GetTextureName(a).c_str(), true) : 0;
+}
+
+u32 SimBodyPart::GetReflectionMaskID(bool a) const
+{
+    return GetModelID() != 0 ? EResourceManager::CalcId(GetReflectionMaskName(a).c_str(), true) : 0;
+}
+
+u32 SimBodyPart::GetIconTextureID() const
+{
+    return EResourceManager::CalcId(GetIconTextureName().c_str(), true);
+}
+
 void SimBodyPart::SetToDefault(bool a)
 {
     SetClothingSetIndex(GetDefaultClothingSetIndex(a));
@@ -201,4 +231,14 @@ void SimBodyPart::SetCurrentHitPoints(int hitPoints)
 u8 SimBodyPart::GetDegradationModelCodeIndex() const
 {
     return modelCodeIndex;
+}
+
+Sim::BodyPartGeometryTSC6 *SimBodyPart::GetClothingSetData() const
+{
+    return clothingSetData;
+}
+
+BodyPartTypeInfo *SimBodyPart::GetBodyPartTypeInfo() const
+{
+    return bodyPartTypeInfo;
 }

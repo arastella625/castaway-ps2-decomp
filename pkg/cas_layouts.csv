@@ -1,6 +1,6 @@
 class,offset,type,name,comment
 SimBodyPart,size,0x24,,
-SimBodyPart,0x0,uint,field_0x0,Unknown. GetCharacterFlag reads 16 bits here on PS2 but 32 on Wii
+SimBodyPart,0x0,ptr,description,The CasSimDescription this part belongs to or null; GetCharacterFlag asks it for flags (inlined in Hair::GetModelCode)
 SimBodyPart,0x4,uint,flags,BitFlags; SetClothingSetIndex copies the clothing set's flags here
 SimBodyPart,0x8,ptr,geometryVector,Wii IsGeneric passes this to VECTOR<Sim::BodyPartGeometryTSC6>::size
 SimBodyPart,0xc,ptr,bodyPartTypeInfo,Direct getter GetBodyPartTypeInfo
@@ -12,7 +12,7 @@ SimBodyPart,0x1a,byte,modelIndex,IsValidModelIndex
 SimBodyPart,0x1b,byte,styleIndex,IsValidStyleIndex
 SimBodyPart,0x1c,byte,textureIndex,IsValidTextureIndex
 SimBodyPart,0x1d,byte,degradationState,IsValidDegradationState
-SimBodyPart,0x1e,ushort,field_0x1e,Address taken in 5 methods; exact type unknown
+SimBodyPart,0x1e,ushort,characterFlags,BitFlags<unsigned short>; GetCharacterFlag reads it when description is null
 SimBodyPart,0x20,ptr,vptr,GCC places the vtable pointer after the base data; Wii has it at offset 0
 SimBodyPartHead,size,0x24,,
 SimBodyPartHead,0x0,SimBodyPart,base,

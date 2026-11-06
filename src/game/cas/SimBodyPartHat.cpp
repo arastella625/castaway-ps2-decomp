@@ -55,7 +55,7 @@ s32 SimBodyPartHat::GetIsDamaged()
     return 0;
 }
 
-BitFlags SimBodyPartHat::ApplyDamage(const Weather::DamageEvents &events)
+BitFlags<u32> SimBodyPartHat::ApplyDamage(const Weather::DamageEvents &events)
 {
-    return BitFlags(0);
+    return BitFlags<u32>(0);
 }

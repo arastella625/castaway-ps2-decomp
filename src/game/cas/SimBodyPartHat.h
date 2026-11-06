@@ -21,7 +21,7 @@ public:
     virtual u8 CalculateStyleIndexFromModelIndex(u8 modelIndex) const;
     virtual void UpdateRelatedData();
     virtual s32 GetIsDamaged();
-    virtual BitFlags ApplyDamage(const Weather::DamageEvents &events);
+    virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvents &events);
 };
 STATIC_ASSERT(SimBodyPartHat_size, sizeof(SimBodyPartHat) == 0x24);
 

@@ -2,11 +2,13 @@
 #define GAME_CAS_SIMBODYPART_H
 
 #include "common/BitFlags.h"
+#include "common/EString.h"
 #include "common/EVec3.h"
 #include "common/TRect.h"
 #include "common/Vector.h"
 #include "common/types.h"
 
+class CasSimDescription;
 class ReconBuffer;
 class SimModelTSC6;
 
@@ -31,7 +33,7 @@ struct BodyPartGeometryTSC6 {
     VECTOR<const char *> textureVariations; // 0x08
     u32 flags;                              // 0x0c  bits 1-5: generic for style 1-5
     s32 hitPointsPerDegradationState;       // 0x10
-    u8 *armorValues;                        // 0x14  one per Weather::eDamageType
+    VECTOR<u8> armorValues;                 // 0x14  one per Weather::eDamageType
 };
 STATIC_ASSERT(BodyPartGeometryTSC6_size, sizeof(BodyPartGeometryTSC6) == 0x18);
 
@@ -72,8 +74,8 @@ struct BodyPartDamageState {
 // Return types of functions that aren't decompiled yet are guesses.
 class SimBodyPart {
 public:
-    u32 field_0x0;                                    // 0x00
-    BitFlags flags;                                   // 0x04  copy of the clothing set's flags
+    CasSimDescription *description;                   // 0x00  the sim this part belongs to, or null
+    BitFlags<u32> flags;                                 // 0x04  copy of the clothing set's flags
     VECTOR<Sim::BodyPartGeometryTSC6> *geometryVector; // 0x08
     BodyPartTypeInfo *bodyPartTypeInfo;               // 0x0c
     Sim::BodyPartGeometryTSC6 *clothingSetData;       // 0x10  &(*geometryVector)[clothingSetIndex]
@@ -84,7 +86,7 @@ public:
     u8 styleIndex;                                    // 0x1b
     u8 textureIndex;                                  // 0x1c
     u8 degradationState;                              // 0x1d
-    u16 field_0x1e;                                   // 0x1e
+    BitFlags<u16> characterFlags;                     // 0x1e  used when description is null
     // vtable pointer                                 // 0x20  GCC 2.95 puts it after the data
 
     virtual ~SimBodyPart();
@@ -124,10 +126,10 @@ public:
     virtual const char *GetStyleCode() const;
     virtual const char *GetClothingSetName() const;
     virtual const char *GetTextureVariationName() const;
-    virtual void GetModelName() const;
-    virtual void GetTextureName(bool a) const;
-    virtual void GetReflectionMaskName(bool a) const;
-    virtual void GetIconTextureName() const;
+    virtual EString GetModelName() const;
+    virtual EString GetTextureName(bool a) const;
+    virtual EString GetReflectionMaskName(bool a) const;
+    virtual EString GetIconTextureName() const;
     virtual u32 GetModelID() const;
     virtual u32 GetTextureID(bool a) const;
     virtual u32 GetReflectionMaskID(bool a) const;
@@ -151,9 +153,9 @@ public:
     virtual void SetIsDamaged(bool damaged);
     virtual s32 GetCurrentHitPoints();
     virtual void SetCurrentHitPoints(int hitPoints);
-    virtual BitFlags ApplyDamage(const Weather::DamageEvents &events);
-    virtual BitFlags Degrade();
-    virtual BitFlags Repair();
+    virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvents &events);
+    virtual BitFlags<u32> Degrade();
+    virtual BitFlags<u32> Repair();
     virtual void CreateIcon(SimModelTSC6 *model, EVec3 *cameraPos, EVec3 *cameraTarget, f32 a, u32 b,
                             u32 c, int d, int e, int f, bool g);
     virtual void GetRequiredDyesForTextureVariation(u8 textureIndex, s16 *dyes);
@@ -161,6 +163,15 @@ public:
         eastl::vector<Sim::ClothingSetIndexInfo, eastl::allocator> &indexes);
     virtual u8 GetClothingSetUIIndex() const;
     virtual u8 GetDegradationModelCodeIndex() const;
+
+    // Not virtual. The PS2 build inlines these three; the Wii build keeps them as functions.
+    u8 GetClothingSetIndex() { return clothingSetIndex; }
+    u8 &StyleIndex() { return styleIndex; }
+    u8 &TextureIndex() { return textureIndex; }
+    Sim::BodyPartGeometryTSC6 *GetClothingSetData() const;
+    BodyPartTypeInfo *GetBodyPartTypeInfo() const;
+    // Defined in CasSimDescription.h, because it needs that class. The PS2 build inlines it.
+    inline bool GetCharacterFlag(int index) const;
 };
 STATIC_ASSERT(SimBodyPart_size, sizeof(SimBodyPart) == 0x24);
 

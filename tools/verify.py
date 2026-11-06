@@ -29,7 +29,9 @@ TARGET_SHA1 = ROOT / 'pkg' / 'target.sha1'
 COMPILER = 'ee-gcc2.95.3-136'
 TOOL_DIR = 'lib/gcc-lib/ee/2.95.3'
 CPPFLAGS = ['-lang-c++', '-nostdinc', '-Isrc']
-CFLAGS = ['-quiet', '-O2', '-G0', '-fno-rtti']
+# -fno-exceptions: the game has no cleanup code around calls made while a temporary is alive
+# (SimBodyPart::GetIconTextureID), which the compiler adds when exceptions are on.
+CFLAGS = ['-quiet', '-O2', '-G0', '-fno-rtti', '-fno-exceptions']
 ASFLAGS = ['-EL', '-mips3', '-mcpu=r5900', '-G0']
 TOOL_TIMEOUT = 120  # seconds; a hung Wine process must not hang the build
 

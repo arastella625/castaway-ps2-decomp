@@ -35,10 +35,10 @@ public:
     virtual const char *GetStyleCode() const;
     virtual const char *GetClothingSetName() const;
     virtual const char *GetTextureVariationName() const;
-    virtual void GetModelName() const;
-    virtual void GetTextureName(bool a) const;
-    virtual void GetReflectionMaskName(bool a) const;
-    virtual void GetIconTextureName() const;
+    virtual EString GetModelName() const;
+    virtual EString GetTextureName(bool a) const;
+    virtual EString GetReflectionMaskName(bool a) const;
+    virtual EString GetIconTextureName() const;
     virtual u32 GetModelID() const;
     virtual u32 GetTextureID(bool a) const;
     virtual u32 GetReflectionMaskID(bool a) const;
@@ -60,9 +60,9 @@ public:
     virtual s32 GetHitPointsPerDegradationState();
     virtual s32 GetIsDamaged();
     virtual s32 GetCurrentHitPoints();
-    virtual BitFlags ApplyDamage(const Weather::DamageEvents &events);
-    virtual BitFlags Degrade();
-    virtual BitFlags Repair();
+    virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvents &events);
+    virtual BitFlags<u32> Degrade();
+    virtual BitFlags<u32> Repair();
     virtual u8 GetClothingSetUIIndex() const;
 };
 STATIC_ASSERT(SimBodyPartUnused_size, sizeof(SimBodyPartUnused) == 0x24);

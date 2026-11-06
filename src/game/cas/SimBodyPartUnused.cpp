@@ -231,19 +231,19 @@ s32 SimBodyPartUnused::GetCurrentHitPoints()
     return 0;
 }
 
-BitFlags SimBodyPartUnused::ApplyDamage(const Weather::DamageEvents &events)
+BitFlags<u32> SimBodyPartUnused::ApplyDamage(const Weather::DamageEvents &events)
 {
-    return BitFlags(0);
+    return BitFlags<u32>(0);
 }
 
-BitFlags SimBodyPartUnused::Degrade()
+BitFlags<u32> SimBodyPartUnused::Degrade()
 {
-    return BitFlags(0);
+    return BitFlags<u32>(0);
 }
 
-BitFlags SimBodyPartUnused::Repair()
+BitFlags<u32> SimBodyPartUnused::Repair()
 {
-    return BitFlags(0);
+    return BitFlags<u32>(0);
 }
 
 u8 SimBodyPartUnused::GetClothingSetUIIndex() const

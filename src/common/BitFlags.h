@@ -3,18 +3,20 @@
 
 #include "common/types.h"
 
-// Wii: BitFlags<unsigned int>. Declared without the template until a second
-// instantiation turns up on PS2.
+// Wii: BitFlags<unsigned int> and BitFlags<unsigned short>.
+template <class T>
 struct BitFlags {
-    u32 bits;
+    T bits;
 
     // Wii: __ct__12BitFlags<Ui>FUi. The default of 0 is a guess.
-    BitFlags(u32 bits_ = 0) : bits(bits_) {}
+    BitFlags(T bits_ = 0) : bits(bits_) {}
     // The game returns BitFlags through a hidden pointer, which this compiler only does for
-    // a 4-byte class that has its own copy constructor or destructor. Which one is a guess.
+    // a class with its own copy constructor. A destructor alone doesn't (tested with EString).
     BitFlags(const BitFlags &other) : bits(other.bits) {}
-    bool Get(int index) const;
+    // Wii: __vc__12BitFlags<Ui>CFi. Defined in BitFlags.cpp; the game keeps one copy per T.
+    bool operator[](int index) const;
 };
-STATIC_ASSERT(BitFlags_size, sizeof(BitFlags) == 0x4);
+STATIC_ASSERT(BitFlags_u32_size, sizeof(BitFlags<u32>) == 0x4);
+STATIC_ASSERT(BitFlags_u16_size, sizeof(BitFlags<u16>) == 0x2);
 
 #endif

@@ -1,8 +1,10 @@
 #include "game/cas/CasSimDescription.h"
 
+#include "game/cas/CasUtils.h"
+
 Character::eSpecies CasSimDescription::GetSpecies() const
 {
-    return (Character::eSpecies)(flags.Get(0) == false);
+    return (Character::eSpecies)(flags[0] == false);
 }
 
 int CasSimDescription::GetSimType() const
@@ -152,7 +154,7 @@ u8 &CasSimDescription::SkinColor()
 
 u32 CasSimDescription::GetTypeCode() const
 {
-    if (flags.Get(0))
+    if (flags[0])
         return typeInfo->typeCodes[0];
     return typeInfo->typeCodes[1];
 }
@@ -187,4 +189,9 @@ const char *CasSimDescription::GetBodyPartName(Character::eBodyPart part) const
 u8 CasSimDescription::GetNumBodyParts() const
 {
     return Character::BODY_PART_COUNT;
+}
+
+u8 CasSimDescription::GetBodyPartIndex(Character::eBodyPart part) const
+{
+    return CasUtils::GetBodyPartIndex(part);
 }

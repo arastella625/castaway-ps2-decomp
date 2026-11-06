@@ -24,9 +24,9 @@ public:
     virtual u8 CalculateStyleIndexFromModelIndex(u8 modelIndex) const;
     virtual void SwitchToFirstAvailableDegradationStage();
     virtual s32 GetIsDamaged();
-    virtual BitFlags ApplyDamage(const Weather::DamageEvents &events);
-    virtual BitFlags Degrade();
-    virtual BitFlags Repair();
+    virtual BitFlags<u32> ApplyDamage(const Weather::DamageEvents &events);
+    virtual BitFlags<u32> Degrade();
+    virtual BitFlags<u32> Repair();
 };
 STATIC_ASSERT(SimBodyPartSleeves_size, sizeof(SimBodyPartSleeves) == 0x28);
 
