@@ -422,11 +422,13 @@ int CasSimDescription::GetClothingTextureInfo(Sim::eSimPartsMapLocation location
 }
 
 #ifdef NON_MATCHING
-// Three of 63 words differ, all from the loop inside clear(). The game closes it with a
-// "branch likely" (bnel) and keeps the body part index in a1; this compiles to a plain bne
-// and a2. Both say the game's compiler thought the loop's pointer was still needed after
-// the loop, so the source shape of eastl::vector::clear() here is still a guess. The loop's
-// padding itself matches (tools/asm_filter.py).
+// 39 of 60 words differ, most of them only shifted. The code is the same up to the end of
+// the loop inside clear(). There the game closes the loop with a "branch likely" (bnel)
+// where this has a plain bne, and afterwards it keeps the body part index in a1 where this
+// uses a2, which also moves the blocks that follow. Both say the game's compiler thought
+// the loop's pointer was still needed after the loop, so the source shape of
+// eastl::vector::clear() here is still a guess. The loop's padding itself matches
+// (tools/asm_filter.py).
 bool CasSimDescription::GetValidClothingSetIndexes(
     Character::eBodyPart part, eastl::vector<Sim::ClothingSetIndexInfo, eastl::allocator> &indexes)
 {
