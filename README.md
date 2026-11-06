@@ -26,6 +26,10 @@ A hobby reverse-engineering project for the US PS2 build, `SLUS_216.64`. The goa
 
 `rebuild/rebuild.py` goes further: it links the C++ into a complete executable and checks its SHA-1. [rebuild/README.md](rebuild/README.md) has the setup.
 
+## Reading the game's assets
+
+`tools/arc.py` lists and extracts the disc's `.ARC` archives, `tools/texture.py` turns all 13,249 textures into PNGs, `tools/model.py` turns all 2,404 models into OBJ files with their materials and textures, `tools/skeleton.py` reads the 338 character skeletons, `tools/anim.py` decodes all 3,104 animations, `tools/gltf.py` exports models as binary glTF with their rigs and animations, ready for Godot or Blender, and `tools/sim.py` assembles a whole Sim with its skin, clothing, face, hair and body shape. `tools/audio.py`, `movie.py`, `font.py` and `gamedata.py` cover sound, video, fonts and the game's data tables, and `tools/livecheck.py` compares all this with the game running in PCSX2. They read your own disc image in place and use only the standard library. [docs/ASSET_FORMATS.md](docs/ASSET_FORMATS.md) describes the formats and what's still unknown. What they extract is game data, so keep it out of the repo.
+
 ## Credits
 
 Function names come from the symbol table in [simdecomp/ts2c](https://github.com/simdecomp/ts2c), a decompilation of the Wii build. This project wouldn't have got far without that work.
