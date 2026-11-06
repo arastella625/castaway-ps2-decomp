@@ -1,0 +1,34 @@
+# Splits SLUS_216.64 for a full rebuild. Run from a work folder outside the repo, because the
+# output is the game's code in text form and must never be committed.
+# First pass: .text as assembly, everything else as raw binary.
+name: SLUS_216.64
+sha1: ac122ffc11d80cd2639a3878bf784f3d77c31fda
+options:
+  basename: SLUS_216.64
+  base_path: .
+  target_path: SLUS_216.64
+  platform: ps2
+  compiler: EEGCC
+  gp_value: 0x00512670
+  asm_path: asm
+  asset_path: assets
+  src_path: src
+  build_path: build
+  symbol_addrs_path: symbol_addrs.txt
+  undefined_funcs_auto_path: undefined_funcs_auto.txt
+  undefined_syms_auto_path: undefined_syms_auto.txt
+  use_legacy_include_asm: False
+  create_undefined_funcs_auto: True
+  create_undefined_syms_auto: True
+segments:
+  - name: header
+    type: bin
+    start: 0x0
+  - name: main
+    type: code
+    start: 0x80
+    vram: 0x00100000
+    subsegments:
+      - [0x80, asm, text]
+  - [0x38C684, bin, after_text]
+  - [0x41024C]

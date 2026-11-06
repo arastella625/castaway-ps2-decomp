@@ -84,6 +84,8 @@ What the compiler does with source shape, learned while matching:
 
 Next targets in `game/cas`: `CasSimDescription::GetBodyPartIndex` (calls a switch helper at `0x129E30`), the texture-name functions (they need the string class at `0x3DE498`–`0x3DED30`), then the 15 `SimBodyPart` subclasses, whose small overrides sit at `0x141DC0`–`0x142450`.
 
+**Status, 2026-11-05, rebuild (step 6):** `rebuild/rebuild.sh` reproduces the `pkg/target.sha1` checksum exactly from a splat split, with `.text` reassembled using GNU binutils. See `rebuild/README.md`. Changing one instruction fails at exactly that address, so the check is real. Still raw binary: the ELF header, `.vutext`, `.data`, `.rodata` and the rest (12.7% of the file). Next: link the matched C++ from `src/` in place of its assembly, split the data sections, and set up a decomp.me workflow. The original linker is still unidentified, and the rebuild doesn't need it.
+
 ## Known weaknesses
 
 - **PS2 function boundaries are rough.** The jal/`jr ra` heuristic finds about 15.7k starts, while the Wii build has about 27.5k functions. It misses some starts, so some "functions" are really two merged together. That's what fills the `review` tier. The fix is to export Ghidra's function list after auto-analysis and rerun the matching against it.
