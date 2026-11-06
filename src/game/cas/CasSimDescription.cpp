@@ -343,6 +343,48 @@ u32 CasSimDescription::GetCompositeTextureID(const char *base, Sim::eSimPartsMap
     return EResourceManager::CalcId(GetCompositeTextureName(base, location).c_str(), true);
 }
 
+void CasSimDescription::FillInTextureBlendInfo(Character::eBodyPart part, bool a, TextureBlendInfo *info) const
+{
+    u8 index = GetBodyPartIndex(part);
+    info->part = part;
+    info->rect = bodyParts[index]->GetLayoutMapRect();
+    info->layoutMapNumber = bodyParts[index]->GetLayoutMapNumber();
+    info->textureID = bodyParts[index]->GetTextureID(a);
+    info->reflectionMaskID = bodyParts[index]->GetReflectionMaskID(a);
+    info->layered = bodyParts[index]->IsLayered();
+}
+
+// Lists the clothing textures that go into one of the four composite maps, and returns
+// how many there are.
+int CasSimDescription::GetClothingTextureInfo(Sim::eSimPartsMapLocation location, TextureBlendInfo *info,
+                                              bool a) const
+{
+    int count = 0;
+    switch (location) {
+    case 0:
+        FillInTextureBlendInfo((Character::eBodyPart)0x27, a, &info[count++]);
+        FillInTextureBlendInfo((Character::eBodyPart)0x20, a, &info[count++]);
+        break;
+    case 1:
+        FillInTextureBlendInfo((Character::eBodyPart)0x1e, a, &info[count++]);
+        break;
+    case 2:
+        FillInTextureBlendInfo((Character::eBodyPart)0x1c, a, &info[count++]);
+        FillInTextureBlendInfo((Character::eBodyPart)0x21, a, &info[count++]);
+        FillInTextureBlendInfo((Character::eBodyPart)0x25, a, &info[count++]);
+        FillInTextureBlendInfo((Character::eBodyPart)0x1b, a, &info[count++]);
+        FillInTextureBlendInfo((Character::eBodyPart)0x1d, a, &info[count++]);
+        FillInTextureBlendInfo((Character::eBodyPart)0x22, a, &info[count++]);
+        FillInTextureBlendInfo((Character::eBodyPart)0x23, a, &info[count++]);
+        FillInTextureBlendInfo((Character::eBodyPart)0x24, a, &info[count++]);
+        break;
+    case 3:
+        FillInTextureBlendInfo((Character::eBodyPart)0x1f, a, &info[count++]);
+        break;
+    }
+    return count;
+}
+
 #ifdef NON_MATCHING
 // The clear() is a short loop, and short loops don't match yet for two reasons.
 // 1. The assembler pads a short loop with nops, a workaround for a fault in the PS2's

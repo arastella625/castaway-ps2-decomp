@@ -24,6 +24,8 @@ class EGlobal {
 public:
     u8 field_0x0[0x1a8];       // 0x000
     ERQuickdata *casQuickdata; // 0x1a8  the Create-a-Sim quickdata once it is loaded
+    u8 field_0x1ac[0x29c];     // 0x1ac
+    int useGameStateTextures;  // 0x448  when set, texture ids are rehashed with "_GAME"
 
     ELocString GetNewUIString(const char *name, const char *a);
 };

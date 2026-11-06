@@ -13,9 +13,6 @@ public:
     static u32 ComputeSymbol(const char *suffix, u32 id);
 };
 
-// The word at 0x515178. The name is ours.
-extern int gUseGameStateTextures;
-
 // Wii: _gd, the game's global data. Only the two words UseArchetype tests are known.
 struct GlobalData {
     u8 field_0x0[0x48]; // 0x00
@@ -90,7 +87,7 @@ public:
     // game-state switch is set, or the caller asks, a non-zero id is rehashed with "_GAME".
     static u32 GetGameStateTextureID(u32 id, bool a)
     {
-        if (gUseGameStateTextures) {
+        if (_globals.useGameStateTextures) {
             if (id != 0)
                 return EChecksum::ComputeSymbol("_GAME", id);
         } else if (id != 0 && a) {

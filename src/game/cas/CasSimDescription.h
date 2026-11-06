@@ -6,7 +6,6 @@
 #include "game/cas/SimBodyPart.h"
 
 class InventoryItems;
-struct TextureBlendInfo;
 
 // Enumerator values are filled in as code proves them.
 enum PersonalityEnum { PERSONALITY_COUNT = 5 };
@@ -22,6 +21,17 @@ enum eLatticeMorphRegion { LATTICE_MORPH_REGION_COUNT = 4 };
 enum eMorphTargetRegion { MORPH_TARGET_REGION_COUNT = 4 };
 enum eSimPartsMapLocation { SIM_PARTS_MAP_LOCATION_0 };
 }
+
+// One texture to blend into a composite map. FillInTextureBlendInfo writes every field.
+struct TextureBlendInfo {
+    u32 textureID;            // 0x00
+    u32 reflectionMaskID;     // 0x04
+    TRect<u16> rect;          // 0x08  where the texture goes in the map
+    Character::eBodyPart part; // 0x10
+    int layoutMapNumber;      // 0x14
+    int layered;              // 0x18  SimBodyPart::IsLayered, stored as a word
+};
+STATIC_ASSERT(TextureBlendInfo_size, sizeof(TextureBlendInfo) == 0x1c);
 
 class CasEventChangeCharacter {
 public:
@@ -137,7 +147,7 @@ public:
     virtual EString GetTattooClothingSetName(Sim::eTattooLocation location) const;
     virtual u32 GetTattooTextureID(Sim::eTattooLocation location, bool a) const;
     virtual void GetTattooTextureInfo(Sim::eSimPartsMapLocation location, TextureBlendInfo *info, bool a) const;
-    virtual void GetClothingTextureInfo(Sim::eSimPartsMapLocation location, TextureBlendInfo *info, bool a) const;
+    virtual int GetClothingTextureInfo(Sim::eSimPartsMapLocation location, TextureBlendInfo *info, bool a) const;
     virtual EString GetCompositeTextureBaseName() const;
     virtual EString GetCompositeTextureName(const char *base, Sim::eSimPartsMapLocation location) const;
     virtual u32 GetCompositeTextureID(const char *base, Sim::eSimPartsMapLocation location) const;
@@ -167,6 +177,7 @@ public:
     void SetFlag(int index, bool value) { flags.Set(index, value); }
     void CopyBodyPart(Character::eBodyPart part, const CasSimDescription &other);
     void DoStreamTSC5(ReconBuffer *buffer);
+    void FillInTextureBlendInfo(Character::eBodyPart part, bool a, TextureBlendInfo *info) const;
     void InitQuickdataPointers();
 
     // Builds "<info> <first name> <last name>" plus a line break for an assert. The release build throws
