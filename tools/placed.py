@@ -7,8 +7,9 @@ Usage:
   python -I tools/placed.py lot   <game.iso> <out.glb> <lot_01>
 
 check decodes every object of every house. list prints one lot's objects. lot writes the lot's
-terrain and every placed object that has a model to one .glb, which is game data: keep it out of
-the repo. docs/formats/world.md has the format.
+terrain, its scenery and every placed object that has a model to one .glb, which is game data:
+keep it out of the repo. Terrain is the node named after the lot; placed objects and scenery are
+the other nodes, with names starting 'placed ' and 'scenery '. docs/formats/world.md has the format.
 """
 import collections
 import math
@@ -33,8 +34,17 @@ DIRECTION_KEY = 1
 UNITS_PER_TILE = 16
 EIGHTH_TURN = math.pi / 4
 FIRST_LOT_OFFSET = 1  # section 0 is lot_01: HouseData's row 0 is a placeholder
+MISMATCHED_LOT = 'lot_28'  # see docs/formats/world.md
 DEF_GUID = 0x1C
 RES_MODELS_FROM = 7  # the first word of ResData that may hold a resource hash
+# Stand-ins, not decoded. Nothing on the disc ties a palm's leaf to its trunk, and this object's
+# table row names only a rig, so these come from model names and from looking at the models.
+OBJECT_MODELS = {'source_tree_coconutpalm': 'isPalmTreeTrunkEdithFruitFull'}
+PALM_TRUNK = 'isPalmTreeTrunk'
+PALM_LEAF = 'isPalmTreeLeaf'
+PALM_CROWN_HEIGHT = 4.12  # treeanimate3 in isTreeSkeleton
+PALM_LEAVES = 9
+PALM_LEAF_LIFT = 20.0  # degrees above level
 MISSING_TEXTURE = 'missingshader'  # the purple 16x16 behind Maya's default materials
 
 
@@ -218,6 +228,8 @@ def object_model(placed, table, available):
     entry = table.get(placed.guid)
     if entry is None:
         return None
+    if OBJECT_MODELS.get(entry[0]) in available:
+        return OBJECT_MODELS[entry[0]]
     return next((name for name in entry[1] if name in available), None)
 
 
@@ -332,10 +344,46 @@ def add_mesh(builder, library, name, meshes, cache):
     return len(builder.gltf['meshes']) - 1
 
 
+def multiply(a, b):
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz)
+
+
+def euler_quaternion(degrees):
+    """SetEuler: Qz * Qy * Qx, so X applies first."""
+    halves = [math.radians(d) / 2 for d in degrees]
+    qx = (math.sin(halves[0]), 0.0, 0.0, math.cos(halves[0]))
+    qy = (0.0, math.sin(halves[1]), 0.0, math.cos(halves[1]))
+    qz = (0.0, 0.0, math.sin(halves[2]), math.cos(halves[2]))
+    return multiply(multiply(qz, qy), qx)
+
+
+def palm_crown(builder, leaf_mesh):
+    """Return child nodes for a palm: one frond repeated round the top of the trunk."""
+    children = []
+    for index in range(PALM_LEAVES):
+        turn = euler_quaternion((0.0, PALM_LEAF_LIFT, index * 360.0 / PALM_LEAVES))
+        children.append(builder.add_node({
+            'name': 'stand-in leaf %d' % index, 'mesh': leaf_mesh,
+            'translation': list(gltf.to_y_up((0.0, 0.0, PALM_CROWN_HEIGHT))),
+            'rotation': list(gltf.quaternion_to_y_up(turn))}))
+    return children
+
+
+def read_lot_level(disc, lot):
+    archive = arc.find_archive(disc, 'LEVELS')
+    entry = next(e for e in arc.read_toc(disc, archive) if e.name == lot)
+    return gd.read_level(disc.read(archive.lba, entry.offset, entry.size), entry.name)
+
+
 def export_lot(disc, out_path, lot):
     objects = read_houses(disc).get(lot)
     if objects is None:
         raise arc.FormatError('no placed objects for %s' % lot)
+    if lot == MISMATCHED_LOT:
+        print('warning: this house looks like an older lot_27, so objects will be misplaced')
     library = gltf.Library(disc)
     table = model_table(disc)
     available = {e.name: (e, raw) for e, raw in mdl.each_model(disc, library.shaders)}
@@ -346,29 +394,50 @@ def export_lot(disc, out_path, lot):
     meshes = {}
     ground = add_mesh(builder, library, lot, terrain, cache)
     nodes = [builder.add_node({'name': lot, 'mesh': ground})]
-    placed_count = 0
-    for placed in objects:
-        name = object_model(placed, table, available) if placed.on_lot else None
-        if name is None:
-            continue
+
+    def mesh_for(name):
         if name not in meshes:
             parsed = mdl.parse_model(available[name][1], library.shaders, name)
             meshes[name] = add_mesh(builder, library, name, parsed, cache) if parsed else None
-        if meshes[name] is None:
+        return meshes[name]
+
+    names = gd.resource_names(disc)
+    level = read_lot_level(disc, lot)
+    scenery_count = 0
+    for index, item in enumerate(level.objects):
+        name = names.get(item.model_hash)
+        if name not in available or mesh_for(name) is None:
+            continue
+        sx, sy, sz = item.scale
+        node = {
+            'name': 'scenery %s %d' % (name, index), 'mesh': meshes[name],
+            'translation': list(gltf.to_y_up(item.position)),
+            'rotation': list(gltf.quaternion_to_y_up(euler_quaternion(item.rotation))),
+            'scale': [sx, sz, sy]}
+        if name.startswith(PALM_TRUNK):
+            node['children'] = palm_crown(builder, mesh_for(PALM_LEAF))
+        nodes.append(builder.add_node(node))
+        scenery_count += 1
+    placed_count = 0
+    for placed in objects:
+        name = object_model(placed, table, available) if placed.on_lot else None
+        if name is None or mesh_for(name) is None:
             continue
         x, y = placed.metres
         z = heights.get((math.floor(x), math.floor(y)), 0.0)
         half = placed.direction * EIGHTH_TURN / 2
-        nodes.append(builder.add_node({
-            'name': '%s %d' % (placed.name, placed.object_id), 'mesh': meshes[name],
-            'translation': list(gltf.to_y_up((x, y, z))),
-            'rotation': [0.0, math.sin(half), 0.0, math.cos(half)]}))
+        node = {'name': 'placed %s %d' % (placed.name, placed.object_id), 'mesh': meshes[name],
+                'translation': list(gltf.to_y_up((x, y, z))),
+                'rotation': [0.0, math.sin(half), 0.0, math.cos(half)]}
+        if name.startswith(PALM_TRUNK):
+            node['children'] = palm_crown(builder, mesh_for(PALM_LEAF))
+        nodes.append(builder.add_node(node))
         placed_count += 1
     builder.gltf['scenes'][0]['nodes'] = nodes
     with open(out_path, 'wb') as out:
         out.write(builder.to_bytes())
-    print('wrote %s: %d of %d objects placed, %d models' % (out_path, placed_count, len(objects),
-                                                            len(meshes)))
+    print('wrote %s: %d of %d objects, %d of %d scenery, %d models'
+          % (out_path, placed_count, len(objects), scenery_count, len(level.objects), len(meshes)))
     return 0
 
 

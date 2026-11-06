@@ -48,6 +48,8 @@ Confirm each look before moving on.
 | 16 | `F8` on a screen full of text | Whether our font spacing is right, as it looks wide |
 | 17 | Listen to the music in stereo, and to a looping sound | Left and right order, and how streams loop |
 | 18 | Stand next to placed objects on a lot, and `F8` | Object positions and heights, against `tools/placed.py list` |
+| 19 | `F8` under a palm on First Beach, looking up | How many fronds a crown has, and their angle |
+| 20 | Try walking through driftwood, a crate and a plant | Which objects block a Sim |
 
 ## Afterwards
 

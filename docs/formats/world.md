@@ -254,7 +254,8 @@ ferns, trees, rocks, sky, clouds, fog planes and particle anchors.
     matrix = rotation, then PreScale(scale), then PostTranslate(position)
     if character hash == 0: PreScale(model scale)
 
-So **scale here multiplies the model's own scale**. Order of rotation hasn't been checked by eye.
+So **scale here multiplies the model's own scale**. `placed.py lot` follows this, and `lot_01`
+looks right by eye: cliffs, palms and plants sit as a coherent cove. That is **likely**, not a test.
 The wind plants are the 2,272 with rig `windyPlantSkel`.
 
 ### Tile grids
@@ -273,11 +274,11 @@ the grid's first axis is tile Y:
 
 `IsBuildable` is 0x01 set and neither 0x20 nor 0x80. `IsPlaceable` is neither 0x20 nor 0x80. So grid
 0 is where you can build, grid 1 where you can place, and grid 2 an exclusion. Lots are up to 63 by
-63 tiles. The grids look right in size; their meaning hasn't been checked against play.
+63 tiles. `### Arry` below tests these meanings against the stored flags and the objects.
 
 ## DEFAULT.NGH: placed objects
 
-**Proven** for sections, chunks, `objt` and the `ObjM` stream. **Open** for `Arry` contents.
+**Proven** for sections, chunks, `objt` and the `ObjM` and `Arry` streams.
 
 The starting save, on the disc root and outside any archive. Sections sit on 2048-byte boundaries:
 
@@ -306,7 +307,7 @@ ids. All 28 hold the same five chunks:
 | `objt` | 0 | The object types on the lot |
 | `ObjM` | 1 | The objects themselves |
 
-The first word 0 sends `Arry` to `_c2DArray::DoStream`, a `ReconBuffer` stream: not decoded.
+The first word 0 sends `Arry` to `_c2DArray::DoStream`: see `### Arry` below.
 
 `objt` is u32 0, u32 2, `tjbo`, then entries of u32 GUID, 6 x u16 and a name padded to even length,
 ending in a zero word. The fifth u16 counts up. **Proven:** 1,134 of 1,135 GUIDs are in
@@ -365,10 +366,142 @@ row 0 is a placeholder, which fits. Objects land on set cells of their lot's gri
 0.822, and 24 of 28 lots are above 0.75. Pairing with other lots gives 0.40 to 0.50, and swapping x
 and y gives 0.479. I found the offset after seeing the data, but the control supports it. Houses 12
 and 18 are low, at 0.59 and 0.63, for reasons not found. What each of the three grids means is
-still open, so the score picks the best-fitting grid per lot.
+in `### Arry`; this score picks the best-fitting grid per lot.
+
+**The last house is the exception.** It reads as `lot_28` by position, but it looks like an older
+`lot_27`: grid 1 agrees 0.908 with `lot_27` and 0.467 with `lot_28`. The tools still call it
+`lot_28`, so don't pair that level with this house's objects.
 
 The objects have no height. `placed.py lot` drops each onto the terrain's highest surface over its
 one-metre cell, which is a stand-in for what the game does and will be wrong on steep ground.
+
+### Arry
+
+**Proven** for the stream, and for bit 0x10 meaning "not routable". **Likely** for the mesh surface
+bit. Other results are labelled below.
+
+`tools/lotgrid.py check` decodes all 84 chunks (ids 8, 11 and 12 in each of 28 houses; there are no
+other ids) and each ends on its exact last byte. A stream moved by one or two bytes, cut short, or
+with one row too few is rejected on all 84. All 11,073 pad bytes are zero.
+
+From `_c2DArray::DoStream`, reached through `ReadFromDisk` with a plain, uncompressed `ReconBuffer`:
+
+| Type | Meaning |
+|---|---|
+| u32 | 0. A non-zero first word is a raw form, which no chunk uses |
+| i32 | Rows: `GetXSize`, the game's tile X, `placed.py`'s y |
+| i32 | Columns: `GetYSize`, the game's tile Y, `placed.py`'s x |
+| i32 | Item size: 1, or 8 for walls |
+| i32 | 1: packed |
+| packets | Until rows x columns x item size bytes are out |
+
+A packet is a u16. Its top bit means a run: one byte follows, repeated by the low 15 bits. Otherwise
+the low 15 bits count literal bytes. If the position in the chunk is then odd, one pad byte follows.
+Runs work on bytes, not items. Items are row after row.
+
+| Id | Holds |
+|---|---|
+| 8 | u8 tile flags |
+| 11 | u8 floor: 38 on 85,390 tiles, 0 on 6,939 (most on the border), 63 on 2,284, 32 on 19 |
+| 12 | 8-byte `TileWallStorage` |
+
+#### Tile flags
+
+| Bit | Meaning | From | Status |
+|---|---|---|---|
+| 0x01 | Buildable: `IsBuildable` | Grid 0 at load | Code |
+| 0x02 | Set on every tile off the array's border | All 94,632 tiles | Pattern proven; reader open |
+| 0x04 | Outside: `IsOutside`. Set on every tile | All tiles | Code |
+| 0x08 | Roofed: `HasRoof`. Never set on disc | `UpdateRoomStyles` | Code |
+| 0x10 | **Not routable** | Grid 1 at load | Proven |
+| 0x20 | Not editable: `MayEditTile`, `IsPlaceable` | Grid 1 at load | Code |
+| 0x40 | Read by `cXPerson::GatherInteractions`. On 32 tiles of `lot_08` | Disc | Open |
+| 0x80 | No building or placing: `IsBuildable`, `IsPlaceable`, `TestPlace` | Grid 2 at load | Code |
+
+**The three level grids are this array's flags.** Load replaces those bits on every tile, with the
+same logic in the PS2 code at 0x1C4E30 and Wii `cFixedWorld::Load`, so grid 1 alone decides bit 0x10
+when a lot loads. `lotgrid.load_flags` does the same.
+
+The bytes back this up. Flags on disc agree with their own lot's grids 0, 1 and 2 at 0.994, 0.977
+and 0.974. Other lots give about 0.88, 0.60 and 0.80, and swapping the axes 0.91, 0.66 and 0.84. 0x10
+and 0x20 always move together. The rest looks stale, as if the disc's flags were saved from older
+grids. **Likely**, not proven, that the grids win in play: Load skips them if the level's grids
+aren't ready, and nothing here watched a running game. That the flags were plainly made from grids
+is good evidence that they are ready.
+
+#### Where a Sim can walk
+
+`lotgrid.walkable(lot)` gives the tiles with bit 0x10 clear after load. The game tests this bit in
+three places:
+
+- `TILEROUTABLE`, for room routing: bit set means no. Wii code only; not found on PS2 yet.
+- `CollisionMap::IsLocationGood`, for placing: bit clear means yes. If it's set, the caller can ask
+  for a mesh test. The same shape is on PS2 near 0x315850.
+- `CollisionMap::IsMoveBlocked`, for each step of a move: a ghost ignores the bit. Otherwise a set
+  bit blocks, unless the Sim is under direct player control. Then a ray goes down to the outer lot
+  mesh, and the move is allowed if the surface it hits has bit 0x10 set. The same shape is on PS2
+  near 0x316290. On Wii the function then blocks on a wall that isn't a door or gate.
+
+So the tile answer is exact for autonomous Sims and too strict for the player, who can also stand on
+routable mesh over tiles marked blocked. **Likely**, that mesh bit is bit 0x10 of a vertex's position
+flags in the lot's model: 82% of vertices with it sit on walkable tiles, against 47% on the wrong
+lot and a 42% base rate. I took the bit from the code's mask but tested it after seeing the data,
+several other bits score well too, and the PS2 raycast's source of the word wasn't followed. Only
+this score supports it.
+
+The data agrees that walkable means walkable, though the code told me what to expect. 82.4% of
+on-lot objects stand on walkable tiles, against 41% to 49% on wrong lots, 47.8% with axes swapped and
+a 39.7% base rate. The others may be scenery beyond the paths, which wasn't checked. In 20 of 28 lots
+the walkable tiles are one connected region. In the rest but `lot_06`, one region holds at least 93%
+of them. `lot_06` has two, of 2,814 and 323 tiles.
+
+Not in the tile answer:
+
+- **Objects.** Their footprints block at run time (`CCollisionGrid`). Not decoded here.
+- **Scripts.** Wii `TryGenericSimCall` call 51 sets or clears bit 0x10 in a rectangle at an object,
+  turned by its direction. Which trees use it, and its number on PS2, are **open**.
+
+#### Walls
+
+Byte 0 is the wall bits, read by `HasWalls`. Byte 1 is placement, bytes 2 and 3 styles, and 4 to 7
+patterns (`TileWalls`, from the code). Bit 1 is the edge toward the previous row and bit 2 toward the
+previous column. Bits 4 and 8 are those edges seen from the other tile, and 0x10 and 0x20 are
+diagonals.
+
+**Proven:** lots have almost no walls. 18 lots (`lot_11` to `lot_28`) hold one edge, between (45, 6)
+and (45, 7), and both tiles record it. No other tile has a wall bit, and none has a diagonal. Its
+pattern, 0x2A, shows on both sides. So `wall_edges` returns one pair at most, and walls don't shape
+the lots. **Likely** inert: the other bytes, non-zero on up to 899 tiles a lot with no wall bit, in
+blocks like rows 2 to 22, columns 5 to 21 of `lot_02`. They look left over. **Open:** what the lone
+edge is. Patterns stay under `WallTile`'s 95 rows, which fits but isn't a test.
+
+#### Floors
+
+**Open.** 32, 38 and 63 don't index `FloorTile`, which has 5 rows, so `IsGrassAt` is false for those
+tiles if the PS2 code matches Wii. No walking code above reads this array.
+
+#### The last house
+
+**Disagreement with "House N is `lot_(N+1)`".** It holds for houses 0 to 26, but house 27 looks like
+an older `lot_27`, not `lot_28`. Its flags match `lot_27`'s grid 1 at 0.908 and `lot_28`'s at 0.467,
+and 85% of its objects are on `lot_27`'s walkable tiles, while `lot_28` isn't among the top four.
+HouseData's rows 1 to 27 are used up by houses 0 to 26, leaving none for it. `read_arrays` still
+names it `lot_28`, as `placed.py` does. `walkable` follows `lot_28`'s grid 1, so it's right for that
+level, but don't pair that level with this house's objects.
+
+### Stand-ins in `placed.py lot`
+
+These make a lot look right and are **not decoded**:
+
+- **Palm crowns.** `isPalmTreeLeaf` is one frond with its own rig. Scanning the whole disc image
+  for its name and hash finds only archive tables and one preload list, and the executable has no
+  such string, so how the game attaches leaves to `isPalmTreeTrunk` is **open**. The tool repeats
+  the frond nine times at `treeanimate3`, 4.12 m up, lifted 20 degrees. The count and lift are guesses.
+- **`source_tree_coconutpalm`** names only a rig and an action queue, so it uses
+  `isPalmTreeTrunkEdithFruitFull`, chosen by name.
+
+The port also blocks tiles under placed objects over 0.5 m tall. Which objects really block is
+**open**.
 
 ### Purple terrain
 
@@ -520,9 +653,10 @@ it. So `ranger` is torso, lowerBody and shoes `ranger` and the rest `none`. `def
 - Bits 24-30 of the sample word are read as a rate index by shape, not by ear.
 
 Open:
-- `Arry` streams, through `ReconBuffer`, and the rest of each `ObjM` object after its variables.
+- The rest of each `ObjM` object after its variables. In `Arry`: floor values, flags 0x02 and 0x40, the lone wall edge, the trees that change flag 0x10, and whether the mesh bit is vertex flag 0x10.
 - Object height, the sense of direction, and how shared models pick a variant.
 - How `missingshader` terrain is drawn.
+- How palm leaves attach, and which objects block a Sim.
 - Scale for rigged mid-lot objects.
 - ObjDefinition, ResFile and most `world` columns. `ERLevel`'s submodel list groups.
 - BHAV instruction fields and opcodes, including the many above 256 and 8192 (globals and semi-globals, likely).

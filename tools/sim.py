@@ -5,7 +5,8 @@ Usage:
   python -I tools/sim.py check <game.iso>
   python -I tools/sim.py build <game.iso> <out.glb> <skin> <animation|-> <part> [<part> ...]
 
-skin is a tone such as caucasian_normal_1. animation is a substring, or - for none. Each
+skin is a tone such as caucasian_normal_1. animation is substrings split by commas, or - for
+none. Each
 part is a model name, with an optional colour and variant: af_lb_pcotton_ln:b:1. The first
 part's prefix, af_ or am_, picks the rig.
 
@@ -256,8 +257,9 @@ def build(disc, out_path, skin, wanted_animation, part_texts):
     builder.gltf['scenes'][0]['nodes'] = roots + [node]
     count = 0
     if wanted_animation != '-':
+        wanted = wanted_animation.split(',')
         for entry, raw in anim.each_animation(disc):
-            if wanted_animation in entry.name:
+            if any(text in entry.name for text in wanted):
                 animation = anim.parse_animation(raw, entry.name)
                 if len(animation.nodes) == len(rig.bones):
                     gltf.add_animation(builder, animation, rig)
