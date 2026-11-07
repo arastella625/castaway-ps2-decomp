@@ -308,3 +308,84 @@ int cXPerson::AddAction(Interaction *action)
     }
     return mActionQueue.Insert(*action, mActionQueue.Count());
 }
+
+void RoutingSlot::WriteSlot(SlotDescriptor *descriptor) const
+{
+    descriptor->mType = 3;
+    descriptor->mFlags = mFlags;
+    descriptor->mMultiplier[0] = mMultiplier;
+    descriptor->mMultiplier[1] = mMultiplier2;
+    descriptor->mMultiplier[2] = mMultiplier3;
+    descriptor->mSnapTarget = mSnapTarget;
+    descriptor->mMin = mMin;
+    descriptor->mMax = mMax;
+    descriptor->mOptimal = mOptimal;
+    descriptor->mGradient = mGradient;
+    descriptor->mFacing = mFacing;
+    descriptor->mResolution = mResolution;
+    descriptor->mOffset[0] = mOffset[0];
+    descriptor->mOffset[1] = mOffset[1];
+    descriptor->mOffset[2] = mOffset[2];
+}
+
+void RoutingSlot::SetDistances(int min, int max, int optimal)
+{
+    mMin = min;
+    mMax = max;
+    mOptimal = optimal;
+}
+
+f32 RoutingSlot::GetXOffset(int simType) const
+{
+    f32 extra;
+    if (mFacing <= 0 || mFacing == 4)
+        return mOffset[0];
+    if ((mFacing & 1) == 0) {
+        if (mFacing == 2)
+            extra = -kStraightOffset[simType];
+        else
+            extra = kStraightOffset[simType];
+    } else if (mFacing == 1 || mFacing == 3) {
+        extra = -kCornerOffset[simType];
+    } else {
+        extra = kCornerOffset[simType];
+    }
+    return mOffset[0] + extra;
+}
+
+f32 RoutingSlot::GetYOffset(int simType) const
+{
+    f32 extra;
+    if (mFacing < 0 || mFacing == 2 || mFacing == 6)
+        return mOffset[1];
+    if ((mFacing & 1) == 0) {
+        if (mFacing == 4)
+            extra = -kStraightOffset[simType];
+        else
+            extra = kStraightOffset[simType];
+    } else if (mFacing == 3 || mFacing == 5) {
+        extra = -kCornerOffset[simType];
+    } else {
+        extra = kCornerOffset[simType];
+    }
+    return mOffset[1] + extra;
+}
+
+void RoutingSlot::AllowDirection(int direction)
+{
+    if ((u32)direction < 8)
+        mFlags |= 1 << direction;
+}
+
+void RoutingSlot::SetFacingDirection(int direction)
+{
+    if ((u32)direction < 8)
+        mFacing = direction;
+}
+
+void RoutingSlot::SetTileDistances(f32 min, f32 max, f32 preferred)
+{
+    mMin = (int)(min * 16.0f);
+    mMax = (int)(max * 16.0f);
+    mOptimal = (int)(preferred * 16.0f);
+}

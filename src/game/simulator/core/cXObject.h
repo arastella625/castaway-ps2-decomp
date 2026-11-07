@@ -104,15 +104,40 @@ public:
 };
 
 // Wii: RoutingSlot, a place to stand, 0x3c bytes.
+// One slot as the data has it: bhav.md's Routing section lists the fields.
+class SlotDescriptor {
+public:
+    s16 mType;         // 0x00  3 for a routing slot
+    f32 mOffset[3];    // 0x04
+    u32 pad_0x10[3];   // 0x10
+    int mMultiplier[3]; // 0x1c
+    int mFlags;        // 0x28
+    int mSnapTarget;   // 0x2c
+    int mMin;          // 0x30
+    int mMax;          // 0x34
+    int mOptimal;      // 0x38
+    f32 mGradient;     // 0x3c
+    int mFacing;       // 0x40
+    int mResolution;   // 0x44
+};
+
 class RoutingSlot : public RoutingSlotVirtuals {
 public:
-    u32 pad_0x4[3];   // 0x04
+    f32 mOffset[3];   // 0x04
     int mMultiplier;  // 0x10  SetMultiplier
-    u32 pad_0x14[2];  // 0x14
+    int mMultiplier2; // 0x14
+    int mMultiplier3; // 0x18
     int mFlags;       // 0x1c  low byte the directions, 14 failure trees, 15 different levels
-    u32 pad_0x20[5];  // 0x20
+    int mSnapTarget;  // 0x20
+    int mMin;         // 0x24
+    int mMax;         // 0x28
+    int mOptimal;     // 0x2c
+    f32 mGradient;    // 0x30
     int mFacing;      // 0x34  -2 towards the object, -3 any
-    u32 pad_0x38;     // 0x38
+    int mResolution;  // 0x38
+
+    static const f32 kStraightOffset[];
+    static const f32 kCornerOffset[];
 
     RoutingSlot();
     virtual ~RoutingSlot() {}
@@ -132,6 +157,10 @@ public:
     void AllowDirection(int direction);
     void SetTileDistances(f32 min, f32 max, f32 preferred);
     void SetFacingDirection(int direction);
+    void SetDistances(int min, int max, int optimal);
+    void WriteSlot(SlotDescriptor *descriptor) const; // virtual in the game
+    f32 GetXOffset(int simType) const;
+    f32 GetYOffset(int simType) const;
 };
 STATIC_ASSERT(RoutingSlot_size, sizeof(RoutingSlot) == 0x3c);
 

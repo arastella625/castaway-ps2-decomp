@@ -1192,3 +1192,11 @@
 0x004923D4 _11RoomManager$sRoomMgr
 0x001DFCA8 RoomScoreChanged__11RoomManageri
 0x001F5058 ComputeAndStoreLotData__5House
+
+# game/simulator/core2/cXPerson.cpp: RoutingSlot
+0x001E1658 WriteSlot__C11RoutingSlotP14SlotDescriptor
+0x001E1718 SetDistances__11RoutingSlotiii
+0x001E1760 GetXOffset__C11RoutingSloti
+0x001E17F0 GetYOffset__C11RoutingSloti
+0x004B66E0 _11RoutingSlot$kStraightOffset
+0x00510568 _11RoutingSlot$kCornerOffset

@@ -708,7 +708,7 @@ The change is the value times 1/1800, so it's per tick.
 
 ## Routing
 
-What's here comes from the PS2 code where it gives an address, and the names come from the Wii build. **Proven** means read on PS2 or tested on the disc. **Likely** means read on Wii only, with PS2's function found by its calls but not compared line by line. Nothing below `TryGotoRoutingSlot` and `TryGotoRelative` is matched.
+What's here comes from the PS2 code where it gives an address, and the names come from the Wii build. **Proven** means read on PS2 or tested on the disc. **Likely** means read on Wii only, with PS2's function found by its calls but not compared line by line. Below `TryGotoRoutingSlot` and `TryGotoRelative`, only `RoutingSlot`'s small methods are matched: `WriteSlot`, `AllowDirection`, `SetFacingDirection`, `SetDistances`, `SetTileDistances`, `GetXOffset` and `GetYOffset`. Its constructor isn't: it writes a vtable at `0x4B7FC0`, and the name in `symbols.txt` is on `0x4B8020`, which needs sorting out with the `Slot` base class first.
 
 | Function | PS2 | Wii |
 |---|---|---|
@@ -767,6 +767,20 @@ The first s16 of a descriptor is its type. Type 0 becomes an `ObjectSlot`, 1 a `
 | `+0x3C` f32 | `+0x30` | Gradient, how fast the score falls away from optimal. 0.1875 by default |
 | `+0x40` s32 | `+0x34` | Facing: 0 to 7, -2 towards the object, -3 any |
 | `+0x44` s32 | `+0x38` | Resolution, in 1/16 tile. 16 by default |
+
+**A slot's offset depends on the Sim. Proven: `GetXOffset` and `GetYOffset` match.** `RoutingSlot` `+0x34`, the facing, picks an extra offset by sim type, and both functions add it to the slot's own x or y. `kStraightOffset` is at `0x4B66E0` and `kCornerOffset` at `0x510568`, which isn't in the file: it's filled in at run time, and what fills it is **open**.
+
+| Facing | Added to x | Added to y |
+|---|---|---|
+| 0 | Nothing | Straight |
+| 1 | -Corner | Corner |
+| 2 | -Straight | Nothing |
+| 3 | -Corner | -Corner |
+| 4 | Nothing | -Straight |
+| 5 | Corner | -Corner |
+| 6 | Straight | Nothing |
+| 7 | Corner | Corner |
+| Below 0 | Nothing | Nothing |
 
 Flags: the low byte is the allowed directions, one bit each, and none means on top of the object. Bit 11 ignores rooms (a ghost's route sets it). Bit 14 allows failure trees, bit 15 a different level, and bit 17 marks a TS2 slot.
 
