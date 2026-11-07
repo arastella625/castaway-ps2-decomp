@@ -28,6 +28,7 @@ class Armor;
 // Wii: FTilePt, a tile position, two FInts. The real class is probably 8 bytes: it is declared
 // as 4 here because only pointers to it are used, and at 4 the local in TryElement leaves the
 // stack slot sharing as it is in the game. The copy constructor keeps it in memory.
+class CTilePt;
 class FTilePt {
 public:
     u32 field_0x0;
@@ -96,13 +97,14 @@ public:
     s16 mTemps[8];             // 0x72  scope 8
     EdithVariableSet mVars;    // 0x84  scope 3 and 4
     ObjectModule *mModule;     // 0xb4
-    u32 field_0xb8;            // 0xb8
+    cXObject *mNext;           // 0xb8  the next object in ObjectModule's list
     RelMatrix *mRelMatrix;     // 0xbc
     s16 mID;                   // 0xc0
-    u8 mLocation[8];           // 0xc4  an FTilePt
+    int mTileX;                // 0xc4  an FTilePt: fixed point, four bits of fraction
+    int mTileY;                // 0xc8
     f32 field_0xcc;            // 0xcc
     u8 mRect[0x10];            // 0xd0  an FTileRect
-    u32 field_0xe0;            // 0xe0
+    int mLevel;                // 0xe0
     u32 field_0xe4;            // 0xe4
     s16 *mDef;                 // 0xe8  a word of it is scope 0x15; word 9 is the object's type
     ObjSelector *mSelector;    // 0xec
@@ -161,6 +163,17 @@ public:
     void SetIdleStatus(int status) { mModule->SetIdleStatus(mID, status); }
     inline bool AllowIdleOptimization();
     s16 GetType() const { return mDef[9]; }
+    bool IsMultiTile() const { return mDef[0xa] != 0; }
+    bool IsInWorld() const
+    {
+        if (mTileX >> 4 < 1 || mTileY >> 4 < 1)
+            return false;
+        return true;
+    }
+    cXObject *GetNext() { return mNext; }
+    s16 GetID() const { return mID; }
+    u16 GetRoom() const { return mVars[0x1d]; }
+    inline CTilePt GetCTilePt() const;
     int CountObjectSlots() { return mObjectSlots.size() - 1; }
     ObjectSlot *GetObjectSlot(int index)
     {

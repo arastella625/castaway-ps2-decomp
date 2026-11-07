@@ -1111,3 +1111,10 @@
 0x0023CFD8 TryNotifyPlans__8cXObjectP9StackElemP10XPrimParam
 0x0023D140 TryManageClothing__8cXObjectP9StackElemP10XPrimParam
 0x00234678 TryElement__8cXObjectP9StackElemsP10XPrimParam
+
+# game/simulator/core/cXObjectPrims.cpp: SetToNext
+0x0050A6A0 gFixedWorld
+0x0050A69C gObjectFolder
+0x001E4330 OutOfGrid__C11cFixedWorldRC7CTilePt
+0x00254C50 __14ObjectIteratorRC7CTilePtQ214ObjectIterator11IterateType
+0x00220208 __pp__14ObjectIterator

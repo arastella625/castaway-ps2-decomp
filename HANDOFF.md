@@ -89,6 +89,8 @@ Creating functions at all vtable slot targets (`tools/CreateFunctionsAt.java`) a
 
 Names now total 2,173 of 13,231 functions (16.4%), including 650 in `game/simulator/core` and `core2`. The jump came from `tools/vtable_order.py`, which pairs tables by order and slot counts (940 names). To rebuild, loop `vtable_order.py`, `vtables.py --all-tiers`, `order_fill.py` and `match.py`, feeding each `castaway_ps2_names.csv` back in, until nothing new appears (5 rounds here). Still open: 2,955 of 4,538 vtable slot targets are unnamed, and Wii seems to combine multiple-inheritance tables that PS2 keeps separate, so those don't match on length.
 
+**Status, 2026-11-06, primitives (branch `decomp/primitives`):** 879 functions match, with `TrySetToNext` new: at 4,284 bytes it's the largest function matched so far.
+
 **Status, 2026-11-06, run-time state (branch `decomp/operands`):** 878 functions match, with `TryRandom` new. This round was mostly behaviour, not matching. The main find: `tools/placed.py` read an extra i32 in each `ObjM` object, which misaligned everything after the position, so attributes and variables looked missing. It now decodes every object exactly to its stream mark, and that decode answered most of the round: variable `0xB` is the object's ID, attributes are the three lists, each object has one frame on its main tree. `bhav.md` also has entry points (`ObjFnData`), list order, the load sequence, `SetToNext` skipping, `CreateObject`, and a short list of what a RAM snapshot would settle. Most placed objects reset on load, because the disc's trees are newer than the saved houses: 2,027 of 2,610. `tools/bhav.py` now reruns the two attribute count proofs.
 
 About byte counts: `verify.py` counts functions' code. `rebuild.py` prints a higher number, because it adds each function's section, and a function with an odd number of words has 4 bytes of padding to reach 8-byte alignment. At 877 functions that was 43,808 against 44,432, from 156 padded functions. The README uses `verify.py`'s number.
@@ -122,6 +124,10 @@ More of what the compiler does with source shape, from this round:
 - A local whose stack slot is shared needs the same mode as the slot's first owner, and a by-value argument to an inline gets its own slot, so a copy at the top of a case points at an inline.
 - A word tested with `lh` then reloaded with `lhu` is an `s16` local that one use reads through a `u16` pointer (`TryRandom`). Different extension means GCC won't reuse the first load.
 - A fall-through `return 1` at the end, after an `else` that returns early, gives a shared `li v0, 1` block that a `return 1` inside the `if` doesn't.
+- If `int` and `s16` accessors give different code, keep the Wii's shape and try the return types. `SetToNextParam` needs `if`/`return` bodies returning `int`, not ternaries returning `s16`.
+- A call that returns something the caller ignores still ties up `$v0`. `ObjectIterator::operator++` returns a reference, and declaring it `void` moves the next load from `$v1` to `$v0`.
+- A local's stack slot follows the order temporaries are made. `object->GetCTilePt() - centreTile` makes the result first, and a named `tile` local makes it second.
+- A test the compiler drops because it "knows" the answer can come back if the code before an `else` can't run off its end. See the comment in `TrySetToNext`.
 - When a stream decodes "well enough", make it end exactly on its marks before trusting any field. A reader that stops early can be wrong from an early field on and still look right.
 - Disassembly `nop`s before a label are alignment. They follow from sizes earlier in the function, so leave them until everything before is right.
 

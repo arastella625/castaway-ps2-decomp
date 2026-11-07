@@ -39,6 +39,7 @@ public:
 
     ObjectFunctionTable *GetFnTable();
     int GetGUID() const;
+    bool compare(int guid) const { return guid == GetGUID(); }
     ObjSelector *GetMasterSelector();
     int CountTypeAttributes();
     s16 *GetTypeAttributes();

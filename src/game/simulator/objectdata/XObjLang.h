@@ -36,17 +36,20 @@ public:
 
     ObjSelector *findItem(const int &key)
     {
-        ObjSelector **bucket = &mBuckets[key & 0xff];
+        unsigned int index = key & 0xff;
+        ObjSelector *selector = mBuckets[index];
         ObjSelector *previous = 0;
-        ObjSelector *selector = *bucket;
-        while (selector && key != selector->GetGUID()) {
+        while (selector) {
+            if (selector->compare(key)) {
+                if (previous) {
+                    previous->mNext = selector->mNext;
+                    selector->mNext = mBuckets[index];
+                    mBuckets[index] = selector;
+                }
+                break;
+            }
             previous = selector;
             selector = selector->mNext;
-        }
-        if (selector && previous) {
-            previous->mNext = selector->mNext;
-            selector->mNext = *bucket;
-            *bucket = selector;
         }
         return selector;
     }

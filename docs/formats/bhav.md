@@ -459,7 +459,7 @@ The full list is `*Param` in the Wii symbols. `tools/bhav.py` doesn't test any o
 
 ## SetToNext (opcode 0x1F)
 
-**Likely**, but strongly: read from the PS2 function (`0x22BF10`) and the Wii build, which agree in structure. It isn't matched yet. 1,248 uses.
+**Proven**: `TrySetToNext` matches the game byte for byte, so this section is what the code does. 1,248 uses.
 
 It steps a value through a list of things. The value is the target; `+4` is the flags.
 
@@ -490,7 +490,7 @@ The target is read first, and it must have an address or it's error 0x13. Return
 
 Search type 9's object has to be in the same room (object variable 0x1D) as the centre object, and off-grid tiles are skipped. A missing centre object is error 0xA, and a local past the tree's count is error 8.
 
-**Skipping.** Proven in structure: both builds test the flag in the same seven places. An earlier version of this page said only 0, 2 and 6 allow it. That rule is only about the list walk, and each other type has its own test:
+**Skipping.** Proven: both builds test the flag in the same seven places, and the match pins the PS2 one. An earlier version of this page said only 0, 2 and 6 allow it. That rule is only about the list walk, and each other type has its own test:
 
 | Type | With skipping on |
 |---|---|

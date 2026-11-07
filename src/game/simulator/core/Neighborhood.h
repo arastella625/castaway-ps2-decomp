@@ -46,7 +46,9 @@ class Neighborhood {
 public:
     eastl::vector<Neighbor *, eastl::allocator> mNeighbors; // 0x00
     s16 mVars[0x24];           // 0x10  scope 0x22
-    u32 pad_0x58[0x1b];        // 0x58
+    u32 pad_0x58[0x12];        // 0x58
+    eastl::vector<int, eastl::allocator> mHouses; // 0xa0  lot numbers
+    u32 pad_0xb0[5];           // 0xb0
     GoalAndUnlockData mGoals;  // 0xc4
     u32 pad_0xc8[0x849];       // 0xc8
 
@@ -57,6 +59,25 @@ public:
     Neighbor *FindNeighborByID(int id);
     int GetNumFamilies();
     Family *GetFamilyByIndex(int index);
+
+    int GetNumNeighborHouses() { return mHouses.size(); }
+    int GetNeighborHouseByIndex(int index)
+    {
+        if ((unsigned int)index >= mHouses.size())
+            index = mHouses.size() - 1;
+        return mHouses[index];
+    }
+
+    // The ID of the first neighbour after this one, or 0.
+    s16 GetNextNeighborID(s16 id)
+    {
+        while ((unsigned int)id < mNeighbors.size()) {
+            id++;
+            if (mNeighbors[id - 1])
+                return id;
+        }
+        return 0;
+    }
 
     // The game has this as a function and also inlines it in InterpValue.
     Neighbor *FindNeighborByIDInline(int id)

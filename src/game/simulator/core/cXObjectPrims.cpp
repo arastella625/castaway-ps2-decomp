@@ -4,6 +4,8 @@
 #include "game/animation/SAnimator2.h"
 
 #include "game/simulator/core/Lot.h"
+#include "game/simulator/core/Neighborhood.h"
+#include "game/simulator/core/cXMTObject.h"
 #include "game/simulator/core2/cXPerson.h"
 #include "game/simulator/objectdata/XObjLang.h"
 
@@ -108,6 +110,433 @@ long cXObject::TryRandom(StackElem *elem, XPrimParam *primParam)
         return -1;
     }
     return 1;
+}
+
+// A whole tile: x, y, level. Built from numbers, it turns anything that doesn't fit in a byte to 0.
+class CTilePt {
+public:
+    s8 mX;     // 0x00
+    s8 mY;     // 0x01
+    s8 mLevel; // 0x02
+
+    CTilePt() { mLevel = 0; }
+    CTilePt(const CTilePt &other)
+    {
+        mX = other.mX;
+        mY = other.mY;
+        mLevel = other.mLevel;
+    }
+    CTilePt(int x, int y, int level)
+    {
+        mX = x;
+        mY = y;
+        if (mX != x)
+            mX = 0;
+        if (mY != y)
+            mY = 0;
+        mLevel = level;
+    }
+    // Wii: CTilePt(const FTilePt &, int), which doesn't check.
+    CTilePt(const cXObject *object, int level)
+    {
+        mX = object->mTileX >> 4;
+        mY = object->mTileY >> 4;
+        mLevel = level;
+    }
+    ~CTilePt() {}
+    CTilePt &operator=(const CTilePt &other)
+    {
+        mX = other.mX;
+        mY = other.mY;
+        mLevel = other.mLevel;
+        return *this;
+    }
+    CTilePt &operator+=(const CTilePt &other)
+    {
+        mX += other.mX;
+        mY += other.mY;
+        return *this;
+    }
+    CTilePt operator-(const CTilePt &other) const { return CTilePt(mX - other.mX, mY - other.mY, mLevel); }
+    void Set(int x, int y)
+    {
+        mX = x;
+        mY = y;
+    }
+    void Set(int x, int y, int level)
+    {
+        mX = x;
+        mY = y;
+        mLevel = level;
+    }
+    int GetX() const { return mX; }
+    int GetY() const { return mY; }
+    int GetLevel() const { return mLevel; }
+};
+
+inline CTilePt cXObject::GetCTilePt() const
+{
+    return CTilePt(mTileX >> 4, mTileY >> 4, mLevel);
+}
+
+inline s16 GetTileObjectID(ObjectModule *module, const CTilePt &tile)
+{
+    int x = tile.GetX();
+    int y = tile.GetY();
+    if (x >= 0x40 || y >= 0x40 || x < 0 || y < 0)
+        return 0;
+    return module->mTileObjects[y][x];
+}
+
+class cFixedWorld {
+public:
+    int OutOfGrid(const CTilePt &tile) const;
+};
+extern cFixedWorld *gFixedWorld;
+
+// Walks the objects on a tile.
+class ObjectIterator {
+public:
+    enum IterateType { kAll };
+
+    u32 field_0x0;     // 0x00
+    cXObject *mObject; // 0x04  0 at the end
+    u32 field_0x8;     // 0x08
+
+    ObjectIterator(const CTilePt &tile, IterateType type);
+    ObjectIterator &operator++();
+    cXObject *operator*() const { return mObject; }
+    bool finished() const { return mObject == 0 ? true : false; }
+};
+
+// Primitive 0x1f: step a value through a list of things.
+class SetToNextParam {
+public:
+    int mGUID;   // 0x00
+    u8 mFlags;   // 0x04  low 4 bits the search type, 5 GUID from temps, 6 skip non-leads, 7 target
+    u8 mOwner;   // 0x05
+    u8 mLocal;   // 0x06
+    u8 mData;    // 0x07
+
+    int GetTargetOwner() const { if (mFlags & 0x80) return mOwner; return 0xa; }
+    int GetTargetData() const { if (mFlags & 0x80) return mData; return 0; }
+    s16 GetSearchType() const { return mFlags & 0xf; }
+    bool GetSkipNonLeads() const { return (mFlags >> 6) & 1; }
+    bool GetGuidFromTemps() const { return (mFlags >> 5) & 1; }
+};
+
+long cXObject::TrySetToNext(StackElem *elem, XPrimParam *primParam)
+{
+    SetToNextParam *param = (SetToNextParam *)primParam;
+    const s16 *ref;
+    cXObject *object;
+
+    if (InterpValue(param->GetTargetOwner(), param->GetTargetData(), &ref, 0, 0, 0) == -1)
+        return -1;
+    OBJECT_ERROR_CHECK(ref, 0x13);
+    s16 type = param->GetSearchType();
+    bool skip = param->GetSkipNonLeads();
+    if (type == 12)
+        skip = false;
+    switch (type) {
+    case 3: {
+        // The parts of the multi-tile object holding the target.
+        object = GetObjectFromID(*ref);
+        if (object) {
+            if (object->IsMultiTile()) {
+                cXMTObject *part = object->GetMTObject();
+                if (skip) {
+                    cXMTObject *start = part;
+                    do {
+                        if (part->mChild)
+                            part = part->mChild;
+                        else
+                            part = part->mSibling;
+                        if (part == start)
+                            return 0;
+                    } while (!part->IsInteractionTile(false));
+                } else {
+                    if (part->mChild)
+                        part = part->mChild;
+                    else
+                        part = part->mSibling;
+                }
+                if (!part) {
+                    InterpWriteValue(param->GetTargetOwner(), param->GetTargetData(), &ref, 0);
+                    return 0;
+                }
+                InterpWriteValue(param->GetTargetOwner(), param->GetTargetData(), &ref, part->GetID());
+                return 1;
+            }
+            InterpWriteValue(param->GetTargetOwner(), param->GetTargetData(), &ref, object->GetID());
+            return 1;
+        }
+        InterpWriteValue(param->GetTargetOwner(), param->GetTargetData(), &ref, 0);
+        return 0;
+    }
+    case 5: {
+        Neighborhood *neighborhood = GetNeighborhood();
+        InterpWriteValue(param->GetTargetOwner(), param->GetTargetData(), &ref, neighborhood->GetNextNeighborID(*ref));
+        if (*ref)
+            return 1;
+        return 0;
+    }
+    case 7: {
+        Neighborhood *neighborhood = GetNeighborhood();
+        InterpWriteValue(param->GetTargetOwner(), param->GetTargetData(), &ref, neighborhood->GetNextNeighborID(*ref));
+        while (*ref != 0) {
+            Neighbor *neighbor = neighborhood->FindNeighborByIDInline(*ref);
+            if (neighbor) {
+                int guid = neighbor->mSelector->GetGUID();
+                if (param->GetGuidFromTemps() && (mTemps[1] << 16 | (u16)mTemps[2]) == param->mGUID)
+                    return 1;
+                if (guid == param->mGUID)
+                    return 1;
+            }
+            InterpWriteValue(param->GetTargetOwner(), param->GetTargetData(), &ref, neighborhood->GetNextNeighborID(*ref));
+        }
+        return 0;
+    }
+    case 8: {
+        // The objects on the target's tile, wrapping round.
+        if (*ref == 0)
+            return 0;
+        object = GetObjectFromID(*ref);
+        OBJECT_ERROR_CHECK(object, 0x33);
+        if (!object->IsInWorld())
+            return 0;
+        CTilePt tile(object, object->mLevel);
+        int found = 0;
+        ObjectIterator first(tile, ObjectIterator::kAll);
+        ObjectIterator it(first);
+        while (!it.finished()) {
+            if ((*it)->GetID() == *ref) {
+                found = 1;
+                break;
+            }
+            ++it;
+        }
+        if (!found) {
+            it = first;
+            while (!it.finished()) {
+                GetObjectFromID((*it)->GetID());
+                ++it;
+            }
+            return 0;
+        }
+        if (skip) {
+            do {
+                ++it;
+                if (it.finished())
+                    it = first;
+                if ((*it)->GetID() == *ref)
+                    return 0;
+            } while (!(*it)->IsInteractionTile(true));
+        } else {
+            ++it;
+            if (it.finished())
+                it = first;
+        }
+        InterpWriteValue(param->GetTargetOwner(), param->GetTargetData(), &ref, (*it)->GetID());
+        return 1;
+    }
+    case 9: {
+        // The four tiles around the object in a local.
+        object = GetObjectFromID(*ref);
+        int local = param->mLocal;
+        OBJECT_ERROR_CHECK(local >= 0 && local < elem->mNumLocals, 8);
+        cXObject *centre = GetObjectFromID(elem->GetLocals()[local]);
+        OBJECT_ERROR_CHECK(centre, 0xa);
+        CTilePt centreTile = centre->GetCTilePt();
+        CTilePt offset;
+        int first;
+        if (object) {
+            first = 0;
+            offset = object->GetCTilePt() - centreTile;
+        } else {
+            first = 1;
+            offset.Set(1, 0, centreTile.GetLevel());
+        }
+        for (;;) {
+            if (!first) {
+                if (offset.GetX() > 0) {
+                    offset.Set(0, 1);
+                } else if (offset.GetX() < 0) {
+                    offset.Set(0, -1);
+                } else if (offset.GetY() > 0) {
+                    offset.Set(-1, 0);
+                } else {
+                    return 0;
+                }
+            }
+            first = 0;
+            CTilePt next(centreTile);
+            next += offset;
+            if (gFixedWorld->OutOfGrid(next))
+                continue;
+            object = GetObjectFromID(GetTileObjectID(GetObjectModule(), next));
+            bool found = false;
+            if (skip) {
+                if (object && object->GetRoom() == centre->GetRoom() && object->IsInteractionTile(true))
+                    found = true;
+            } else {
+                found = false;
+                if (object && object->GetRoom() == centre->GetRoom())
+                    found = true;
+            }
+            if (found) {
+                InterpWriteValue(param->GetTargetOwner(), param->GetTargetData(), &ref, object->GetID());
+                return 1;
+            }
+        }
+    }
+    case 1: {
+        // The Sims.
+        int count = mModule->GetNumPeople();
+        int index = 0;
+        if (*ref != 0 && count > 0) {
+            do {
+                if (((cXObject *)mModule->GetPeople(index))->GetID() == *ref) {
+                    index++;
+                    break;
+                }
+                index++;
+            } while (index < count);
+        }
+        if (index == count) {
+            InterpWriteValue(param->GetTargetOwner(), param->GetTargetData(), &ref, 0);
+        } else {
+            InterpWriteValue(param->GetTargetOwner(), param->GetTargetData(), &ref, ((cXObject *)mModule->GetPeople(index))->GetID());
+        }
+        if (*ref)
+            return 1;
+        return 0;
+    }
+    case 4: {
+        // Objects of one type, by position.
+        ObjSelector *selector;
+        if (param->GetGuidFromTemps())
+            selector = GetObjectFolder()->GetSelectorByGUID(mTemps[1] << 16 | (u16)mTemps[2]);
+        else
+            selector = GetObjectFolder()->GetSelectorByGUID(param->mGUID);
+        int count = mModule->GetNumObjects();
+        int id = *ref;
+        int index = 0;
+        if ((unsigned int)(id - 1) < (unsigned int)count)
+            index = id;
+        for (; index < count; index++) {
+            cXObject *candidate = mModule->GetObject(index);
+            if (skip) {
+                if (candidate && candidate->mSelector == selector && candidate->IsInteractionTile(true))
+                    break;
+            } else if (candidate && candidate->mSelector == selector) {
+                break;
+            }
+        }
+        if (index >= count) {
+            InterpWriteValue(param->GetTargetOwner(), param->GetTargetData(), &ref, 0);
+        } else {
+            InterpWriteValue(param->GetTargetOwner(), param->GetTargetData(), &ref, index + 1);
+        }
+        if (*ref)
+            return 1;
+        return 0;
+    }
+    case 11: {
+        // Lots in the neighbourhood.
+        Neighborhood *neighborhood = GetNeighborhood();
+        int count = neighborhood->GetNumNeighborHouses();
+        int index = 0;
+        int house = 0;
+        if (*ref != 0) {
+            for (; index < count; index++) {
+                house = neighborhood->GetNeighborHouseByIndex(index);
+                if (house == *ref) {
+                    index++;
+                    if (index >= count)
+                        index = 0;
+                    house = neighborhood->GetNeighborHouseByIndex(index);
+                    break;
+                }
+            }
+        } else {
+            house = neighborhood->GetNeighborHouseByIndex(0);
+        }
+        if (index == count)
+            return 0;
+        InterpWriteValue(param->GetTargetOwner(), param->GetTargetData(), &ref, house);
+        return 1;
+    }
+    case 10:
+        return 0;
+    default: {
+        // The object list.
+        if (*ref != 0) {
+            object = GetObjectFromID(*ref);
+            if (!object)
+                return 0;
+            object = object->GetNext();
+        } else {
+            object = mModule->GetFirst();
+        }
+        if (object) {
+            // The gotos and the check with a false condition aren't style. Nothing may run off
+            // the end of this switch, or the compiler carries what it knows about object into
+            // the else branch and drops the null test the game has in case 2.
+            if (skip) {
+                switch (type) {
+                case 0:
+                    while (object && !object->IsInteractionTile(true))
+                        object = object->GetNext();
+                    goto walked;
+                case 2:
+                    while (object && (object->GetType() == 2 || !object->IsInteractionTile(true)))
+                        object = object->GetNext();
+                    goto walked;
+                case 6: {
+                    s16 value = elem->GetParams()[0];
+                    while (object && (object->mVars[0x3b] != value || !object->IsInteractionTile(true)))
+                        object = object->GetNext();
+                    goto walked;
+                }
+                default:
+                    OBJECT_ERROR_CHECK(false, 0x1e);
+                }
+            } else {
+                switch (type) {
+                case 0:
+                    break;
+                case 2:
+                    while (object) {
+                        if (object->GetType() != 2)
+                            break;
+                        object = object->GetNext();
+                    }
+                    break;
+                case 6: {
+                    s16 value = elem->GetParams()[0];
+                    while (object && object->mVars[0x3b] != value)
+                        object = object->GetNext();
+                    break;
+                }
+                case 12:
+                    while (object && !object->IsInWorld())
+                        object = object->GetNext();
+                    break;
+                default:
+                    OBJECT_ERROR_CHECK(false, 0x1e);
+                }
+            }
+        }
+        break;
+    }
+    }
+walked:
+    if (object) {
+        InterpWriteValue(param->GetTargetOwner(), param->GetTargetData(), &ref, object->GetID());
+        return 1;
+    }
+    return 0;
 }
 
 #ifdef NON_MATCHING
