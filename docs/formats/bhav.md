@@ -1528,6 +1528,48 @@ Then each load is the path in Load details: `FamilyImpl::CreateFamilyInLot` call
 
 So a port with no Create-a-Sim needs a stand-in Sim: one new definition and `Neighbor`, added to family 1 and marked with data 0x25 and 0x2B. That's the code's own new-game path, without the appearance.
 
+### Where a Sim starts on a lot
+
+**Proven from the trees on the disc and the PS2 code that runs them.** No C++ places a Sim in a normal game. `CreateFamilyInLot` only runs in author mode, and `LaunchNewGame` turns that off. `generator_visit`'s `Function - Load` looks like it would do it, but node 0 returns on both branches, so `Load - Place Family` never runs.
+
+The real path is on the scenario object, `generator_scenario_sp`, with shared trees in `scenario_sg`. Its load tree (entry point 2, parameter 0 the transition type):
+
+1. It stores parameter 0 in semi-global attribute 0xD. That's the **Lot Load Type**, constant table 319: 1 new game from Create-a-Family, 2 save game, 3 lot to lot portal, 4 map screen, 5 dev menu, 6 autotest.
+2. `Get in Temp 0 - Lead Transitioner`, which is LotTransition with `+2` set. If there's nobody, it stops there.
+3. It stores the lead's ID in attribute 0xC, the lead's neighbour data word 0x2E in 0xE and word 0x2B in 0xF.
+4. `Sub - Transition Onto Lot` (`0x203B`).
+
+**`Sub - Transition Onto Lot`:**
+
+- Save game: nothing is placed, unless global 0xA is 1 and neighbourhood variable 6 is 0x10. The Sims are in the saved lot.
+- Otherwise `Sub - Establish Geographic Verisimilitude` runs first, for type 1 and all others, then `Sub - Get Transitioner Spawn Point`, then `Sub - Place Neighbor`.
+
+**`Sub - Get Transitioner Spawn Point` (`0x2028`)** leaves the spawn object in temp 0. Objects in a room with a negative ID are skipped, which excludes split diagonals. By load type:
+
+| Type | Order tried |
+|---|---|
+| 3, 4 (portal, map) | If the lead's word 0x2E is above 0: the `transition_triggerplate` (GUID 0xA09E02A9) whose attribute 1 equals it. Then any plate as below |
+| 5, 6 (dev, autotest) | Any plate with attribute 1 above 0, and on a second pass the first whose lot transition flag test (scope 0x44 data 0) is non-zero. Then the first plate in a room |
+| 1, 2 (new game, save) | The first `portal_green_arrow` (GUID 0x50323DB5), then the plates as above |
+
+No spawn object at all returns false, and the tree stops. Before returning it clears the spot: if the spawn is a `transition_portal` with variable 0x3E set, it removes any object there that `CallNamedTree` picks out.
+
+**`Sub - Place Neighbor` (`0x2031`).** A Sim with no object is made by CreateObject, as a neighbour, out of the world. Then, with the spawn object as parameter 0:
+
+| Case | Placement |
+|---|---|
+| No spawn object | FindGoodLocation mode 6, editable tiles only: a random tile |
+| Load type 1 or 2 | Not placed here: the object stays where it was made |
+| Load type 5 with global 0xA at 1 | Not placed here |
+| The spawn's category (variable 0x3B) is 0x23, `transition_portal` | PushAction on the Sim: interaction 1 on the portal, so it walks in through `Interaction - Arrive` |
+| Otherwise | FindGoodLocation mode 0, flags 3, from the spawn object: the spiral search, not preferring empty tiles |
+
+If placing fails the tree ends with an error. Afterwards it sets person data 0xF to 1 and 0xD to Person Type 0, Family Member.
+
+**`Sub - Establish Geographic Verisimilitude` (`0x202A`)** walks every neighbour, skipping the lead. A neighbour who has an object and isn't on this lot is removed. A family member whose word 0x2F is this lot (global 0xA) and who has no object gets one. It then looks for a Harvestable Source object (category 0x44) with a room, skipping `source_marine_fish` and `source_marine_clamrock`, and tries FindGoodLocation mode 0 from it, then mode 6. If both fail, the Sim is removed.
+
+**For a port:** on arrival by lot transition, put the lead on the `transition_triggerplate` whose attribute 1 is the transition number, using the spiral search from it. On a new game use the first `portal_green_arrow`, then plates. The rest of the family use the harvestable source rule.
+
 ## What a RAM snapshot would settle
 
 The code answers most of this, but three things are worth reading from a snapshot taken just after a lot has loaded, before much has run. `tools/livecheck.py snapshot` saves the memory. All offsets are PS2.
