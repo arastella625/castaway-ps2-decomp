@@ -30,7 +30,8 @@ public:
     u32 field_0x0;         // 0x00
     u32 mNamespaceID;      // 0x04
     u32 mSemiNamespaceID;  // 0x08
-    u8 pad_0xc[0x2c];      // 0x0c
+    class Behavior *mBehavior; // 0x0c
+    u8 pad_0x10[0x28];     // 0x10
     s16 *mDefinition;      // 0x38
     u8 pad_0x3c[0x80];     // 0x3c
     void *mSimDescription; // 0xbc
@@ -39,7 +40,9 @@ public:
 
     ObjectFunctionTable *GetFnTable();
     int GetGUID() const;
+    bool compare(int guid) const { return guid == GetGUID(); }
     ObjSelector *GetMasterSelector();
+    class TreeTab *GetTreeTab();
     int CountTypeAttributes();
     s16 *GetTypeAttributes();
 };

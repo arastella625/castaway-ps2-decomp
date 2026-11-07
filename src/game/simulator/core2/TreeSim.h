@@ -74,6 +74,7 @@ public:
 
     static s16 sMaxIterations;
     static int sInMainSim;
+    static int sBreakOnCallTreeStringFailure;
 
     TreeSim();
     virtual cXPortal *GetPortal() const;

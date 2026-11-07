@@ -1,16 +1,20 @@
 #ifndef GAME_SIMULATOR_CORE_CXMTOBJECT_H
 #define GAME_SIMULATOR_CORE_CXMTOBJECT_H
 
-#include "common/types.h"
+#include "game/simulator/core/cXObject.h"
 
-// Generated from the Wii symbol names and the PS2 code of each function. Only the functions
-// decompiled so far are declared, as plain member functions: the base class, the vtable order
-// and the full layout are not known yet. Return types are guesses, and the fields are only
-// the ones these functions touch. The names come from pkg/castaway_ps2_names.csv, mostly its
-// vtable pairing tiers; a one-instruction body cannot confirm that a name is right.
-class cXMTObject {
+// A multi-tile object: one of these for each tile, in a list from the first part.
+class cXMTObject : public cXObject {
 public:
-    u32 ReconType();
+    cXMTObject *mNextPart;  // 0x13c
+    cXMTObject *mFirstPart; // 0x140
+
+    virtual u32 ReconType();
+    virtual void AssignOffsets();
+    virtual FTilePt GetAverageLocation() const;
+    virtual cXObject *GetAnchorTile();
+
+    cXMTObject *GetFirstMultiTileObject() { return mFirstPart ? mFirstPart : this; }
 };
 
 #endif

@@ -41,6 +41,25 @@ RESFILE_STRINGS = 0x10  # 12-byte entries: pointer to a VECTOR of strings, tag, 
 STRING_SET_SIZE = 12
 ATTRIBUTE_SCOPE, SEMI_ATTRIBUTE_SCOPE = 0, 2
 DEF_ATTRIBUTES, DEF_ATTRIBUTES_CONTROL = 0x74, 0x72
+DEF_GUID = 0x1C
+DEF_SLOT_SET = 0x28  # the STR#-like ID of the object's slot set, 0 for none
+RESFILE_SLOTS = 0x28  # 8-byte entries: pointer to a VECTOR of slots, set ID
+SLOT_SET_SIZE = 8
+SLOT_SIZE = 0x48
+SEMI_SLOT_SETS = 1000  # set IDs from here live in the semi-global file
+RECON_HEADER = 12
+WIDE_MARK = bytes((0xFE, 0xFF))
+NGH_KIND_NEIGHBORHOOD = 1
+PERSON_DATA_WORDS = 0x31
+MOTIVE_WORDS = 16
+NEIGHBORHOOD_VARS = 0x24
+GOAL_BYTES = 0x80
+WEATHER_EVENTS = 100
+PLAYER_FAMILY = 0x4000
+PLAYER_STATS = 25
+DEF_LEAD = 0x10   # the control for +0x16: it marks the interaction leader, not the master
+DEF_GROUP = 0x14  # the multi-tile object this is part of, 0 for a single tile
+DEF_TILE = 0x16   # the part's place, y << 8 | x, and -1 on the master
 DEFAULT_ATTRIBUTES = 8  # what a count of 0 means
 SEMI_ATTRIBUTES, SEMI_ATTRIBUTES_CONTROL = 0x100, 0x101  # STR# IDs
 SEMI_SET_SUFFIX = '_sg'
@@ -250,6 +269,243 @@ def check_counts(disc, sets):
     return attributes[1] == 0 and semi[1] == 0, attributes_control[1] > 0 and semi_control[1] > 0
 
 
+def read_masters(disc):
+    """{definition's GUID: its master's GUID}, the way ObjectFolder::GetMasterSelector finds it.
+
+    Definitions of one file with the same non-zero +0x14 are one multi-tile object, and the master
+    is the one whose +0x16 is -1. A single-tile definition, or one with no master, is its own.
+    Also returns the groups by their number of masters, and the same count for the control word.
+    """
+    quickdata = gamedata.load_quickdata(disc)
+    data, table = gamedata.find_table(quickdata, 'ResFile')
+    half = lambda position: struct.unpack_from('<h', data.image, position)[0]
+    masters, counts, control = {}, {}, {}
+    for row in range(table.count):
+        start, count = data.vector(table.rows + row * table.stride)
+        groups = {}
+        for position in (data.word(start + 4 * i) for i in range(count)):
+            guid = data.word(position + DEF_GUID) & 0xFFFFFFFF
+            masters[guid] = guid
+            if half(position + DEF_GROUP):
+                groups.setdefault(half(position + DEF_GROUP), []).append(position)
+        for parts in groups.values():
+            found = [p for p in parts if half(p + DEF_TILE) == -1]
+            counts[len(found)] = counts.get(len(found), 0) + 1
+            wrong = sum(half(p + DEF_LEAD) == -1 for p in parts)
+            control[wrong] = control.get(wrong, 0) + 1
+            if len(found) == 1:
+                for part in parts:
+                    masters[data.word(part + DEF_GUID) & 0xFFFFFFFF] = data.word(found[0] + DEF_GUID) & 0xFFFFFFFF
+    return masters, counts, control
+
+
+def check_masters(disc):
+    """Every multi-tile object should have exactly one master, and the wrong word shouldn't."""
+    masters, counts, control = read_masters(disc)
+    print('multi-tile objects by masters: %s (control +0x10: %s), %d definitions point elsewhere'
+          % (sorted(counts.items()), sorted(control.items()), sum(k != v for k, v in masters.items())))
+    return set(counts) == {1}, set(control) != {1}
+
+
+def read_slots(disc):
+    """{ResFile row name: {slot set ID: [slot dictionaries]}}, as QuickDataSlotDescList reads them."""
+    quickdata = gamedata.load_quickdata(disc)
+    data, table = gamedata.find_table(quickdata, 'ResFile')
+    half = lambda position: struct.unpack_from('<h', data.image, position)[0]
+    word = lambda position: struct.unpack_from('<i', data.image, position)[0]
+    real = lambda position: struct.unpack_from('<f', data.image, position)[0]
+    files = {}
+    for row in range(table.count):
+        start, count = data.vector(table.rows + row * table.stride + RESFILE_SLOTS)
+        sets = files.setdefault(data.row_name(table, row), {})
+        for entry in range(start, start + count * SLOT_SET_SIZE, SLOT_SET_SIZE):
+            first, slots = data.vector(entry)
+            sets[word(entry + 4)] = [{
+                'type': half(p), 'offset': (real(p + 4), real(p + 8), real(p + 12)),
+                'multipliers': (word(p + 0x1C), word(p + 0x20), word(p + 0x24)),
+                'flags': word(p + 0x28), 'snap_target': word(p + 0x2C),
+                'min': word(p + 0x30), 'max': word(p + 0x34), 'optimal': word(p + 0x38),
+                'gradient': real(p + 0x3C), 'facing': word(p + 0x40), 'resolution': word(p + 0x44),
+            } for p in range(first, first + slots * SLOT_SIZE, SLOT_SIZE)]
+    return files
+
+
+def check_slots(disc):
+    """Definitions' +0x28 should name slot sets, in their own file or, from 1000, the semi-global one.
+
+    59 definitions name a set that isn't there, mostly test objects: SlotLoader then loads nothing.
+    The control, +0x2A, finds none at all.
+    """
+    files = read_slots(disc)
+    semis = {name: semi for name, (semi, _) in read_resfiles(disc).items()}
+    quickdata = gamedata.load_quickdata(disc)
+    data, table = gamedata.find_table(quickdata, 'ResFile')
+
+    def found(offset):
+        hits = misses = 0
+        for row in range(table.count):
+            name = data.row_name(table, row)
+            start, count = data.vector(table.rows + row * table.stride)
+            for position in (data.word(start + 4 * i) for i in range(count)):
+                wanted = struct.unpack_from('<h', data.image, position + offset)[0]
+                if wanted:
+                    owner = semis.get(name) if wanted >= SEMI_SLOT_SETS else name
+                    if wanted in files.get(owner, {}):
+                        hits += 1
+                    else:
+                        misses += 1
+        return hits, misses
+
+    types = {}
+    for sets in files.values():
+        for slots in sets.values():
+            for slot in slots:
+                types[slot['type']] = types.get(slot['type'], 0) + 1
+    hits, misses = found(DEF_SLOT_SET)
+    control = found(DEF_SLOT_SET + 2)
+    print('slot types: %s; definitions with a set found: %d, not found: %d (control +0x2A: %d, %d)'
+          % (sorted(types.items()), hits, misses, control[0], control[1]))
+    return hits > misses * 10 and set(types) <= {0, 1, 3}, control[0] == 0
+
+
+class ReconReader:
+    """ReconBuffer reading a chunk: u32 0, u32 version, a reversed tag, then the stream."""
+
+    def __init__(self, data, pad_strings=True):
+        self.data, self.position, self.pad_strings = data, RECON_HEADER, pad_strings
+
+    def read(self, code):
+        value = struct.unpack_from('<' + code, self.data, self.position)[0]
+        self.position += struct.calcsize(code)
+        return value
+
+    def many(self, code, count):
+        return [self.read(code) for _ in range(count)]
+
+    def narrow(self):
+        end = self.data.index(b'\0', self.position)
+        text = self.data[self.position:end].decode('latin-1')
+        self.position = end + 1
+        if self.pad_strings:
+            self.position += self.position & 1
+        return text
+
+    def at_wide(self):
+        return self.data[self.position:self.position + 2] == WIDE_MARK
+
+    def wide(self):
+        self.position += self.position & 1
+        if not self.at_wide():
+            raise ValueError('no wide string at %#x' % self.position)
+        self.position += 2
+        text = []
+        while True:
+            unit = self.read('H')
+            if not unit:
+                return ''.join(map(chr, text))
+            text.append(unit)
+
+    def finished(self):
+        return self.position == len(self.data)
+
+
+def read_relations(reader):
+    """RelMatrixImpl::DoStream: -1, then a pointer vector of RelArrays. Empty on the disc."""
+    if reader.read('i') != -1:
+        raise ValueError('relations without the -1')
+    arrays = {}
+    for _ in range(reader.read('i')):
+        if reader.read('i'):
+            key = reader.read('i')
+            arrays[key] = reader.many('i', reader.read('i'))
+    return arrays
+
+
+def read_neighbor(reader):
+    """Neighbor::DoStream at version 0x82. Only chimps have the name at the end."""
+    neighbor = {'name': reader.narrow(), 'word_14': reader.read('i'), 'word_0': reader.read('i')}
+    neighbor['person_data'] = reader.many('h', PERSON_DATA_WORDS) if neighbor['word_0'] else None
+    neighbor['motives'] = reader.many('f', MOTIVE_WORDS)
+    neighbor['motives_2'] = reader.many('f', MOTIVE_WORDS)
+    neighbor['id'] = reader.read('h')
+    neighbor['guid'] = reader.read('I')
+    neighbor['relations'] = read_relations(reader)
+    neighbor['user_name'] = reader.wide() if reader.at_wide() else None
+    return neighbor
+
+
+def read_neighbors(reader):
+    """NBRS: slots, each a word saying whether a Neighbor follows."""
+    return [read_neighbor(reader) if reader.read('i') else None for _ in range(reader.read('i'))]
+
+
+def read_neighborhood(reader):
+    """NGBH: Neighborhood::DoStream, with its managers' streams in order."""
+    hood = {'vars': reader.many('h', NEIGHBORHOOD_VARS), 'name': reader.wide(),
+            'word_150': reader.read('i'), 'word_154': reader.read('i'),
+            'goals': reader.many('b', GOAL_BYTES)}
+    hood['plans'] = reader.many('h', reader.read('h'))
+    hood['lots'] = [(reader.read('h'), reader.read('i')) for _ in range(reader.read('h'))]
+    hood['lot_word'] = reader.read('h')
+    hood['transitions'] = reader.many('b', reader.read('h'))
+    hood['weather'] = [(reader.read('i'), reader.read('h'), reader.read('b'), reader.read('b'))
+                       for _ in range(WEATHER_EVENTS)]
+    hood['weather_state'] = (reader.read('i'), reader.read('i'), reader.many('f', 4))
+    hood['res_files'] = [(reader.read('i'), reader.read('i')) for _ in range(reader.read('h'))]
+    return hood
+
+
+def read_family(reader, chunk_id):
+    """FAMI: FamilyImpl::DoStream, and PlayerFamilyImpl's stats if the ID has bit 0x4000."""
+    family = {'number': chunk_id & ~PLAYER_FAMILY, 'player': bool(chunk_id & PLAYER_FAMILY)}
+    for field in ('house', 'creation_order', 'funds', 'pet_points', 'house_value', 'friends', 'flags'):
+        family[field] = reader.read('i')
+    family['members'] = reader.many('I', reader.read('i'))
+    family['name'] = reader.wide()
+    items = reader.read('h')
+    reader.read('b')
+    if items:
+        raise ValueError('inventory items: the disc has none, so they are not read here')
+    family['inventory_words'] = reader.many('i', reader.read('i'))
+    family['stats'] = reader.many('h', PLAYER_STATS) if family['player'] else None
+    return family
+
+
+def read_neighborhood_chunks(disc, pad_strings=True):
+    """The kind 1 section of DEFAULT.NGH: (hood, neighbours, families, chunks used to the last byte)."""
+    disc_file = disc.find(gamedata.NGH_FILE)
+    hood = neighbors = None
+    families = []
+    exact = 0
+    for section in gamedata.read_ngh_sections(disc.read(disc_file.lba, 0, disc_file.size)):
+        if section.kind != NGH_KIND_NEIGHBORHOOD:
+            continue
+        for kind, chunk_id, data in gamedata.house_chunks(section):
+            reader = ReconReader(data, pad_strings)
+            try:
+                if kind == 'NGBH':
+                    hood = read_neighborhood(reader)
+                elif kind == 'NBRS':
+                    neighbors = read_neighbors(reader)
+                else:
+                    families.append(read_family(reader, chunk_id))
+            except (ValueError, struct.error):
+                continue
+            exact += reader.finished()
+    return hood, neighbors, families, exact
+
+
+def check_neighborhood(disc):
+    """Each of the 8 chunks should be used up exactly. The control forgets the strings' padding."""
+    hood, neighbors, families, exact = read_neighborhood_chunks(disc)
+    control = read_neighborhood_chunks(disc, pad_strings=False)[3]
+    real = [n for n in neighbors or [] if n]
+    print('neighbourhood chunks used exactly: %d of 8 (control, no padding: %d); %d neighbours in %d slots, '
+          '%d families, %d members' % (exact, control, len(real), len(neighbors or []), len(families),
+                                       sum(len(f['members']) for f in families)))
+    return exact == 8 and hood is not None, control < 8
+
+
 def main(argv):
     if len(argv) != 2:
         print(__doc__)
@@ -298,9 +554,12 @@ def main(argv):
 
     links_hold, link_control_fails = check_links(disc, sets)
     counts_hold, count_control_fails = check_counts(disc, sets)
+    masters_hold, master_control_fails = check_masters(disc)
+    slots_hold, slot_control_fails = check_slots(disc)
+    hood_holds, hood_control_fails = check_neighborhood(disc)
 
-    rules_hold = bad_targets == 0 and bad_expressions == 0 and None not in classes and links_hold and counts_hold
-    controls_fail = bad_control > 0 and bad_expr_control > 0 and link_control_fails and count_control_fails
+    rules_hold = bad_targets == 0 and bad_expressions == 0 and None not in classes and links_hold and counts_hold and masters_hold and slots_hold and hood_holds
+    controls_fail = bad_control > 0 and bad_expr_control > 0 and link_control_fails and count_control_fails and master_control_fails and slot_control_fails and hood_control_fails
     print('rules hold' if rules_hold else 'a rule failed', '/',
           'controls fail as they should' if controls_fail else 'a control passed: the test proves nothing')
     return 0 if rules_hold and controls_fail else 1

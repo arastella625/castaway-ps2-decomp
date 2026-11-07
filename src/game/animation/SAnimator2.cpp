@@ -51,3 +51,31 @@ long SAnimator2::TryAnimate(StackElem *elem, const AnimateNewParam *param)
         return ProcessDequeueEvent(param, event, elem);
     return ProcessNoDequeueEvent(param, event, elem);
 }
+
+// Wii: EResourceManager and its instance _animman.
+class EResourceManager {
+public:
+    int PreloadResource(u32 id);
+};
+extern EResourceManager _animman;
+
+// Bit 7 of Animate's flags: ask for the animation to load and go no further.
+long SAnimator2::PreloadOnly(bool &preloaded, const AnimateNewParam *param, const AnimRef *&ref, StackElem *elem)
+{
+    preloaded = false;
+    long result = -1;
+    if (param->mFlags >> 7) {
+        bool second;
+        if (resolveSkillForPrimitive(elem, param, ref, second) == -1) {
+            preloaded = true;
+            return 1;
+        }
+        PreloadEvents(ref);
+        result = 0;
+        int loaded = _animman.PreloadResource(*(const u32 *)ref);
+        preloaded = true;
+        if (loaded)
+            result = 1;
+    }
+    return result;
+}

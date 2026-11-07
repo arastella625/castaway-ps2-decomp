@@ -3,6 +3,8 @@
 
 #include "common/types.h"
 
+class StackElem;
+
 // One ad of a tree table entry, 16 bytes.
 struct CheckTreeAd {
     u32 field_0x0;       // 0x00
@@ -73,6 +75,8 @@ public:
 // Wii: ObjTestSim. sCheckTreeModEntry is what GetCheckTreeAds reads.
 class ObjTestSim {
 public:
+    static int IsMenuInProgress();
+    static void MakeNewMenuItem(const u16 *text, const s16 *object, StackElem *elem, s16 a);
     static CheckTreeAds *sCheckTreeModEntry;
 };
 
