@@ -4,6 +4,7 @@
 Usage:
   python -I tools/lotgrid.py check <game.iso>
   python -I tools/lotgrid.py grid  <game.iso> <out.json> <lot_01>
+  python -I tools/lotgrid.py routing <game.iso> <out.json>
 
 check decodes every Arry chunk of every house to its exact last byte and tests what the flags
 mean against the lot grids and the placed objects, with negative controls. From Python:
@@ -309,8 +310,27 @@ def check(disc):
     passed &= check_flags(lots)
     passed &= check_walls(lots)
     passed &= check_meaning(disc, lots)
+    passed &= check_routing(disc, lots)
     print('failures: %d' % (not passed))
     return 0 if passed else 1
+
+
+def routable_rows(entry, bit=NOT_ROUTABLE):
+    rows = [bytes.fromhex(row) for row in entry['flags']]
+    return [[not tile & bit for tile in row] for row in rows]
+
+
+def check_routing(disc, lots):
+    """The export must say what walkable does, and a single wall edge can't make a room."""
+    data = routing_data(disc)
+    same = sum(routable_rows(data[name]) == walkable(lots[name]) for name in lots)
+    passed = gd.report('routing tiles match walkable', same, len(lots))
+    wrong = sum(routable_rows(data[name], BUILDABLE) == walkable(lots[name]) for name in lots)
+    print('  control: bit 0x01 instead matches on %d lots' % wrong)
+    passed &= wrong == 0
+    passed &= gd.report('lots with at most one wall edge',
+                        sum(len(entry['wall_edges']) <= 1 for entry in data.values()), len(data))
+    return passed
 
 
 def write_grid(disc, out_path, lot):
@@ -323,11 +343,43 @@ def write_grid(disc, out_path, lot):
     return 0
 
 
+def hex_rows(array, data):
+    return [data[y * array.columns:(y + 1) * array.columns].hex() for y in range(array.rows)]
+
+
+def walls_of(array):
+    """Return [x, y, the tile's 8 TileWallStorage bytes as hex] for each tile that has any."""
+    return [[x, y, array.item(x, y).hex()] for y in range(array.rows) for x in range(array.columns)
+            if any(array.item(x, y))]
+
+
+def routing_data(disc):
+    """What XRoute reads, by lot, apart from objects and slots."""
+    data = {}
+    for name, lot in sorted(read_arrays(disc).items()):
+        flags = lot[FLAGS]
+        data[name] = {'columns': flags.columns, 'rows': flags.rows,
+                      'flags': hex_rows(flags, flags.loaded),
+                      'floor': hex_rows(lot[FLOOR], lot[FLOOR].data),
+                      'walls': walls_of(lot[WALLS]), 'wall_edges': wall_edges(lot)}
+    return data
+
+
+def write_routing(disc, out_path):
+    """Write every lot's routing data. This is game data."""
+    with open(out_path, 'w', encoding='ascii') as out:
+        json.dump(routing_data(disc), out, separators=(',', ':'))
+    print('wrote %s' % out_path)
+    return 0
+
+
 def main(argv):
     if len(argv) == 3 and argv[1] == 'check':
         return check(arc.Disc(argv[2]))
     if len(argv) == 5 and argv[1] == 'grid':
         return write_grid(arc.Disc(argv[2]), argv[3], argv[4])
+    if len(argv) == 4 and argv[1] == 'routing':
+        return write_routing(arc.Disc(argv[2]), argv[3])
     print(__doc__)
     return 2
 
