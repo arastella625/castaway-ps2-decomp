@@ -408,7 +408,7 @@ Person data fields (0x12, 0x13, 0x1E, 0x1F) are split between two arrays. `cXPer
 
 A motive is a float at Sim `+0x180`. The s16 is `x < 0 ? x - 0.5 : x + 0.5`, cut to an integer.
 
-Room data (0x17). Room 0xFFFB is outside; it gives 0, 1, 0, 0 for data 0 to 3 and has no room to look up otherwise.
+Room data (0x17). Room 0xFFFB, a diagonal tile holding two rooms, gives 0, 1, 0, 0 for data 0 to 3, because it has no `Room` to look up. An outdoor tile is an ordinary room: see Rooms.
 
 | Data | Value |
 |---|---|
@@ -742,7 +742,7 @@ What's here comes from the PS2 code where it gives an address, and the names com
 |---|---|---|
 | Routing slots | `ResFile +0x28`, below | Where to stand. Global ones are set 100 in the `global` row |
 | Tile flags | `Arry`, bit 0x10 | `TILEROUTABLE`: set means no. **Proven on PS2** |
-| Room ID per tile | `cFixedWorld::GetRoom`, worked out by `ComputeRooms` from walls | A tile in another room isn't routable, unless its ID is 0xFFFB, or a portal on it leads to this room |
+| Room ID per tile | `cFixedWorld::GetRoom`, worked out by `ComputeRooms` from walls | A tile in another room isn't routable, unless its ID is 0xFFFB (a split diagonal), or a portal on it leads to this room |
 | Walls | `Arry`: `HasWall`, `HasDiagonal`, style | `BuildRoomPartition` makes rectangles of them. Door-like styles let a Sim through. On the disc, lots have one wall edge at most |
 | Portals | Objects of type 8 on the tile | Entry point 15 and its other side join rooms in `TILEROUTABLE` |
 | Objects | The object list: `GetRect` and footprint, variable 0xA, `GetWallBlockFlags` (variable 0x35 turned by variable 1) | Penalty rectangles for the path, and obstacles for the goals |
@@ -782,7 +782,7 @@ The first s16 of a descriptor is its type. Type 0 becomes an `ObjectSlot`, 1 a `
 | 7 | Corner | Corner |
 | Below 0 | Nothing | Nothing |
 
-Flags: the low byte is the allowed directions, one bit each, and none means on top of the object. Bit 11 ignores rooms (a ghost's route sets it). Bit 14 allows failure trees, bit 15 a different level, and bit 17 marks a TS2 slot.
+Flags: the low byte is the allowed directions, one bit each, and none means on top of the object. Bit 11 ignores rooms (a ghost's route sets it). Bit 9 ignores the target's direction, bit 13 is random scoring, bit 16 uses the object's average location. Bit 14 allows failure trees, bit 15 a different level, and bit 17 marks a TS2 slot.
 
 ### The route
 
@@ -792,8 +792,15 @@ Flags: the low byte is the allowed directions, one bit each, and none means on t
 |---|---|
 | `+0x00` | Goals, a vector of 16-byte `RouteGoal`s: `+0x0C` s16 object ID, `+0x0E` s16 direction, which goes to person data 0x12 |
 | `+0x10` | A copy of the routing slot, 0x3C bytes |
-| `+0x4C` | Start object, me |
-| `+0x50` | Destination object |
+| `+0x4C` | Target object |
+| `+0x50` | Me |
+| `+0x54` | Current goal, -1 for none |
+| `+0x58` | Best score, -1 for none |
+| `+0x70` | Start tile |
+| `+0x78` | Exit direction flag |
+| `+0x8C` | Result |
+| `+0x90` | ID of the object in the way |
+| `+0xA0` | Goal limit |
 | `+0x6C` | Current portal |
 | `+0x7C` | Valid. Clear means the route was invalidated: walking restarts through state 0xF |
 
@@ -808,16 +815,58 @@ Flags: the low byte is the allowed directions, one bit each, and none means on t
 
 Then each tick, with any state: no current route is 0, and a route with no destination pops itself and returns 2. A target gone from the world moves to state 0x13, or 0x14 from Walking. An invalid route goes to state 0xF if it was walking, after which it's valid again. Then the state loop runs as in GotoRoutingSlot's section.
 
-**Finding a path. Likely.**
+**Finding a path. Proven on PS2, read line by line, except `Path` itself.** The steps below are the PS2 code.
 
-1. `BuildGoalList`: `ChooseStartingPoint` picks the start. A Sim sitting tries the 8 tiles around the chair and takes the nearest good one. In a room above 250 tiles the route's radius becomes 8. Then `ConstructGoals`.
-2. `ConstructGoals` walks outwards from the object in steps of the slot's resolution, from minimum to maximum distance, in each allowed direction. Each spot goes through `EvalTileForGoal`, then gets a score from its distance to optimal and the gradient. With random scoring set, up to 20 is added. On-top slots have one goal, scored 100.
-3. `EvalTileForGoal` returns 0 if the spot is usable. It says why not otherwise: out of bounds, wrong room, a wall in the way, or another object or Sim.
-4. `ComputeRouteResult` turns the reasons into a result if there are no goals. It gives 8, 9, 0xB or 0xD.
-5. `FindPath` first needs a real room for the Sim. It collects penalty rectangles from each object it doesn't ignore: 1000 for most, 10,000 for walls of an object that blocks them, and clips them to the room. Then it uses the room's cached partition from `BuildRoomPartition`, which is rectangles of routable tiles and walls.
-6. `Path` is A*: `InitPath`, `AdvancePath` until `PathComplete`, then one smoothing step at a time, `GetFinalPath` and `GetChosenGoal`. The chosen goal becomes the current one. If it fails it's tried once more with other settings.
+**Corrections to earlier versions of this section. Read these first:**
 
-**For a port:** a plain A* over tiles with bit 0x10 clear, around object footprints, gives the same answer in most cases, because the disc's lots have no real walls and rooms. The goals are what matter: try the slot's directions at its distances, and stand on the first good tile.
+- **`EvalTileForGoal` returns 5 for a usable tile, not 0.** 0 means out of bounds or a placement error, 1 an object, 2 another room, 3 a wall, and 4 a Sim.
+- **Rooms aren't optional.** `FindPath` gives up unless the Sim's room ID is below 0xFFFB and has a `Room`, and unless the target is in the same room (ghosts skip the second test).
+- **0xFFFB isn't "outside".** It's a diagonal tile holding two rooms. An open lot is one real room, **ID 0**, covering every tile. See Rooms, below.
+- **Penalties:** an object's rectangle costs `INT_MAX`, or 10 if its variable 0xA is set. 10,000 is only for portal walls, and for a solid object overlapping the Sim. 1000 is only for a Sim overlapping the Sim.
+- **`+0xA0` is the goal limit, not a radius:** 48, or 8 in a room above 250 tiles.
+- **Random scoring adds -10 to +9**, not up to 20.
+- **`+0x4C` is the target and `+0x50` the Sim.** They were the wrong way round.
+- **The ring of tiles at the lot's edge is out of bounds:** x and y must be above 0 and below size - 1.
+
+Wii differs from PS2 in only two ways here. Wii takes the square root with `fastsqrtf` where PS2 uses `sqrt.s`, which can change a score by 1. And Wii calls `SetPersonData` where PS2 writes person data 0x21 directly. Offsets from `+0x98` up are 4 higher on PS2.
+
+1. **`BuildGoalList`** (`0x1CC218`). `ChooseStartingPoint`, then the goal limit. Person data 0x21 is set to `+0x9C` while `ConstructGoals` runs, then cleared, and my direction is put back afterwards.
+2. **`ChooseStartingPoint`** (`0x1CD978`). The start is my tile, with exit flag 0. If I'm in a chair (a container with tree entry 0x1A), it tries each direction in definition `+0x84`, turned by the chair's direction, one tile out, and keeps the tile nearest the target that scores 4 or 5.
+3. **`ConstructGoals`** (`0x1CDBE0`). The base direction is the target's, or 0 with slot flag bit 9. The origin is the target's tile, or its average location with bit 16.
+   - **On top** (no direction bits): one spot at the slot's offset. If it's on another whole tile, the direction to it is passed to the wall test. A 5 adds a goal scored 100. Otherwise the blockers give the result.
+   - **Otherwise** distances must fit: minimum 0 to 512, maximum 1 to 512, and minimum, optimal and maximum in order. If not, there are no goals and no result.
+   - The step is 16 if the same-level multiplier (`+0x14`) is non-zero, or else the slot's resolution.
+   - A wall on the target's tile in direction n blocks direction n and marks n-1, n and n+1 for scoring.
+   - For each allowed direction, base + n: a blocked one counts as a wall and is skipped. Otherwise it walks rows from the minimum distance out to the maximum. A row is y, in steps, and x runs from -y to +y, so each direction covers a 90-degree wedge. Offsets are turned by `TransformToWorldCoords`.
+   - Each spot is tried up to 10 times: `fp` from -1 to 8. -1 or 8 is standing on the spot, and which one counts depends on the multipliers. 0 to 7 look for a chair next to it, facing it, when `+0x14` is non-zero.
+   - A spot must be from minimum to maximum distance away (squared values compared). Its score is 100 - (int)(|(int)sqrt(x² + y²) - optimal| x gradient) + multiplier x 10. Random scoring adds rand % 20 - 10. A direction not marked by a wall adds 25, and the Sim's start tile adds 20.
+   - `EvalTileForGoal` with the direction. 5 adds the goal unless slot flag bit 13 finds a door there. 3 ends this direction after its row. Others try the next `fp`.
+   - Above the goal limit, chair goals stay and the rest are picked at random.
+   - No goals: the result is 9 if a chair was taken, 0xD for a Sim, 8 for an object, 0xB for a wall or room, 0xA if the blockers were built for level-only slots, and otherwise 0.
+4. **`EvalTileForGoal`** (`0x1CAF08`). Out of bounds is 0. Unless the slot ignores rooms: a tile in another room is 2, and `GetWallBlockFlagsAtTile` for direction + 4 gives 3 on bit 0, or for a diagonal on 0x82. Then the Sim's `CanPlace` (slot `+0x130`) with `gPlacementConflict` cleared: true is 5. False depends on `gPlacementError`: 7 is 3, 0xB is a conflict, and anything else 0. A conflict with no object or with the goal object is 5. Otherwise the ID goes in `+0x90`, and it's 4 for a Sim and 1 for anything else.
+5. **`FindPath`** (`0x1CC350`).
+   - No goals: result 1 becomes 7, and it returns 0.
+   - My room must be the target's unless I'm a ghost, and it must have a `Room`. If not, it clears the current goal and returns 0.
+   - Each other object in my room that `ShouldIgnore` doesn't skip makes a rectangle. Portals add their walls. A Sim's grows by half my width, and an `INT_MAX` rectangle by half my width.
+   - A rectangle holding my start tile isn't used as it is. A Sim's or an `INT_MAX` one shrinks back. If that no longer touches my own rectangle, it's kept, and that object is ignored from then on (Sim `+0x5E0`). If it does touch, it's kept at 1000 for a Sim or 10,000 otherwise, grown again, and ignored too. A rectangle of penalty 10 or 10,000 holding the start tile is dropped.
+   - `CollapsePenaltyRects` merges them. The room's partition is built if it's empty.
+   - Goals become 1-tile rectangles, with penalty (best score - score) x 16. Goals with a score of 0 or less aren't used.
+   - The iteration limit is the smaller of the caller's limit and goal count x area + 50.
+   - In a room above 256 tiles, a first pass without smoothing tests that a path exists: none gives result 3 and returns 0.
+6. **`Path`** is next on the list. **Likely** until then: A* over the partition, `InitPath`, `AdvancePath` until `PathComplete`, then `GetFinalPath` and `GetChosenGoal`.
+
+### Rooms
+
+**Proven on PS2** (`cFixedWorld::ComputeRooms`, around `0x1C6518`). `RoomManager::ComputeRooms` only gathers statistics.
+
+1. Every tile's room starts at 0xFFFF, and tile flag bits 1 and 2 are cleared.
+2. The border ring gets room 0 and flag bit 2.
+3. Rooms are numbered from 0. It scans x from 1 to width - 2 and y from 1 to height - 2. Each tile not yet in a room starts a flood fill with the next ID, stopped by walls.
+4. Diagonal tiles use 0xFFFE, 0xFFFD and 0xFFFC while filling. A tile that ends up with a room on each side is 0xFFFB.
+
+So on a lot with no closed walls the fill from (1, 1) reaches every tile, and everything, the border too, is room 0. `RoomManager` has a `Room` for 0, because only IDs above 0xFFFA are refused. One wall edge can't close anything off. Objects copy their tile's room into variable 0x1D in `SetLocation`.
+
+**For a port:** treat a lot with no closed walls as one room, ID 0, with a `Room`. Set variable 0x1D to 0 on everything, and it passes every room test above. Then the goals are the slot's wedge search, and a plain A* around object rectangles should give the same result on open ground. `CanPlace` decides the last step: the next pass reads it.
 
 ## GotoRelative (opcode 0x1B)
 
