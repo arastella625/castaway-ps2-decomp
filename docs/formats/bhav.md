@@ -960,6 +960,56 @@ PS2 does the same thing as Wii, with these inlined or different:
 
 Afterwards variable 0x34 says how it went: 0 by default, 1 if a Sim was asked to move, 2 if the place was out of bounds. Variable 0x36 is the ID of the object in the way, or 0. It returns whether the placement worked.
 
+## FindGoodLocation (opcode 0x10)
+
+**Proven: read line by line on PS2** (`TryFindGoodLocation` `0x224D60`, `cXObject::FindGoodLocation` `0x2139D8`). No difference from Wii was found, apart from inlined helpers. Not matched. 219 uses.
+
+It places the **stack object**, which must exist or it's error 0x15. It returns true if it was placed, false if not.
+
+| Operand | Meaning |
+|---|---|
+| `+0` u8 | Mode, below |
+| `+1` u8 | Local holding the relative object's ID. A bad index is error 0x34, a missing object 0x17 |
+| `+2` bit 0 | Start at the relative object. Without it, the start is tile (1, 1), level 1, and there's no relative object |
+| `+2` bit 1 | Don't prefer empty tiles |
+| `+2` bit 2 | Only tiles that may be edited (tile flag 0x20) |
+| `+2` bit 3 | The object's direction comes from temp 0. Anything but a Sim loses bit 0 of it |
+| `+2` bit 4 | Prefer under a roof: placement tests also want a roof, error 0xA without |
+
+| Mode | What it does | Fails with |
+|---|---|---|
+| 0, 9 and up | **Search out from the start**, no direction. If that fails and bit 4 was set, it tries again without it, then again with stay-in-room off | False |
+| 1 | **Take it out of the world:** `Pickup`, after leaving a dynamic multi-tile object. Tile and level are given back. For a Sim, its sprite slot is deactivated, and the player's menu closes | Never |
+| 2 | **Same tile as the relative object, or me:** the object turns to that one's direction + 5, then `CanPlace` and `Place` there | False, or error 0x52 if it didn't turn |
+| 3 | **Search along the relative object's direction** | 0x3D with no relative object |
+| 4 | **The same, direction + 2** | 0x3D |
+| 5 | **Multi-tile link:** the object turns to match the relative object, and goes where the two leaders' part offsets (definition `+0x16`) say | 0x3D, 0x15 for no leader |
+| 6 | **Random:** 10 tries at random tiles, the middle of the tile. With bit 2 it needs flag 0x20, and when preferring empty the tile must have no object | False |
+| 7 | **Search along temp 1 as the direction**, modulo 8 | 0x3D |
+| 8 | **Multi-tile, every turn:** it tries directions 0, 2, 4 and 6 and keeps the nearest good tile. It tries with bit 4 if set, then without, then with stay-in-room off | False |
+
+Directions must be even or -1, or it's error 0x5F. Modes 3, 4 and 7 use `CanPlace` again after the search, then `Place`. After a good placement the function writes back an action (temps aren't touched): 1 for mode 2, 2 for mode 1, 3 for mode 0, 4 for modes 3, 4, 6, 7 and 8, 5 for mode 5.
+
+**The search** (`FindGoodLocation`). It starts at the given tile, or the cursor without one, kept to 1 and size - 2, on level 1 if none is given. Stay in room is on, and it's the start tile's room. From offset (0, 0) it tests each tile:
+
+1. Out of bounds: not good, and it counts. It stops once (width + height) x 4 tiles in a row are out of bounds. Going past -0x40 on either axis also stops it.
+2. Editable only: tile flag 0x20 is needed.
+3. Prefer empty: a tile with an object isn't good, unless the object is type 5, type 0xE, or a type 8 without entry point 15.
+4. A tile with a diagonal wall isn't good.
+5. Stay in room: the tile must be in the start's room.
+6. `CanPlace` on the middle of the tile (x x 16 + 8).
+
+The first good tile wins. With no direction, the offset moves in a square spiral:
+
+```
+if (y <= x && y <= -x) x -= 1;
+else if (y <= x) y -= 1;
+else if (y >= -x) x += 1;
+else y += 1;
+```
+
+With direction 0 or 4 the offset goes 0, +1, -1, +2, -2 and so on along y. With 2 or 6 it does that along x.
+
 ## Update (opcode 0x07)
 
 **Proven: matched byte for byte** (`0x230CC0`). `+0` picks the object: 0 is me, 1 the stack object (missing is error 0x15), and anything else is error 3. It returns true.
