@@ -80,6 +80,22 @@ public:
 };
 STATIC_ASSERT(ObjectSlot_size, sizeof(ObjectSlot) == 0x24);
 
+// Wii: RoutingSlot, a place to stand, 0x3c bytes.
+class RoutingSlot {
+public:
+    u32 pad_0x0[7];  // 0x00
+    int mFlags;      // 0x1c  bit 14 failure trees may run
+    u32 pad_0x20[7]; // 0x20
+
+    void SetAllowFailureTrees(bool allow)
+    {
+        mFlags &= ~0x4000;
+        if (allow)
+            mFlags |= 0x4000;
+    }
+};
+STATIC_ASSERT(RoutingSlot_size, sizeof(RoutingSlot) == 0x3c);
+
 // The base of everything in the world that runs trees. The layout comes from the Wii
 // constructor and the PS2 destructor: past TreeSim, a PS2 offset is the Wii offset plus 4,
 // because PS2 keeps TreeSim's vptr after its fields and Wii keeps it among them. Fields with
@@ -109,7 +125,7 @@ public:
     s16 *mDef;                 // 0xe8  a word of it is scope 0x15; word 9 is the object's type
     ObjSelector *mSelector;    // 0xec
     eastl::vector<ObjectSlot, eastl::allocator> mObjectSlots; // 0xf0
-    u8 mRoutingSlots[0x10];    // 0x100 eastl::vector<RoutingSlot>
+    eastl::vector<RoutingSlot, eastl::allocator> mRoutingSlots; // 0x100
     eastl::vector<SpriteSlot, eastl::allocator> mSpriteSlots; // 0x110
     u8 field_0x120;            // 0x120
     u32 field_0x124;           // 0x124
@@ -175,6 +191,8 @@ public:
     s16 GetID() const { return mID; }
     u16 GetRoom() const { return mVars[0x1d]; }
     inline CTilePt GetCTilePt() const;
+    int GetNumRoutingSlots() { return mRoutingSlots.size(); }
+    RoutingSlot *GetRoutingSlot(int index) { return &mRoutingSlots[index]; }
     int CountObjectSlots() { return mObjectSlots.size() - 1; }
     ObjectSlot *GetObjectSlot(int index)
     {

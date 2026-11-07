@@ -1119,3 +1119,13 @@
 0x001E4330 OutOfGrid__C11cFixedWorldRC7CTilePt
 0x00254C50 __14ObjectIteratorRC7CTilePtQ214ObjectIterator11IterateType
 0x00220208 __pp__14ObjectIterator
+
+# game/simulator/core2/cXPerson.cpp: GotoRoutingSlot
+0x001A8CA8 TryGotoRoutingSlot__8cXPersonP9StackElemP10XPrimParam
+0x001AA008 GotoRoutingSlot__8cXPersonP8cXObjectPC11RoutingSlotRi
+0x001DD710 IsModelLoaded__8cXPerson
+0x00121018 EnableSmoothRoute__10SAnimator2
+
+# game/simulator/core/cXObjectPrims.cpp: CallNamedTree
+0x002010F8 GetCacheItem__17NamespaceSelectorsPvUii
+0x0049242C _7TreeSim$sBreakOnCallTreeStringFailure

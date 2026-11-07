@@ -112,6 +112,133 @@ long cXObject::TryRandom(StackElem *elem, XPrimParam *primParam)
     return 1;
 }
 
+inline u32 Behavior::GetNamespaceIDInline()
+{
+    return mSelector->mNamespaceID;
+}
+
+inline u32 Behavior::GetSemiGlobalNamespaceIDInline()
+{
+    return mSelector->mSemiNamespaceID;
+}
+
+#ifdef NON_MATCHING
+// 410 of the 411 words line up. One branch to the bad mode error goes to the error's alignment
+// nop in the game and just past it here. The delay slot is the same, so it behaves the same.
+// Primitive 0x1c: run a tree found by name.
+class CallNamedTreeParam {
+public:
+    s16 mStringSet; // 0x00
+    s16 mWhere;     // 0x02  1 global, 2 semi-global, 3 private, others by the running tree's class
+    u8 mString;     // 0x04
+    u8 mMode;       // 0x05  0 and 1 run it to the end, on me or the stack object; 2 a subroutine
+
+    bool GetNameGlobal() const { return mWhere == 1; }
+    bool GetNameSemiGlobal() const { return mWhere == 2; }
+    bool GetNamePrivate() const { return mWhere == 3; }
+};
+
+long cXObject::TryCallNamedTree(StackElem *elem, XPrimParam *primParam)
+{
+    CallNamedTreeParam *param = (CallNamedTreeParam *)primParam;
+    if (elem->mWaiting == 1) {
+        if (GetLastResult())
+            return 1;
+        return 0;
+    }
+
+    u32 first, second;
+    second = first = 0xffffffff;
+    if (param->GetNameGlobal()) {
+        first = sGlobNamespaceID;
+    } else if (param->GetNameSemiGlobal()) {
+        first = elem->mBehavior->GetSemiGlobalNamespaceIDInline();
+    } else if (param->GetNamePrivate()) {
+        first = elem->mBehavior->GetNamespaceIDInline();
+    } else {
+        s16 treeClass = Behavior::GetTreeClass(elem->GetTreeID());
+        if (treeClass == 2) {
+            first = elem->mBehavior->GetNamespaceIDInline();
+            second = elem->mBehavior->GetSemiGlobalNamespaceIDInline();
+        } else if (treeClass == 3) {
+            first = elem->mBehavior->GetSemiGlobalNamespaceIDInline();
+            second = elem->mBehavior->GetNamespaceIDInline();
+        }
+    }
+    OBJECT_ERROR_CHECK(first != 0xffffffff, 0x2d);
+
+    ConsoleAutoRefCount<StringSet> strings;
+    strings = GetObjectFolder()->GetNamespaceSelector(first)->GetStringSet(param->mStringSet);
+    const char *name = 0;
+    if (strings.mObject)
+        name = strings->GetString(param->mString, -1);
+    if (!name || !*name) {
+        if (second == 0xffffffff) {
+            if (TreeSim::sBreakOnCallTreeStringFailure && !strings.mObject) {
+                OBJECT_ERROR_CHECK(false, 0x2c);
+            }
+            return 0;
+        }
+        strings = GetObjectFolder()->GetNamespaceSelector(second)->GetStringSet(param->mStringSet);
+        if (strings.mObject)
+            name = strings->GetString(param->mString, -1);
+        if (!name || !*name) {
+            if (TreeSim::sBreakOnCallTreeStringFailure && !strings.mObject) {
+                OBJECT_ERROR_CHECK(false, 0x2c);
+            }
+            return 0;
+        }
+    }
+
+    cXObject *object = GetObjectFromID(elem->mStackObject);
+    if (!object) {
+        TREE_ERROR_LOOP(0x15);
+        return -1;
+    }
+    cXObject *runner;
+    cXObject *target;
+    bool toTheEnd = false;
+    switch (param->mMode) {
+    case 0:
+        runner = this;
+        target = GetObjectFromID(elem->mStackObject);
+        toTheEnd = true;
+        break;
+    case 1:
+        toTheEnd = true;
+        target = GetObjectFromID(elem->mStackObject);
+        runner = target;
+        break;
+    case 2:
+        runner = this;
+        target = GetObjectFromID(elem->mStackObject);
+        break;
+    default:
+        OBJECT_ERROR_CHECK(false, 0x2d);
+    }
+
+    long result;
+    Behavior *behavior = target->mSelector->mBehavior;
+    s16 tree = behavior->GetTreeIDByNameFast(name);
+    if (tree == 0) {
+        result = 0;
+    } else if (toTheEnd) {
+        result = 0;
+        if (runner->RunCheckTree(behavior, target->mID, tree, 0))
+            result = 1;
+    } else if (runner == this) {
+        if (!runner->GosubObjectTree(target, 0, tree, false))
+            return 0;
+        elem->mWaiting = 1;
+        result = 3;
+    } else {
+        result = 0;
+    }
+    return result;
+}
+
+#endif
+
 // A whole tile: x, y, level. Built from numbers, it turns anything that doesn't fit in a byte to 0.
 class CTilePt {
 public:

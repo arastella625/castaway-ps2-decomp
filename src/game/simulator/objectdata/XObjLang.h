@@ -23,10 +23,30 @@ public:
     int CountValues() const;
 };
 
+// Wii: StringSet, an STR# resource.
+class StringSet : public IConsoleUnknown {
+public:
+    virtual void Slot3();
+    virtual void Slot4();
+    virtual void Slot5();
+    virtual void Slot6();
+    virtual void Slot7();
+    virtual void Slot8();
+    virtual void Slot9();
+    virtual void Slot10();
+    virtual void Slot11();
+    virtual void Slot12();
+    virtual void Slot13();
+    virtual void Slot14();
+    virtual const char *GetString(int index, int language);
+};
+
 // Wii: NamespaceSelector. What a namespace ID resolves to.
 class NamespaceSelector {
 public:
     ObjectDataBehaviorConstants *GetBehaviorConstants(s16 id);
+    void *GetCacheItem(s16 id, void *cache, u32 type, int kind);
+    StringSet *GetStringSet(s16 id) { return (StringSet *)GetCacheItem(id, (char *)this + 8, 0x6bc37bc5, 2); }
 };
 
 // Wii: HashList<ObjSelector, int, 256>. A find moves what it finds to the front of its bucket.

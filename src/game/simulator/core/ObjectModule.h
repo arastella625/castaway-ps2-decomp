@@ -6,6 +6,7 @@
 
 class cXObject;
 class cXPerson;
+class RoutingSlot;
 
 // Wii: ObjectModule. Holds every object in the world. Only what the decompiled code calls is
 // declared so far.
@@ -17,7 +18,10 @@ public:
     s16 mTileObjects[0x40][0x40]; // 0x0030
     u32 pad_0x2030[8];         // 0x2030
     eastl::vector<cXPerson *, eastl::allocator> mPeople; // 0x2050
-    u32 pad_0x2060[8];         // 0x2060
+    u32 pad_0x2060[4];         // 0x2060
+    RoutingSlot *mGlobalRoutingSlots;    // 0x2070
+    RoutingSlot *mGlobalRoutingSlotsEnd; // 0x2074
+    u32 pad_0x2078[2];         // 0x2078
     cXObject *mTutorialObject; // 0x2080
     u32 pad_0x2084;            // 0x2084
     eastl::vector<cXObject *, eastl::allocator> mObjects; // 0x2088
@@ -38,6 +42,8 @@ public:
 
     cXObject *GetTutorialObject() { return mTutorialObject; }
     cXObject *GetFirst() { return mFirst; }
+    inline int GetNumGlobalRoutingSlots();
+    inline RoutingSlot *GetGlobalRoutingSlot(int index);
     int GetNumPeople() { return mPeople.size(); }
     cXPerson *GetPeople(int index) { return mPeople[index]; }
 

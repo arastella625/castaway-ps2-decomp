@@ -96,6 +96,16 @@ public:
         return &mObject;
     }
     T *operator->() const { return mObject; }
+    void operator=(T *object)
+    {
+        if (object == mObject)
+            return;
+        if (object)
+            object->AddRef();
+        if (mObject)
+            mObject->Release();
+        mObject = object;
+    }
 };
 
 class ISmartDataFactory {
@@ -111,11 +121,16 @@ class ObjSelector;
 class ObjectDataBehaviorConstants;
 
 // Finds trees for an object: its own (private), its group's (semi-global) and the global ones.
+extern u32 sGlobNamespaceID;
+
 class Behavior : public IConsoleUnknown {
 public:
     virtual ~Behavior();
     virtual void Init();
     virtual u32 GetResFileID(s16 treeID);
+    virtual void Slot6();
+    virtual void Slot7();
+    virtual int GetTreeIDByNameFast(const char *name);
 
     ObjSelector *mSelector; // 0x04
 
@@ -126,6 +141,21 @@ public:
     int GetTree(s16 treeID, ObjectDataBehaviorTree **result, bool load);
     u32 GetNamespaceID();
     u32 GetGlobNamespaceID();
+    inline u32 GetNamespaceIDInline();
+    inline u32 GetSemiGlobalNamespaceIDInline();
+    // 0 a primitive, 1 global, 2 private, 3 semi-global.
+    static s16 GetTreeClass(s16 id)
+    {
+        if ((u16)id < 0x100)
+            return 0;
+        if ((u16)(id - 0x100) < 0xf00)
+            return 1;
+        if ((u16)(id - 0x2000) < 0x329)
+            return 3;
+        if ((u16)(id - 0x1000) < 0x1000)
+            return 2;
+        return 0;
+    }
     inline ObjectDataBehaviorConstants *GetConstants(s16 id, ObjectDataBehaviorConstants **constants);
 
     static bool IsDefaultParam(const s16 *param)

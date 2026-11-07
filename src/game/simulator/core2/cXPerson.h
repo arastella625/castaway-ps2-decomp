@@ -77,6 +77,10 @@ public:
 
     static int sbAllowingCheckTreeAds;
 
+    long TryGotoRoutingSlot(StackElem *elem, XPrimParam *primParam);
+    long GotoRoutingSlot(cXObject *object, const RoutingSlot *slot, int &state);
+    int IsModelLoaded();
+
 
     u32 ReconType();
 
