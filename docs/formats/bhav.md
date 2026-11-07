@@ -1235,7 +1235,7 @@ Each of these is labelled. Offsets are PS2 unless they say Wii.
 
 **Misc flag 0x40. Proven.** The word is object `+0xE4`. Only `ObjectModule::KillOutOfWorldObject` sets the flag, and `ReconStream` doesn't save it, so it's clear on every loaded object. It marks an object being killed. During a load, `Cleanup` always goes on to place the object.
 
-**Object IDs. Proven for the rule, open for the name.** `AddObject` (`0x222EA0`), given no ID, starts at 0x401 if the app's game state (`_pApp +0x14C`) is 2, and otherwise at 1. It takes the first free slot from there. The state starts at 0 in `EApp`'s constructor, and it's set through a virtual call that hasn't been traced, so which state 2 is remains **open**. Placed objects on the disc have IDs from 1 to 257, none above 0x400. **Likely:** 2 is normal play, so objects made during play stay clear of the IDs saved in lots. A port that keeps IDs from 0x401 for created objects won't collide with saved ones either way.
+**Object IDs. Proven for the rule, likely that 2 never happens on PS2.** `AddObject` (`0x222EA0`), given no ID, starts at 0x401 if the app's game state (`_pApp +0x14C`) is 2, and otherwise at 1. It takes the first free slot from there. The state starts at 0 in `EApp`'s constructor. The only writer is the virtual `SetGameState` (`0x343ED0` and `0x3E3E90`, slot `+0x90`), and the only call to it found on PS2 is in `InLevelBaseState::Update` (`0x265200`), passing 0. So a port starting IDs at 1 is right. The search was for that slot's call pattern, so a call written another way could be missed. Placed objects on the disc have IDs from 1 to 257.
 
 **`Reset`. Proven on PS2 for the variables, likely for the order.** `cXObject::Reset` (`0x20F478`) copies the variables, clears them all, and puts back 0x1D, 1, 0x29, 0x2D, 0x2E, 0x2F, 0x18, 0x15 and 0x43. It sets 0xB to my ID and 0x3A to definition `+0x62`, and later 2 and 3 from my container. On a single tile only, it then runs init, and if its argument is true, it isn't author mode and I have a main tree, one `Simulate`. A multi-tile object doesn't run init here.
 
@@ -1244,6 +1244,28 @@ So an object with no cleanup tree runs init twice when it resets on load, on a s
 **`Cleanup(0)`. Proven on PS2 for the entry points.** With a cleanup tree (entry point 3), it runs that on me, or on each part of a multi-tile object, then clears variable 0x3E and bit 5 of variable 8, and puts main back on the stack. Without one, it saves my place, calls `Pickup`, then `Reset(true)` unless flag 0x40 is set, then `Place` if I was placed. `Pickup` runs entry point 10 and `Place` entry point 9, so those run during such a cleanup too.
 
 **Type attributes. Proven on the disc.** `GetTypeAttributes` asks `ObjectFolder` for a block by definition `+0xB8`, or by GUID if that's 0. `+0xB8` is 0 on all 1,335 definitions, so blocks are per GUID. They're shared by all objects of that type, and they aren't in `ObjM`.
+
+## Lot transitions
+
+**Proven for the data, likely for the rules.** `LotToLotTransition::Initialize` (`0x1FD60C`) fills a table of 72 transitions, once, from tree constants in the semi-global row of the object with GUID 0xF85F. That's `portal_basic`, so the row is `portal_sg`. The code loads ID 0x2000 to 0x2004 and 0x2006 to 0x2009, and each table has a value per transition, with number 0 unused. The titles are on the disc:
+
+| Table | Title | Field | PS2 entry, 0x18 bytes |
+|---|---|---|---|
+| 0x2000 | Source Lot ID | Source lot | `+0x0E` u8 |
+| 0x2001 | Destination Lot ID | Destination lot | `+0x0F` u8 |
+| 0x2002 | Time Cost | Time | `+0x00` |
+| 0x2003 | Hygiene Cost | Hygiene | `+0x02` |
+| 0x2004 | Energy Cost | Energy | `+0x04` |
+| 0x2006 | Energy Requirement | Energy needed | `+0x06` |
+| 0x2007 | Body Skill Requirement | Body needed | `+0x08` |
+| 0x2008 | Min Body For Discount | Body for the discount | `+0x0A` |
+| 0x2009 | Energy Cost Discount | Discount | `+0x0C` |
+
+`+0x10` u8 is the transition's number. Tables 0x2005, 0x200A to 0x200C aren't loaded here, but they're on the disc too: Body Skill Gain, Energy Requirement Discount, Default Locked State and Lock Bit Lookup. 0x200D is the service NPCs' neighbour IDs.
+
+`GetTransitionCost` gives time, hygiene and energy for a transition, and the energy drops by the discount if person data 0x10 is at least the body value. `GetTransitionEnd` gives the destination lot. Whether one's open comes from `IsTransitionOpen` and `HasTransitionBeenUsed`, which aren't read here.
+
+So a port can build this table from the `portal_sg` constants, with no stand-in.
 
 ## What a RAM snapshot would settle
 
