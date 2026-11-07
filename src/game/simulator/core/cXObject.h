@@ -92,7 +92,16 @@ class ObjectSlot {
 public:
     u32 field_0x0;       // 0x00
     s16 mObjectID;       // 0x04
-    u8 pad_0x6[0x1e];    // 0x06
+    u8 pad_0x6[0xa];     // 0x06
+    int mFlags;          // 0x10  bit 17 a TS2 slot
+    u32 pad_0x14;        // 0x14
+    f32 mXOffset;        // 0x18
+    f32 mYOffset;        // 0x1c
+    u32 pad_0x20;        // 0x20
+
+    bool IsTS2ObjectSlot() const { return (mFlags >> 17) & 1; }
+    f32 GetXOffset() const { return mXOffset; }
+    f32 GetYOffset() const { return mYOffset; }
 };
 STATIC_ASSERT(ObjectSlot_size, sizeof(ObjectSlot) == 0x24);
 
@@ -156,6 +165,24 @@ public:
             mFlags |= 0x8000;
     }
     void SetIsOnTopOfObject() { mFlags &= ~0xff; }
+    int SnapsToDirection() const { return mFlags & 0x1000; }
+    bool IsTS2RoutingSlot() const { return (mFlags >> 17) & 1; }
+    bool GetIgnoreRooms() const
+    {
+        int flag = mFlags & 0x800;
+        return flag != 0;
+    }
+    int GetSnapDirection() const
+    {
+        int i;
+        for (i = 0; i < 7; i++) {
+            if ((mFlags >> i) & 1)
+                goto found;
+        }
+        i = 0;
+    found:
+        return i;
+    }
     void AllowDirection(int direction);
     void SetTileDistances(f32 min, f32 max, f32 preferred);
     void SetFacingDirection(int direction);
@@ -300,6 +327,7 @@ public:
     long TryGenericSimCall(StackElem *, XPrimParam *);
     long TryDialog(StackElem *, XPrimParam *, bool);
     long TrySnap(StackElem *, XPrimParam *);
+    long TrySnap(const FTilePt &tile, int level, cXObject *object, int slot, bool ignoreRooms, int direction, bool footprint);
     long TryNotifyStackObject(StackElem *, XPrimParam *);
     long TryFindFunctionalObject(StackElem *, XPrimParam *);
     long TryCallFunctionalTree(StackElem *, XPrimParam *);
@@ -360,6 +388,16 @@ inline bool cXObject::AllowIdleOptimization()
     if (GetType() != 2 && mVars[0x19] == 0 && !active)
         return true;
     return false;
+}
+
+inline int ObjectModule::GetNumGlobalRoutingSlots()
+{
+    return mGlobalRoutingSlotsEnd - mGlobalRoutingSlots;
+}
+
+inline RoutingSlot *ObjectModule::GetGlobalRoutingSlot(int index)
+{
+    return &mGlobalRoutingSlots[index];
 }
 
 #endif

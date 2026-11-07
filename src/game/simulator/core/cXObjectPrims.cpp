@@ -1,6 +1,7 @@
 #include "game/simulator/core/cXObject.h"
 
 #include "common/EGlobal.h"
+#include "common/EVec3.h"
 #include "game/animation/SAnimator2.h"
 
 #include "game/simulator/core/Lot.h"
@@ -1817,6 +1818,249 @@ long cXObject::TryCompleteGoal(StackElem *elem, CompleteGoalParam &param)
     }
     if (param.GetReturnTrueIfSatisfied() && type == 2 && status == 2)
         result = 1;
+    return result;
+}
+#endif
+
+// Not matched: 610 of 726 words. The flow and frame are the game's, but it keeps direction in a
+// saved register with other and level on the stack, and here other gets the register. Most of
+// the differing words follow from that.
+#ifdef NON_MATCHING
+extern int gPlacementError;
+extern cXObject *gPlacementConflict;
+
+void ObjectRotationTf(EMat4 *matrix, int direction);
+EVec3 IsoFracsToWorld(const f32 &x, const f32 &y, const f32 &z);
+EVec3 IsoToWorld(const FTilePt &tile, const f32 &z);
+FTilePt WorldToIso(const EVec3 &world);
+
+// Wii: OffsetCoordsInDirection.
+inline void OffsetCoordsInDirection(int direction, int &x, int &y)
+{
+    switch (direction & 7) {
+    case 1:
+        x += 1;
+    case 0:
+        y -= 1;
+        break;
+    case 3:
+        y += 1;
+    case 2:
+        x += 1;
+        break;
+    case 5:
+        x -= 1;
+    case 4:
+        y += 1;
+        break;
+    case 7:
+        y -= 1;
+    case 6:
+        x -= 1;
+        break;
+    }
+}
+
+// Wii: FTilePt::FTilePt(int), one tile in a direction.
+class DirectionTile : public FTilePt {
+public:
+    DirectionTile(int direction)
+    {
+        mX = 0;
+        mY = 0;
+        OffsetCoordsInDirection(direction, mX, mY);
+        mX <<= 4;
+        mY <<= 4;
+    }
+};
+
+class SnapParam {
+public:
+    s16 mSlot;   // 0x00
+    s16 mWhere;  // 0x02
+    u16 mFlags;  // 0x04
+
+    bool GetOriginOnly() const { return mFlags & 1; }
+    bool GetAskPersonToMove() const { return (mFlags >> 1) & 1; }
+    bool GetUseFootprint() const { return (mFlags >> 2) & 1; }
+};
+
+long cXObject::TrySnap(StackElem *elem, XPrimParam *primParam)
+{
+    SnapParam *param = (SnapParam *)primParam;
+    cXObject *object = GetObjectFromID(elem->mStackObject);
+    OBJECT_ERROR_CHECK(object, 0x15);
+
+    FTilePt tile;
+    int level;
+    cXObject *other;
+    int slotIndex;
+    bool ignoreRooms;
+    int direction;
+
+    if (param->mWhere == 2) {
+        tile = object->GetLocationRef();
+        slotIndex = 0;
+        level = object->mLevel;
+        direction = mVars[1];
+        other = 0;
+        ignoreRooms = false;
+        DirectionTile ahead(object->mVars[1]);
+        tile.mX += ahead.mX;
+        tile.mY += ahead.mY;
+    } else if (param->mWhere == 1) {
+        tile = object->GetLocationRef();
+        level = object->mLevel;
+        other = object;
+        slotIndex = 0;
+        ignoreRooms = false;
+        direction = mVars[1];
+    } else {
+        RoutingSlot *slot;
+        if (param->mWhere == 0) {
+            if (param->mSlot < 0 || param->mSlot >= elem->mNumParams) {
+                OBJECT_ERROR_CHECK(false, 8);
+            }
+            slotIndex = elem->GetParams()[param->mSlot];
+            if (slotIndex < 0 || (u32)slotIndex >= (u32)object->GetNumRoutingSlots()) {
+                OBJECT_ERROR_CHECK(false, 0x1B);
+            }
+            slot = object->GetRoutingSlot(slotIndex);
+        } else if (param->mWhere == 3) {
+            slotIndex = param->mSlot;
+            if (slotIndex < 0 || (u32)slotIndex >= (u32)object->GetNumRoutingSlots()) {
+                OBJECT_ERROR_CHECK(false, 0x1B);
+            }
+            slot = object->GetRoutingSlot(slotIndex);
+        } else {
+            OBJECT_ERROR_CHECK(param->mWhere == 4, 0x24);
+            slotIndex = param->mSlot;
+            if (slotIndex < 0 || (u32)slotIndex >= (u32)object->mModule->GetNumGlobalRoutingSlots()) {
+                OBJECT_ERROR_CHECK(false, 0x1B);
+            }
+            slot = object->mModule->GetGlobalRoutingSlot(slotIndex);
+        }
+        OBJECT_ERROR_CHECK(slot, 0x1B);
+
+        if (slot->SnapsToDirection()) {
+            u16 base = object->mVars[1];
+            direction = ((s16)base + slot->GetSnapDirection()) & 7;
+        } else {
+            direction = mVars[1];
+        }
+
+        if (slot->mSnapTarget >= 0) {
+            ObjectSlot *objectSlot = object->GetObjectSlot(slot->mSnapTarget);
+            if (!objectSlot) {
+                OBJECT_ERROR_CHECK(false, 0x20);
+            }
+            tile = object->GetLocationRef();
+            if (objectSlot->IsTS2ObjectSlot() && GetPerson()) {
+                EMat4 rotation;
+                ObjectRotationTf(&rotation, object->mVars[1]);
+                EVec3 offset = IsoFracsToWorld(objectSlot->GetXOffset(), objectSlot->GetYOffset(), 0.0f);
+                EVec3 world = rotation * offset;
+                FTilePt moved = WorldToIso(world);
+                tile.mX += moved.mX;
+                tile.mY += moved.mY;
+            }
+            other = object;
+            level = object->mLevel;
+            ignoreRooms = slot->GetIgnoreRooms();
+            slotIndex = slot->mSnapTarget;
+        } else {
+            if (slot && slot->IsTS2RoutingSlot()) {
+                cXMTObject *part = object->GetMTObject();
+                if (part) {
+                    cXObject *anchor = part->GetAnchorTile();
+                    if (anchor)
+                        object = anchor;
+                }
+            }
+            tile = object->GetLocationRef();
+            level = object->mLevel;
+            EMat4 rotation;
+            ObjectRotationTf(&rotation, object->mVars[1]);
+            EVec3 world = IsoToWorld(tile, 0.0f);
+            int simType = 0;
+            if (GetPerson())
+                simType = GetPerson()->GetSimType();
+            other = 0;
+            slotIndex = 0;
+            EVec3 offset = IsoFracsToWorld(slot->GetXOffset(simType), slot->GetYOffset(simType), 0.0f);
+            offset = offset * rotation;
+            world += offset;
+            tile = WorldToIso(world);
+            ignoreRooms = slot->GetIgnoreRooms();
+            if (slot->mFacing >= 0)
+                direction = (object->mVars[1] + slot->mFacing) & 7;
+        }
+    }
+
+    int offsetX = 0;
+    int offsetY = 0;
+    int offsetDirection = 0;
+    if (param->GetOriginOnly()) {
+        offsetX = mTileX - tile.mX;
+        offsetY = mTileY - tile.mY;
+        offsetDirection = mVars[1] - direction;
+    }
+    if (other) {
+        cXObject *owner = other;
+        ObjectSlot *objectSlot = owner->GetObjectSlot(slotIndex);
+        if (objectSlot) {
+            f32 x = objectSlot->mXOffset;
+            f32 y = objectSlot->mYOffset;
+            s16 turn = other->mVars[1];
+            f32 turnedY = 0;
+            f32 turnedX = turnedY;
+            switch (turn & 7) {
+            case 0:
+                turnedX = x;
+                turnedY = y;
+                break;
+            case 2:
+                turnedY = x;
+                turnedX = -y;
+                break;
+            case 4:
+                turnedX = -x;
+                turnedY = -y;
+                break;
+            case 6:
+                turnedY = -x;
+                turnedX = y;
+                break;
+            }
+            offsetX += (int)turnedX;
+            offsetY += (int)turnedY;
+        }
+    }
+
+    gPlacementError = 0;
+    gPlacementConflict = 0;
+    long result = TrySnap(tile, level, other, slotIndex, ignoreRooms, direction, param->GetUseFootprint());
+    cXPerson *person = GetPerson();
+    mVars.WriteVar(0x34, 0);
+    if (result == 1) {
+        if (person)
+            person->mAnimator->Slot11Offset(offsetX, offsetY, offsetDirection);
+        return result;
+    }
+    if (person && param->GetAskPersonToMove() && gPlacementError == 0xB) {
+        cXObject *conflict = gPlacementConflict;
+        if (conflict && conflict->GetType() == 2) {
+            cXPerson *blocker = conflict->GetPerson();
+            if (blocker && blocker->MoveOutOfWay(person->GetCurrentAction()->GetPriority()))
+                mVars.WriteVar(0x34, 1);
+        }
+    }
+    if (mVars[0x34] == 0 && gPlacementError == 1)
+        mVars.WriteVar(0x34, 2);
+    if (gPlacementConflict)
+        mVars.WriteVar(0x36, gPlacementConflict->mID);
+    else
+        mVars.WriteVar(0x36, 0);
     return result;
 }
 #endif

@@ -82,7 +82,7 @@ public:
     virtual void Slot8();
     virtual void Slot9();
     virtual void Slot10();
-    virtual void Slot11();
+    virtual void Slot11Offset(f32 x, f32 y, f32 direction);
     virtual void Slot12();
     virtual void Slot13();
     virtual void Slot14();
@@ -138,6 +138,8 @@ public:
     void SetCurrentActionText(const BString2 &text);
     int AddAction(Interaction *action);
     int RunImmediateAction(Interaction *action);
+    int MoveOutOfWay(int priority);
+    int GetSimType();
     Interaction *GetCurrentAction();
     void ActionSkipped(const Interaction &action);
     u32 GetPendingAction() const { return field_0x538 ? 1 : 0; }

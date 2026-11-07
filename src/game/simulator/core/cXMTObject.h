@@ -10,6 +10,9 @@ public:
     cXMTObject *mFirstPart; // 0x140
 
     virtual u32 ReconType();
+    virtual void AssignOffsets();
+    virtual FTilePt GetAverageLocation() const;
+    virtual cXObject *GetAnchorTile();
 
     cXMTObject *GetFirstMultiTileObject() { return mFirstPart ? mFirstPart : this; }
 };

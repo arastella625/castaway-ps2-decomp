@@ -853,7 +853,7 @@ Wii differs from PS2 in only two ways here. Wii takes the square root with `fast
    - Goals become 1-tile rectangles, with penalty (best score - score) x 16. Goals with a score of 0 or less aren't used.
    - The iteration limit is the smaller of the caller's limit and goal count x area + 50.
    - In a room above 256 tiles, a first pass without smoothing tests that a path exists: none gives result 3 and returns 0.
-6. **`Path`.** Proven on PS2 for the stages, which `FindPath` has inlined: state 1 runs `OpenANode` (`0x1BC8A0`) until it's done, then state 2 runs `DoOneSmooth` (`0x1BD0B8`) if smoothing is on, and state 0 is finished. Each step counts against the limit. **Likely for the inside**, read on Wii and paired by calls, not line by line: A* over the nodes of a `SpacePartition`, which are the rectangles left by the room's partition and the penalty rectangles, not tiles. `DoOneSmooth` moves each point along the edge between two rectangles to shorten the path, 100 at a time.
+6. **`Path`.** Proven on PS2 for the stages, which `FindPath` has inlined: state 1 runs `OpenANode` (`0x1BC8A0`) until it's done, then state 2 runs `DoOneSmooth` (`0x1BD0B8`) if smoothing is on, and state 0 is finished. Each step counts against the limit. **Likely for the inside**, read on Wii and paired by calls, not line by line: A* over the nodes of a `SpacePartition`, which are the rectangles left by the room's partition and the penalty rectangles, not tiles. `DoOneSmooth` moves each point along the edge between two rectangles to shorten the path, 100 at a time. The estimate to a goal is the straight distance from the node's entry point to the centre of the goal's rectangle. A step between rectangles costs the straight distance from the entry point to `FindInterfacePoint`. Stepping into a goal costs that goal's penalty, so a poorer goal is only taken if it's nearer by more than the score gap x 16. When the open list empties, the path is read back through the parents as interface points, and the goal's centre is added if smoothing is off.
 7. **`CanPlace` (`0x253938`) for a Sim.** It builds a `PlacementSpec` and calls `TestPlace` (`0x2104C8`). **Proven on PS2** for this first part, where a failure sets `gPlacementError`:
    - Out of bounds: 1.
    - The tile has flag 0x10, I'm not a ghost and Sim `+0x120` is clear: I'm allowed on if I'm standing on a 0x10 tile already. Otherwise chimps and boars are refused, any Sim but the player (`0x514EA4`) is refused, and the player needs `CollisionMap::IsLocationGood` (`0x3157A8`) to pass. A refusal is 1, and so is my own tile being out of bounds.
@@ -926,7 +926,7 @@ It returns 1 in every case but the error, so a port with no menus can return 1.
 
 ## Snap (opcode 0x2E)
 
-**Proven for the flow**, compared with PS2 call by call (`0x238B88`, helper `0x2396E0`). Not matched: it's 4,416 bytes with its helper, and it needs real `FTilePt`, `EVec3` and `EMat4` classes first. 115 uses.
+**Proven for the flow**, compared with PS2 call by call (`0x238B88`, helper `0x2396E0`). Not matched: it's 4,416 bytes with its helper, and `TrySnap` is written out in `cXObjectPrims.cpp`, parked at 610 of 726 words on one register choice. The helper isn't written. 115 uses.
 
 It moves me to a place relative to the stack object, which must exist or it's error 0x15.
 

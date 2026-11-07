@@ -2,16 +2,6 @@
 
 #include "game/animation/SAnimator2.h"
 
-inline int ObjectModule::GetNumGlobalRoutingSlots()
-{
-    return mGlobalRoutingSlotsEnd - mGlobalRoutingSlots;
-}
-
-inline RoutingSlot *ObjectModule::GetGlobalRoutingSlot(int index)
-{
-    return &mGlobalRoutingSlots[index];
-}
-
 // Primitive 0x2d.
 class GotoRoutingSlotParam {
 public:
