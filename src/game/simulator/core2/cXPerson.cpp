@@ -389,3 +389,21 @@ void RoutingSlot::SetTileDistances(f32 min, f32 max, f32 preferred)
     mMax = (int)(max * 16.0f);
     mOptimal = (int)(preferred * 16.0f);
 }
+
+RoutingSlot::RoutingSlot()
+{
+    mOffset[0] = 0;
+    mOffset[1] = 0;
+    mOffset[2] = 0;
+    mFlags = 0;
+    mMultiplier = 0;
+    mMultiplier2 = 0;
+    mMultiplier3 = 0;
+    mSnapTarget = -1;
+    mMin = 16;
+    mMax = 16;
+    mOptimal = 16;
+    mGradient = 0.1875f;
+    mFacing = -2;
+    mResolution = 16;
+}

@@ -25,16 +25,15 @@ class DamageEvent;
 class Armor;
 }
 
-// Wii: FTilePt, a tile position, two FInts. The real class is probably 8 bytes: it is declared
-// as 4 here because only pointers to it are used, and at 4 the local in TryElement leaves the
-// stack slot sharing as it is in the game. The copy constructor keeps it in memory.
 class CTilePt;
+
+// Wii: FTilePt, a tile position: x and y, two FInts with four bits of fraction.
 class FTilePt {
 public:
-    u32 field_0x0;
+    int mX; // 0x00
+    int mY; // 0x04
 
     FTilePt() {}
-    FTilePt(const FTilePt &other);
 };
 
 enum TFGL_ACTIONS { };
@@ -98,10 +97,6 @@ public:
 STATIC_ASSERT(ObjectSlot_size, sizeof(ObjectSlot) == 0x24);
 
 // A base holding only the vptr, which puts it at offset 0.
-class RoutingSlotVirtuals {
-public:
-    virtual void Slot0();
-};
 
 // Wii: RoutingSlot, a place to stand, 0x3c bytes.
 // One slot as the data has it: bhav.md's Routing section lists the fields.
@@ -121,7 +116,14 @@ public:
     int mResolution;   // 0x44
 };
 
-class RoutingSlot : public RoutingSlotVirtuals {
+// Wii: Slot. PS2 has its vtable at 0x4B8020, after RoutingSlot, SpriteSlot and ObjectSlot.
+class Slot {
+public:
+    virtual ~Slot() {}
+    virtual void WriteSlot(SlotDescriptor *descriptor) const;
+};
+
+class RoutingSlot : public Slot {
 public:
     f32 mOffset[3];   // 0x04
     int mMultiplier;  // 0x10  SetMultiplier
@@ -158,7 +160,7 @@ public:
     void SetTileDistances(f32 min, f32 max, f32 preferred);
     void SetFacingDirection(int direction);
     void SetDistances(int min, int max, int optimal);
-    void WriteSlot(SlotDescriptor *descriptor) const; // virtual in the game
+    virtual void WriteSlot(SlotDescriptor *descriptor) const;
     f32 GetXOffset(int simType) const;
     f32 GetYOffset(int simType) const;
 };
@@ -184,7 +186,7 @@ public:
     cXObject *mNext;           // 0xb8  the next object in ObjectModule's list
     RelMatrix *mRelMatrix;     // 0xbc
     s16 mID;                   // 0xc0
-    int mTileX;                // 0xc4  an FTilePt: fixed point, four bits of fraction
+    int mTileX;                // 0xc4  an FTilePt, GetLocationRef: fixed point, four bits of fraction
     int mTileY;                // 0xc8
     f32 field_0xcc;            // 0xcc
     u8 mRect[0x10];            // 0xd0  an FTileRect
@@ -270,6 +272,7 @@ public:
     inline CTilePt GetCTilePt() const;
     int GetNumRoutingSlots() { return mRoutingSlots.size(); }
     RoutingSlot *GetRoutingSlot(int index) { return &mRoutingSlots[index]; }
+    FTilePt &GetLocationRef() { return *(FTilePt *)&mTileX; }
     int CountObjectSlots() { return mObjectSlots.size() - 1; }
     ObjectSlot *GetObjectSlot(int index)
     {

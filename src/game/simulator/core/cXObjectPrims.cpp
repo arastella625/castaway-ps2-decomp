@@ -1384,6 +1384,16 @@ inline void cXObject::TryParticleEffect(ParticleEffectParam effect, long &result
 // The switch over primitive numbers. Cases are in the order of the game's code; the source order
 // sets the order of the blocks, and the numbers show which are together. cXPerson::TryElement
 // handles the Sim-only primitives and passes the others here.
+// TryElement's local for TryFindGoodLocation. Four bytes with a copy constructor, not an FTilePt:
+// that keeps the stack slots shared as they are in the game.
+class OpaqueTile {
+public:
+    u32 field_0x0;
+
+    OpaqueTile() {}
+    OpaqueTile(const OpaqueTile &other);
+};
+
 long cXObject::TryElement(StackElem *elem, s16 opcode, XPrimParam *param)
 {
     long result;
@@ -1396,11 +1406,11 @@ long cXObject::TryElement(StackElem *elem, s16 opcode, XPrimParam *param)
         result = TryIsPersonInArea(elem, param);
         break;
     case 0x10: {
-        FTilePt tile;
+        OpaqueTile tile;
         s16 slot;
         TFGL_ACTIONS action;
         int found;
-        result = TryFindGoodLocation(elem, param, &action, &tile, &found, &slot);
+        result = TryFindGoodLocation(elem, param, &action, (FTilePt *)&tile, &found, &slot);
         break;
     }
     case 0x1a:

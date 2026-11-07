@@ -1160,7 +1160,8 @@
 0x001E16D8 AllowDirection__11RoutingSloti
 0x001E1700 SetFacingDirection__11RoutingSloti
 0x001E1728 SetTileDistances__11RoutingSlotfff
-0x004B8020 _vt$11RoutingSlot
+0x004B7FC0 _vt$11RoutingSlot
+0x004B8020 _vt$4Slot
 0x001DA788 IsMenuInProgress__10ObjTestSim
 0x001DA7B8 MakeNewMenuItem__10ObjTestSimPCUsPCsP9StackElems
 0x00263F18 CreateInstance__9StringSet
