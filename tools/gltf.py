@@ -239,14 +239,13 @@ def bone_channels(animation):
             for i in range(len(animation.nodes))]
 
 
-def posed_bones(character, channels, frame):
-    """Return each bone's world (position, rotation) at a frame, in the game's axes.
+def bone_moves(character, channels, frame):
+    """Return each bone's (turn, offset), which map rest-pose points to posed ones.
 
     The game rotates a bone about its rest position in world axes, adds the position
-    channel, then applies the parent's result. That maps rest-pose points to posed ones.
+    channel, then applies the parent's result.
     """
     moves = []
-    posed = []
     for bone, (rotation, position) in zip(character.bones, channels):
         turn = channel_value(rotation, frame, anim.IDENTITY)
         shift = channel_value(position, frame, (0.0, 0.0, 0.0))
@@ -259,7 +258,14 @@ def posed_bones(character, channels, frame):
             offset = [moved[i] + parent_offset[i] for i in range(3)]
             turn = multiply(parent_turn, turn)
         moves.append((turn, offset))
-        placed = rotate(turn, rest)
+    return moves
+
+
+def posed_bones(character, channels, frame):
+    """Return each bone's world (position, rotation) at a frame, in the game's axes."""
+    posed = []
+    for bone, (turn, offset) in zip(character.bones, bone_moves(character, channels, frame)):
+        placed = rotate(turn, bone.position)
         posed.append(([placed[i] + offset[i] for i in range(3)],
                       normalised(multiply(turn, bone.rotation))))
     return posed

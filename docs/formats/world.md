@@ -443,7 +443,7 @@ UTF-16 to a zero. Narrow text ends in a zero and is padded to even length with 0
 | i16 count, i16 each | `PlanManager`: unlocked plans. One, plan 29 |
 | i16 count, (i16, i32) each | `LotManager`, lots 1 to 27: flags 1 visited, 2 has a tiki; seconds at last exit |
 | i16 | `WhereIsHomeTiki`: -1 on the disc |
-| i16 count, i8 each | `LotManager`, transitions 1 up: 1 open, 4 used. `IsTransitionOpen` tests 2 as well when asked; what it means is open |
+| i16 count, i8 each | `LotManager`, transitions 1 up: 1 open, 4 used. `LotToLotTransition::UpdateAvailability` needs 1 and 2 both set before a route is offered for travel |
 | (i32, i16, i8, i8) x 100 | `WeatherManager` events |
 | i32 x 2, f32 x 4 | Weather state, from version 0x82 |
 | i16 count, (i32, i32) each | `LotHelper`: dataset hash and a mask of lots, bit 0 for lot 1 |
@@ -979,8 +979,27 @@ it. So `ranger` is torso, lowerBody and shoes `ranger` and the rest `none`. `def
 
   **Proven, no placed object goes missing for its rig.** Every visible object's model is in
   `MODELS.ARC`: 1,681 are drawn, and the rest are 347 hidden and 218 with no entries. `CHARACTE.ARC`
-  holds rigs only. 1,564 of those objects have one, 1,562 name an animation and 471 have skinned
-  meshes, so they stand in their stored pose, not the pose their `o_` animation gives.
+  holds rigs only, and the ResData row's word 8 names the object's rig.
+
+  **Proven, an object's animation chooses what shows.** 1,562 drawn objects name an animation, and
+  its first frame matters mostly through the visibility channel, a node's fourth field: 0 means no
+  channel, otherwise an index into the float table, and a value of 0 hides that bone. One model often
+  holds every variant. `isStalkVariations` is bamboo, sugarcane and corn on separate bones, and
+  `source_plant_bamboo` and `source_plant_sugarcane` differ only by animation: the first keeps
+  `bambooLeaves`, the second `isSugarCaneLeaves`. 1,133 drawn objects lose triangles, of 76 of 116
+  types. No object's animation has a visibility track, only constants.
+
+  Position matters on far fewer. 1,345 objects move under 1 mm. Banana (51) lowers its top 1.29 m, as
+  it shares the palm's rig. Fish (131) swim up to 0.91 m from their stored pose. `resource_chicken`
+  (19) is a feather pile: `o-chicken-feathers` moves the body bones 604 m away, which `pose.py` treats
+  as hidden. A few portals and tools also move. **Likely:** the channel's meaning, read from the names
+  above, as the game's code for it wasn't found.
+
+  `placed.py lot --posed` bakes frame 0 into the mesh, using the entry for the object's saved
+  graphic. Without it, output is unchanged. Baking is the simple choice: the port needs no skeleton,
+  but a tree that changes graphic in play, such as losing its fruit, needs the next entry's bake.
+  **Open:** animations that loop, like the fish's swim, stand still at frame 0, and scale channels,
+  on 35 objects, aren't applied.
 
 - **Routing slots.** `ResFile +0x28` is a vector of 8-byte entries, a pointer to a `VECTOR` of 0x48-byte
   slots and the set's ID. **Proven**, from `cXObject::Initialize`: `ObjDefinition +0x28` is the ID, 0

@@ -4,7 +4,7 @@
 Usage:
   python -I tools/placed.py check <game.iso>
   python -I tools/placed.py list  <game.iso> <lot_01>
-  python -I tools/placed.py lot   <game.iso> <out.glb> <lot_01>
+  python -I tools/placed.py lot   <game.iso> <out.glb> <lot_01> [--posed]
 
 check decodes every object of every house. list prints one lot's objects. lot writes the lot's
 terrain, its scenery and every placed object that has a model to one .glb, which is game data:
@@ -46,7 +46,9 @@ RELATIONS_NEW_FORM = -1  # RelMatrixImpl::DoStream: first word of the form every
 MT_INTS = 6
 DEF_RES_DATA = 0xC0  # in ObjDefinition: a pointer to its ObjDefinition::ResData row
 ANIM_DEF_SIZE = 0x20  # ObjAnimDef
+ANIM_DEF_ANIMATION = 8
 ANIM_DEF_GRAPHIC = 0x18
+RES_RIG = 8  # the word of a ResData row naming the rig, when the model has one
 ANY_GRAPHIC = -1  # in the first ObjAnimDef: the graphic is simply an index
 GRAPHIC_KEY = 0  # the variable holding an object's graphic
 HIDDEN_KEY = 0x22  # non-zero fails ISimsObjectModel::IsVisible
@@ -281,7 +283,7 @@ def read_houses(disc):
 
 
 def read_anim_defs(data, definition, names):
-    """Return [(graphic, model name)]: an ObjDefinition's ResData row starts with VECTOR<ObjAnimDef>."""
+    """Return [(graphic, model, animation)]: a ResData row starts with VECTOR<ObjAnimDef>."""
     if definition + DEF_RES_DATA not in data.pointers:
         return []
     start, count = data.vector(data.word(definition + DEF_RES_DATA))
@@ -289,12 +291,19 @@ def read_anim_defs(data, definition, names):
     for index in range(count):
         pos = start + index * ANIM_DEF_SIZE
         graphic = struct.unpack('<i', struct.pack('<I', data.word(pos + ANIM_DEF_GRAPHIC)))[0]
-        anims.append((graphic, names.get(data.word(pos))))
+        anims.append((graphic, names.get(data.word(pos)),
+                      names.get(data.word(pos + ANIM_DEF_ANIMATION))))
     return anims
 
 
+def read_rig(data, definition, names):
+    if definition + DEF_RES_DATA not in data.pointers:
+        return None
+    return names.get(data.word(data.word(definition + DEF_RES_DATA) + RES_RIG * 4))
+
+
 def model_table(disc):
-    """Return {GUID: (resource file name, [(graphic, model name)])}."""
+    """Return {GUID: (resource file name, [(graphic, model, animation)], rig)}."""
     quickdata = gd.load_quickdata(disc)
     names = gd.resource_names(disc)
     data, definitions = gd.find_table(quickdata, 'SimsObjects/ObjDefinition')
@@ -308,7 +317,8 @@ def model_table(disc):
             definition = data.word(start + 4 * item)
             if definition in rows:
                 table[data.word(definition + DEF_GUID)] = (
-                    name, read_anim_defs(data, definition, names))
+                    name, read_anim_defs(data, definition, names),
+                    read_rig(data, definition, names))
     return table
 
 
@@ -327,6 +337,12 @@ def object_model(placed, table, available):
         return None
     name = anim_def(entry[1], placed.variables.get(GRAPHIC_KEY, 0))[1]
     return name if name in available else None
+
+
+def object_pose(placed, table):
+    """Return (animation, rig) for an object's saved graphic, either or both None."""
+    entry = table[placed.guid]
+    return anim_def(entry[1], placed.variables.get(GRAPHIC_KEY, 0))[2], entry[2]
 
 
 def lot_fit(objects, level):
@@ -521,7 +537,7 @@ def split_terrain(terrain, data, level, shader_hashes):
     return ground, fading
 
 
-def export_lot(disc, out_path, lot):
+def export_lot(disc, out_path, lot, posed=False):
     objects = read_houses(disc).get(lot)
     if objects is None:
         raise arc.FormatError('no placed objects for %s' % lot)
@@ -552,6 +568,24 @@ def export_lot(disc, out_path, lot):
             meshes[name] = add_mesh(builder, library, name, parsed, cache) if parsed else None
         return meshes[name]
 
+    if posed:
+        import anim  # only here, as pose.py needs this module
+        import pose
+        animations = pose.load_animations(disc)
+
+    def posed_mesh_for(name, item):
+        """The mesh for an object, standing as its animation says if it has one and a rig."""
+        animation_name, rig = object_pose(item, table)
+        if not posed or not animation_name or not rig or rig.lower() not in library.characters:
+            return mesh_for(name)
+        key = (name, animation_name)
+        if key not in meshes:
+            parsed = mdl.parse_model(available[name][1], library.shaders, name)
+            animation = anim.parse_animation(animations[animation_name], animation_name)
+            stood = pose.pose_meshes(parsed, library.characters[rig.lower()], animation)
+            meshes[key] = add_mesh(builder, library, '%s %s' % key, stood, cache)                 if pose.triangle_count(stood) else None
+        return meshes[key]
+
     names = gd.resource_names(disc)
     scenery_count = 0
     for index, item in enumerate(level.objects):
@@ -571,12 +605,13 @@ def export_lot(disc, out_path, lot):
     placed_count = 0
     for placed in objects:
         name = object_model(placed, table, available) if placed.on_lot else None
-        if name is None or mesh_for(name) is None:
+        mesh = posed_mesh_for(name, placed) if name else None
+        if mesh is None:
             continue
         x, y = placed.metres
         z = heights.get((math.floor(x), math.floor(y)), 0.0)
         half = placed.direction * EIGHTH_TURN / 2
-        node = {'name': 'placed %s %d' % (placed.name, placed.object_id), 'mesh': meshes[name],
+        node = {'name': 'placed %s %d' % (placed.name, placed.object_id), 'mesh': mesh,
                 'translation': list(gltf.to_y_up((x, y, z))),
                 'rotation': [0.0, math.sin(half), 0.0, math.cos(half)]}
         if name.startswith(PALM_TRUNK):
@@ -596,8 +631,8 @@ def main(argv):
         return check(arc.Disc(argv[2]))
     if len(argv) == 4 and argv[1] == 'list':
         return list_lot(arc.Disc(argv[2]), argv[3])
-    if len(argv) == 5 and argv[1] == 'lot':
-        return export_lot(arc.Disc(argv[2]), argv[3], argv[4])
+    if len(argv) in (5, 6) and argv[1] == 'lot' and argv[5:] in ([], ['--posed']):
+        return export_lot(arc.Disc(argv[2]), argv[3], argv[4], len(argv) == 6)
     print(__doc__)
     return 2
 
