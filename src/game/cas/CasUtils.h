@@ -1,6 +1,7 @@
 #ifndef GAME_CAS_CASUTILS_H
 #define GAME_CAS_CASUTILS_H
 
+#include "game/simulator/core/Plan.h"
 #include "common/EGlobal.h"
 #include "common/ERQuickdata.h"
 #include "common/types.h"
@@ -25,12 +26,6 @@ extern GlobalData _gd;
 class UIDB {
 public:
     static int UIDBGetInt(const char *name);
-};
-
-// Wii: cheatIgnoreRequirements__11PlanManager, a bool there. The PS2 code reads a word.
-class PlanManager {
-public:
-    static int cheatIgnoreRequirements;
 };
 
 namespace Sim {

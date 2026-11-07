@@ -5,8 +5,8 @@
 
 class InventoryItems;
 
-// Wii: Family, the interface FamilyImpl implements. Only GetInventory is declared; the 46
-// virtual functions before it are placeholders that keep it in its vtable slot.
+// Wii: Family, the interface FamilyImpl implements. Only the slots the decompiled code calls
+// have real signatures; the others are placeholders that keep them in place.
 class Family {
 public:
     virtual void slot0();
@@ -21,7 +21,7 @@ public:
     virtual void slot9();
     virtual void slot10();
     virtual void slot11();
-    virtual void slot12();
+    virtual int slot12(int a); // true if the neighbour with this field is in the family
     virtual void slot13();
     virtual void slot14();
     virtual void slot15();
@@ -56,6 +56,8 @@ public:
     virtual void slot44();
     virtual void slot45();
     virtual InventoryItems *GetInventory();
+    virtual void slot47();
+    virtual int GetVarRef(s16 index, const s16 **ref);
 };
 
 #endif
