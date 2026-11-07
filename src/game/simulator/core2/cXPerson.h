@@ -69,7 +69,9 @@ public:
     f32 mMotives[16];         // 0x180  scope 0xe, read through GetMotive
     u32 pad_0x1c0[0x17];      // 0x1c0
     ActionQueue mActionQueue; // 0x21c
-    u32 pad_0x524[9];         // 0x524
+    u32 pad_0x524[5];         // 0x524
+    u32 field_0x538;          // 0x538  IsIdle clears bit 0 of it
+    u32 pad_0x53c[3];         // 0x53c
     s16 mPersonData[0x24];    // 0x548  scopes 0x12, 0x13 and 0x30 to 0x33
     Neighbor *mNeighbor;      // 0x590
     u32 pad_0x594[0x17];      // 0x594

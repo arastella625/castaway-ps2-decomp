@@ -189,6 +189,13 @@ public:
     }
     cXObject *GetNext() { return mNext; }
     cXObject *GetInteractionLeader();
+    bool IsInteractionLeader() const
+    {
+        bool leader = true;
+        if (IsMultiTile() && mDef[8] > 0)
+            leader = false;
+        return leader;
+    }
     s16 GetID() const { return mID; }
     u16 GetRoom() const { return mVars[0x1d]; }
     inline CTilePt GetCTilePt() const;

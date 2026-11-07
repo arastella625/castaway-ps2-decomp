@@ -132,6 +132,8 @@ public:
 
     int PendingAnimationLoaded(long &result, const AnimateNewParam *param);
     void EnableSmoothRoute();
+    long resolveSkillForPrimitive(StackElem *elem, const AnimateNewParam *param, const AnimRef *&ref, bool &second);
+    void PreloadEvents(const AnimRef *ref);
     long PreloadOnly(bool &preloaded, const AnimateNewParam *param, const AnimRef *&ref, StackElem *elem);
     void UpdateAnimationValidity();
     long BackgroundBehavior(const AnimateNewParam *param, s16 anim, const AnimRef *&ref);

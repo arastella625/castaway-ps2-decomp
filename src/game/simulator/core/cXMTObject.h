@@ -3,15 +3,15 @@
 
 #include "game/simulator/core/cXObject.h"
 
-// A multi-tile object: one of these for each tile, linked into a loop.
+// A multi-tile object: one of these for each tile, in a list from the first part.
 class cXMTObject : public cXObject {
 public:
-    cXMTObject *mChild;   // 0x13c
-    cXMTObject *mSibling; // 0x140
+    cXMTObject *mNextPart;  // 0x13c
+    cXMTObject *mFirstPart; // 0x140
 
     virtual u32 ReconType();
 
-    cXMTObject *GetNextPart() { return mChild ? mChild : mSibling; }
+    cXMTObject *GetFirstMultiTileObject() { return mFirstPart ? mFirstPart : this; }
 };
 
 #endif

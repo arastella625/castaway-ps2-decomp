@@ -361,6 +361,26 @@ long cXObject::TryPushAction(StackElem *elem, XPrimParam *primParam)
     OBJECT_ERROR_CHECK(false, 0x15);
 }
 
+// The part of a multi-tile object that interactions belong to. Its definition's word 8 is the
+// negative of what this part's is.
+cXObject *cXObject::GetInteractionLeader()
+{
+    if (!IsInteractionLeader()) {
+        s16 lead = mDef[8];
+        lead = -lead;
+        cXMTObject *object = GetMTObject();
+        if (object) {
+            cXMTObject *part = object->GetFirstMultiTileObject();
+            while (part) {
+                if (part->mDef[8] == lead)
+                    return part;
+                part = part->mNextPart;
+            }
+        }
+    }
+    return this;
+}
+
 // A whole tile: x, y, level. Built from numbers, it turns anything that doesn't fit in a byte to 0.
 class CTilePt {
 public:
@@ -497,18 +517,18 @@ long cXObject::TrySetToNext(StackElem *elem, XPrimParam *primParam)
                 if (skip) {
                     cXMTObject *start = part;
                     do {
-                        if (part->mChild)
-                            part = part->mChild;
+                        if (part->mNextPart)
+                            part = part->mNextPart;
                         else
-                            part = part->mSibling;
+                            part = part->mFirstPart;
                         if (part == start)
                             return 0;
                     } while (!part->IsInteractionTile(false));
                 } else {
-                    if (part->mChild)
-                        part = part->mChild;
+                    if (part->mNextPart)
+                        part = part->mNextPart;
                     else
-                        part = part->mSibling;
+                        part = part->mFirstPart;
                 }
                 if (!part) {
                     InterpWriteValue(param->GetTargetOwner(), param->GetTargetData(), &ref, 0);

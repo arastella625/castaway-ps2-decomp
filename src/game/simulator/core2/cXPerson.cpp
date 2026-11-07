@@ -67,3 +67,16 @@ long cXPerson::TryGotoRoutingSlot(StackElem *elem, XPrimParam *primParam)
     }
     return GotoRoutingSlot(object, 0, (int &)elem->mWaiting);
 }
+
+int cXPerson::IsIdle()
+{
+    return field_0x538 ^ 1;
+}
+
+int cXPerson::IsModelLoaded()
+{
+    ESim *sim = (ESim *)mESimPerson;
+    if (sim && sim->mModelLoaded)
+        return 1;
+    return 0;
+}
