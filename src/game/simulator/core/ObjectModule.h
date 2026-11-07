@@ -12,7 +12,9 @@ class RoutingSlot;
 // declared so far.
 class ObjectModule {
 public:
-    u32 pad_0x0[0xa];          // 0x0000
+    u32 pad_0x0[5];            // 0x0000
+    int mRelationsDirty;       // 0x0014
+    u32 pad_0x18[4];           // 0x0018
     cXObject *mFirst;          // 0x0028  the object list, linked through cXObject::mNext
     u32 pad_0x2c;              // 0x002c
     s16 mTileObjects[0x40][0x40]; // 0x0030

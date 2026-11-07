@@ -731,7 +731,7 @@ In order:
 
 ## Relationship2 (opcode 0x1A)
 
-**Likely**, read from the Wii build, with its error codes in the PS2 code (`0x228ED0`). 358 uses.
+**Likely**, read from both builds. The C++ for `0x228ED0` is parked under `NON_MATCHING`, 563 of 732 words. 358 uses.
 
 It reads or writes one field of one relationship between two things.
 
@@ -758,14 +758,14 @@ It reads or writes one field of one relationship between two things.
 A local past the frame's count is error 0x34.
 
 - **With neighbour IDs**, `+1` 0 and 1 need me to be a Sim, or it's error 0x1C, and I'm my neighbour. A missing neighbour is error 0x15, and field 2 is error 0x56. The list used is the first neighbour's, keyed by the second's ID.
-- **With object IDs**, a missing object is error 0x15. The list is the first object's `RelMatrix` at `+0xBC`, keyed by the second object's ID.
+- **With object IDs**, a missing object is error 0x15. The list is the first object's `RelMatrix` at `+0xBC`, keyed by the second object's ID. **But if both objects are Sims, it switches to their neighbours**: the list is the first neighbour's at `+0x10`, keyed by the second neighbour's ID, and field 2 is error 0x56. So relationships between Sims live on neighbours, however the tree names them.
 - **Pet ownership** has the object first and a person second. `+1` 1 with neighbour IDs is error 0x5B, and a second party that's missing or not a Sim is error 0x5C.
 
 Then, with the list and the key:
 
 1. If the relationship is shorter than `field + 1`, then with create off it's **false**. With it on, it grows, and it's **true** if it's still too short.
 2. Read the value through `+4` and `+6`.
-3. With assign, write the field. If I'm the player's neighbour, the change also goes to the goals system.
+3. With assign, write the field. If the first party is the player's neighbour, the change also goes to the goals system. On neighbours, assign also marks both neighbours and their families as changed.
 4. Otherwise the value needs an address, or it's error 0x13, and the field is written to it.
 5. **True.**
 

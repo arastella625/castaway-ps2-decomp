@@ -89,7 +89,9 @@ Creating functions at all vtable slot targets (`tools/CreateFunctionsAt.java`) a
 
 Names now total 2,173 of 13,231 functions (16.4%), including 650 in `game/simulator/core` and `core2`. The jump came from `tools/vtable_order.py`, which pairs tables by order and slot counts (940 names). To rebuild, loop `vtable_order.py`, `vtables.py --all-tiers`, `order_fill.py` and `match.py`, feeding each `castaway_ps2_names.csv` back in, until nothing new appears (5 rounds here). Still open: 2,955 of 4,538 vtable slot targets are unnamed, and Wii seems to combine multiple-inheritance tables that PS2 keeps separate, so those don't match on length.
 
-**Status, 2026-11-06, primitives (branch `decomp/primitives`):** 884 functions match. New: `cXPerson::TryGotoRoutingSlot`, `TryPushAction`, `TrySetToNext`, which at 4,284 bytes is the largest function matched so far, then the parked `TryTestObjectType`, `TryCheckObject` and `cXObject::TryAnimate`. All three fell to the same fixes: the Wii's branch shape (one `return 0` at the end, `if (x) return 1;` above it), and `findItem` written as the Wii has it.
+**Status, 2026-11-06, primitives (branch `decomp/primitives`):** 888 functions match. New: `cXPerson::TryGotoRoutingSlot`, `TryPushAction`, the helpers `cXPerson::IsIdle`, `IsModelLoaded`, `cXObject::GetInteractionLeader` and `SAnimator2::PreloadOnly`, `TrySetToNext`, which at 4,284 bytes is the largest function matched so far, then the parked `TryTestObjectType`, `TryCheckObject` and `cXObject::TryAnimate`. All three fell to the same fixes: the Wii's branch shape (one `return 0` at the end, `if (x) return 1;` above it), and `findItem` written as the Wii has it. `bhav.md` now covers GotoRoutingSlot, PushAction, Relationship2, CallNamedTree, GenericSimCall and what preload only does.
+
+Parked now, each with a note: `TryCallNamedTree` (410 of 411 words: one branch lands on the alignment nop in the game and just past it here), `TryExpression` (618 of 632, the right size: only alignment nops are in different places), `TryRelationship2` (563 of 732, a first pass), `InterpValue` (2,872 of 3,060) and `DoNodeActionNormal` (65 of 66). `GenericSimCall` has no C++ yet: at 12,744 bytes it's documented only.
 
 **Status, 2026-11-06, run-time state (branch `decomp/operands`):** 878 functions match, with `TryRandom` new. This round was mostly behaviour, not matching. The main find: `tools/placed.py` read an extra i32 in each `ObjM` object, which misaligned everything after the position, so attributes and variables looked missing. It now decodes every object exactly to its stream mark, and that decode answered most of the round: variable `0xB` is the object's ID, attributes are the three lists, each object has one frame on its main tree. `bhav.md` also has entry points (`ObjFnData`), list order, the load sequence, `SetToNext` skipping, `CreateObject`, and a short list of what a RAM snapshot would settle. Most placed objects reset on load, because the disc's trees are newer than the saved houses: 2,027 of 2,610. `tools/bhav.py` now reruns the two attribute count proofs.
 
@@ -103,7 +105,7 @@ About byte counts: `verify.py` counts functions' code. `rebuild.py` prints a hig
 
 Functions are parked under `NON_MATCHING`, with the differences listed in a comment above each. All three have complete logic, and what's left is compiler detail, so `docs/formats/bhav.md` uses them as strong evidence:
 - `cXObject::InterpValue`: 2,872 of 3,060 words line up. Register allocation, stack frame and block order agree. Five things differ (`data == 7` test in scope 0x22, `lw`/`move` in the neighbour lookup, a `v0`/`v1` swap in scopes 0x34 to 0x37, a retest in scope 0x1A, a null test in scope 0x2A).
-- `cXObject::TryExpression`: 575 of 628 words line up, and it's four words too long.
+- `cXObject::TryExpression`: 618 of 632 words line up, and the size is right.
 
 Not started then: `PlaySound`, `Dialog`.
 
@@ -200,7 +202,7 @@ For these, a byte match confirms the code and the address, but not the name: any
 
 Still unmatched among small named functions: about 50 with other shapes, and about 30 whose Wii symbol the generator doesn't parse (templates, class or enum parameters passed by value, overloads). Not tried: functions of 17 to 32 bytes, which are too varied for cheap patterns.
 
-Next for object behaviour, in order of what the port needs: a RAM snapshot for the three questions at the end of `bhav.md`, a byte match of `SetToNext`, `GotoRoutingSlot`, `Relationship2`, `PushAction`, `PlaySound`, `Dialog`, then finishing the parked functions (see "operands" above). `TreeStack::ReconStream` (`0x1C30B0`) and `StackElem::ReconStream` are the save-game side and can wait. Reading these functions is worth doing before matching them: `bhav.md` got most of its content from the Wii code, and the port can use that without any byte match.
+Next for object behaviour, in order of what the port needs: a RAM snapshot for the three questions at the end of `bhav.md`, a byte match of `Relationship2`, `PlaySound`, `Dialog`, then finishing the parked functions (see "operands" above). `TreeStack::ReconStream` (`0x1C30B0`) and `StackElem::ReconStream` are the save-game side and can wait. Reading these functions is worth doing before matching them: `bhav.md` got most of its content from the Wii code, and the port can use that without any byte match.
 
 Best next seam for count alone: names. 2,955 of 4,538 vtable slot targets are still unnamed, and every newly named one-instruction function can be generated immediately. Tried and rejected: pairing sibling vtables (same base class, same length) in address order. Against tables whose class is already known it was right 12 times in 16, which is too low to name anything from.
 

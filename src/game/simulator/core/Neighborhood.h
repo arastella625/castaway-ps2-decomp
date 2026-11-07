@@ -10,15 +10,20 @@ class ObjSelector;
 // Wii: Neighbor. Only what the decompiled code reads is declared so far.
 class Neighbor {
 public:
-    u8 pad_0x0[8];
+    u32 pad_0x0;            // 0x00
+    s16 mID;                // 0x04
     int field_0x8;          // 0x08  the argument of Family's membership test
     ObjSelector *mSelector; // 0x0c
-    u8 pad_0x10[0x5c];      // 0x10
+    class RelMatrix *mRelations; // 0x10
+    u32 pad_0x14[3];        // 0x14
+    int mDirty;             // 0x20
+    u8 pad_0x24[0x48];      // 0x24
     s16 mPersonData[0x31];  // 0x6c  scopes 0x34 to 0x39
 
     Family *GetFamily();
     s16 CountRelationshipsOfType(int type, bool a) const;
     s16 *GetPersonDataArray() { return mPersonData; }
+    s16 GetID() const { return mID; }
 
     // The game has this as a function (0x250DE8) and also inlines it in InterpValue. An inline
     // function's copy lands in a linkonce section, so the inline body has its own name.
@@ -60,6 +65,7 @@ public:
     int GetNumFamilies();
     Family *GetFamilyByIndex(int index);
 
+    int *GetFamily(s16 id);
     int GetNumNeighborHouses() { return mHouses.size(); }
     int GetNeighborHouseByIndex(int index)
     {

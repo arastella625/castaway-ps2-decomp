@@ -381,6 +381,218 @@ cXObject *cXObject::GetInteractionLeader()
     return this;
 }
 
+#ifdef NON_MATCHING
+// The logic is complete, from the Wii build, and 563 of the game's 732 words line up on a first
+// pass. It's 25 words short: the neighbour lookups need checking case by case against the game.
+extern int _gd;
+
+// Wii: an object's or neighbour's relationships. Only the slots Relationship2 calls.
+class RelMatrix {
+public:
+    virtual void Slot0();
+    virtual void Slot1();
+    virtual void Slot2();
+    virtual int GetCount(s16 key);
+    virtual void SetCount(s16 key, int count);
+    virtual void Slot5();
+    virtual void Slot6();
+    virtual s16 Get(s16 key, int field);
+    virtual void Set(s16 key, int field, s16 value);
+};
+
+class H2DTarget {
+public:
+    void RelationshipChangeOccured(int change);
+};
+
+// Primitive 0x1a: read or write one field of a relationship.
+class Relationship2Param {
+public:
+    u8 mField; // 0x00
+    u8 mWho;   // 0x01  0 me to stack object, 1 stack object to me, 2 stack object to local, 3 local to stack object
+    u8 mFlags; // 0x02  bit 0 don't create, 1 neighbour IDs, 2 assign, 3 pet ownership
+    u8 mLocal; // 0x03
+    u8 mScope; // 0x04
+    u8 pad_0x5;
+    s16 mData; // 0x06
+
+    bool GetCreate() const { return (mFlags ^ 1) & 1; }
+    bool GetUseNeighbors() const { return (mFlags >> 1) & 1; }
+    bool GetAssign() const { return (mFlags >> 2) & 1; }
+    bool GetPetOwnership() const { return (mFlags >> 3) & 1; }
+};
+
+// Wii: ObjectModule::RelationshipAccessed. An assignment marks both neighbours and their families.
+inline void RelationshipAccessed(ObjectModule *module, Neighbor *a, Neighbor *b, bool assign)
+{
+    if (assign) {
+        a->mDirty = 1;
+        int *family = GetNeighborhood()->GetFamily(a->mPersonData[0x28]);
+        if (family)
+            family[9] = 1;
+        b->mDirty = 1;
+        family = GetNeighborhood()->GetFamily(b->mPersonData[0x28]);
+        if (family)
+            family[9] = 1;
+        module->mRelationsDirty = 1;
+    }
+}
+
+long cXObject::TryRelationship2(StackElem *elem, XPrimParam *primParam)
+{
+    Relationship2Param *param = (Relationship2Param *)primParam;
+    Neighborhood *neighborhood = GetNeighborhood();
+    Neighbor *from = 0;
+    RelMatrix *matrix;
+    s16 key;
+
+    if (param->GetPetOwnership()) {
+        cXObject *owner = 0;
+        cXObject *other = 0;
+        Neighbor *neighbor = 0;
+        switch (param->mWho) {
+        case 0:
+            owner = this;
+            if (param->GetUseNeighbors())
+                neighbor = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+            else
+                other = GetObjectFromID(elem->mStackObject);
+            break;
+        case 1:
+            if (param->GetUseNeighbors()) {
+                OBJECT_ERROR_CHECK(false, 0x5b);
+            }
+            owner = GetObjectFromID(elem->mStackObject);
+            neighbor = neighborhood->FindNeighborByIDInline(mID);
+            break;
+        case 2:
+            OBJECT_ERROR_CHECK(param->mLocal < elem->mNumLocals, 0x34);
+            owner = GetObjectFromID(elem->mStackObject);
+            if (param->GetUseNeighbors())
+                neighbor = neighborhood->FindNeighborByIDInline(elem->GetLocals()[param->mLocal]);
+            else
+                other = GetObjectFromID(elem->GetLocals()[param->mLocal]);
+            break;
+        case 3:
+            OBJECT_ERROR_CHECK(param->mLocal < elem->mNumLocals, 0x34);
+            owner = GetObjectFromID(elem->GetLocals()[param->mLocal]);
+            if (param->GetUseNeighbors())
+                neighbor = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+            else
+                other = GetObjectFromID(elem->mStackObject);
+            break;
+        }
+        if (!param->GetUseNeighbors()) {
+            if (!(other && other->GetPerson())) {
+                OBJECT_ERROR_CHECK(false, 0x5c);
+            }
+            neighbor = other->GetPerson()->GetNeighbor();
+        }
+        if (!(owner && neighbor)) {
+            OBJECT_ERROR_CHECK(false, 0x15);
+        }
+        matrix = owner->mRelMatrix;
+        key = neighbor->GetID();
+    } else if (param->GetUseNeighbors()) {
+        Neighbor *to = 0;
+        switch (param->mWho) {
+        case 0: {
+            cXPerson *person = GetPerson();
+            OBJECT_ERROR_CHECK(person, 0x1c);
+            from = neighborhood->FindNeighborByIDInline(person->GetNeighborID());
+            to = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+            break;
+        }
+        case 1: {
+            cXPerson *person = GetPerson();
+            OBJECT_ERROR_CHECK(person, 0x1c);
+            from = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+            to = neighborhood->FindNeighborByIDInline(person->GetNeighborID());
+            break;
+        }
+        case 2:
+            OBJECT_ERROR_CHECK(param->mLocal < elem->mNumLocals, 0x34);
+            from = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+            to = neighborhood->FindNeighborByIDInline(elem->GetLocals()[param->mLocal]);
+            break;
+        case 3:
+            OBJECT_ERROR_CHECK(param->mLocal < elem->mNumLocals, 0x34);
+            from = neighborhood->FindNeighborByIDInline(elem->GetLocals()[param->mLocal]);
+            to = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+            break;
+        }
+        if (!(from && to)) {
+            OBJECT_ERROR_CHECK(false, 0x15);
+        }
+        OBJECT_ERROR_CHECK(param->mField != 2, 0x56);
+        matrix = from->mRelations;
+        key = to->GetID();
+        RelationshipAccessed(mModule, from, to, param->GetAssign());
+    } else {
+        cXObject *first = 0;
+        cXObject *second = 0;
+        switch (param->mWho) {
+        case 0:
+            first = this;
+            second = GetObjectFromID(elem->mStackObject);
+            break;
+        case 1:
+            second = this;
+            first = GetObjectFromID(elem->mStackObject);
+            break;
+        case 2:
+            OBJECT_ERROR_CHECK(param->mLocal < elem->mNumLocals, 0x34);
+            second = GetObjectFromID(elem->GetLocals()[param->mLocal]);
+            first = GetObjectFromID(elem->mStackObject);
+            break;
+        case 3:
+            OBJECT_ERROR_CHECK(param->mLocal < elem->mNumLocals, 0x34);
+            first = GetObjectFromID(elem->GetLocals()[param->mLocal]);
+            second = GetObjectFromID(elem->mStackObject);
+            break;
+        }
+        if (!(first && second)) {
+            OBJECT_ERROR_CHECK(false, 0x15);
+        }
+        matrix = first->mRelMatrix;
+        key = second->mID;
+        if (first->GetType() == 2 && second->GetType() == 2) {
+            from = neighborhood->FindNeighborByIDInline(first->GetPerson()->GetNeighborID());
+            matrix = from->mRelations;
+            key = second->GetPerson()->GetNeighborID();
+            OBJECT_ERROR_CHECK(param->mField != 2, 0x56);
+            RelationshipAccessed(mModule, from, neighborhood->FindNeighborByIDInline(key), param->GetAssign());
+        }
+    }
+
+    if (matrix->GetCount(key) <= param->mField) {
+        if (!param->GetCreate())
+            return 0;
+        matrix->SetCount(key, param->mField + 1);
+        if (matrix->GetCount(key) <= param->mField)
+            return 1;
+    }
+    const s16 *ref;
+    s16 value;
+    if (InterpValue(param->mScope, param->mData, &ref, 0, &value, 0) == -1)
+        return -1;
+    if (param->GetAssign()) {
+        s16 before = matrix->Get(key, param->mField);
+        matrix->Set(key, param->mField, value);
+        if (_globals.mPlayerPerson && from && from == _globals.mPlayerPerson->GetNeighbor()) {
+            H2DTarget *target = *(H2DTarget **)((char *)&_gd + 0x54);
+            if (target && before)
+                target->RelationshipChangeOccured(value - before);
+        }
+        return 1;
+    }
+    OBJECT_ERROR_CHECK(ref, 0x13);
+    InterpWriteValue(param->mScope, param->mData, &ref, matrix->Get(key, param->mField));
+    return 1;
+}
+
+#endif
+
 // A whole tile: x, y, level. Built from numbers, it turns anything that doesn't fit in a byte to 0.
 class CTilePt {
 public:
