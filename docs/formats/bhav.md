@@ -864,7 +864,7 @@ Wii differs from PS2 in only two ways here. Wii takes the square root with `fast
 
 ### Rooms
 
-**Proven on PS2** (`cFixedWorld::ComputeRooms`, around `0x1C6518`). `RoomManager::ComputeRooms` only gathers statistics.
+**Proven on PS2** (`cFixedWorld::ComputeRooms`, `0x1C64E8`). `RoomManager::ComputeRooms` only gathers statistics.
 
 1. Every tile's room starts at 0xFFFF, and tile flag bits 1 and 2 are cleared.
 2. The border ring gets room 0 and flag bit 2.
