@@ -20,6 +20,24 @@ public:
     const u16 *c_str() const;
 };
 
+// One row of a tree table: only the slots AddAction calls.
+class TreeTableEntry {
+public:
+    virtual void Slot0();
+    virtual void Slot1();
+    virtual void Slot2();
+    virtual void Slot3();
+    virtual void Slot4();
+    virtual void Slot5();
+    virtual void Slot6();
+    virtual void Slot7();
+    virtual void Slot8();
+    virtual void Slot9();
+    virtual int GetImmediate();
+    virtual void Slot11();
+    virtual int GetAllowConsecutive();
+};
+
 // One queued action. The layout is from the Wii constructor; PS2 offsets are the same, with
 // the vptr last at 0x3c.
 class Interaction {
@@ -61,6 +79,17 @@ public:
     Interaction(cXPerson *person, cXObject *object, int index, int priority);
     void SetIconObject(cXObject *object) { mIconObject = object; }
     bool GetContinuation() const { return (mFlags >> 1) & 1; }
+    bool GetHidden() const { return (mFlags >> 4) & 1; }
+    bool GetPushToHead() const { return (mFlags >> 5) & 1; }
+    bool GetCarryNameOver() const { return (mFlags >> 6) & 1; }
+    bool GetMustRun() const { return (mFlags >> 10) & 1; }
+    bool GetRunAsSub() const { return (mFlags >> 15) & 1; }
+    int GetPriority() const { return field_0x28; }
+    TreeTableEntry *GetEntry() const;
+    void SetUniqueID();
+    const BString2 &GetName() const;
+    void SetName(const BString2 &name);
+    cXObject *GetIconObject() const;
     void SetFlag(int mask, bool on)
     {
         mFlags &= ~mask;

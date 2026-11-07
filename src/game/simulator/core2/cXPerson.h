@@ -15,6 +15,40 @@ public:
     u32 mHead;                // 0x300
     u32 mTail;                // 0x304
 
+    u32 Count() const { return mTail - mHead; }
+    Interaction *At(u32 index) { return &mActions[(mHead + index) % 12]; }
+    bool IsVisibleAction(const Interaction &action) const;
+    int CountVisible()
+    {
+        s16 lastGroup = 0;
+        int visible = 0;
+        for (int index = 0; index < (int)Count(); index++) {
+            Interaction *queued = At(index);
+            if (IsVisibleAction(*queued)) {
+                int group = queued->field_0x30;
+                if (lastGroup != group) {
+                    visible++;
+                    lastGroup = group;
+                }
+            }
+        }
+        return visible;
+    }
+    // The body of IsVisibleAction, which AddAction's second loop has inlined.
+    int IsVisibleInline(Interaction &action)
+    {
+        int shown = 0;
+        if (action.GetIconObject())
+            shown = !action.GetHidden() ? 1 : 0;
+        if (shown && action.GetContinuation()) {
+            if (Count() == 0)
+                return 0;
+            if (&action != At(0))
+                shown = 0;
+        }
+        return shown;
+    }
+    int Insert(const Interaction &action, u32 index);
     bool Peek(u32 index, Interaction &action) const
     {
         if (index >= mTail - mHead)
@@ -103,6 +137,10 @@ public:
     int IsIdle();
     void SetCurrentActionText(const BString2 &text);
     int AddAction(Interaction *action);
+    int RunImmediateAction(Interaction *action);
+    Interaction *GetCurrentAction();
+    void ActionSkipped(const Interaction &action);
+    u32 GetPendingAction() const { return field_0x538 ? 1 : 0; }
 
 
     u32 ReconType();

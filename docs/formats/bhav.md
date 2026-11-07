@@ -856,7 +856,7 @@ It returns 1 in every case but the error, so a port with no menus can return 1.
 
 ## Snap (opcode 0x2E)
 
-**Likely**, read from the Wii build, with the opening compared with PS2 (`0x238B88`). Not matched: it's 4,416 bytes with its helper. 115 uses.
+**Proven for the flow**, compared with PS2 call by call (`0x238B88`, helper `0x2396E0`). Not matched: it's 4,416 bytes with its helper, and it needs real `FTilePt`, `EVec3` and `EMat4` classes first. 115 uses.
 
 It moves me to a place relative to the stack object, which must exist or it's error 0x15.
 
@@ -878,7 +878,31 @@ It moves me to a place relative to the stack object, which must exist or it's er
 
 A slot can give a direction and a facing, added to the stack object's direction, and it can name an object slot to snap to: a missing one is error 0x20.
 
+PS2 does the same thing as Wii, with these inlined or different:
+
+- Place 2 adds one tile by the stack object's direction, in 1/16 tile, from a jump table: direction 0 is y-1, 1 is x+1 and y-1, 2 is x+1, 3 is x+1 and y+1, 4 is y+1, 5 is x-1 and y+1, 6 is x-1, and 7 is x-1 and y-1.
+- `SnapsToDirection` is slot flag 0x1000, and `GetSnapDirection` is the lowest set bit of the flags, below bit 7. It's added to the stack object's direction, and the sum is masked to 0 to 7.
+- `GetObjectSlot` is inline. Entries are 0x24 bytes at `+0xF0`, and entry 0 isn't used: slot n is entry n + 1.
+- A TS2 object slot is flag bit 17 of the object slot. For a Sim, its offset is turned by the object's direction (`0x2622F8`, `0x2620E8`, and a matrix multiply written out in full), then added to the tile.
+- A TS2 routing slot on an object with a master first moves to that object's lead part, as GotoRoutingSlot does (slots `+0x18` and `+0x1D8`).
+- The slot's offset needs the Sim's type: `GetSimType` (`0x1DD428`), then `GetYOffset` and `GetXOffset` (`0x1E1760`, `0x1E17F0`).
+- Ignore rooms is slot flag 0x800.
+
 Afterwards variable 0x34 says how it went: 0 by default, 1 if a Sim was asked to move, 2 if the place was out of bounds. Variable 0x36 is the ID of the object in the way, or 0. It returns whether the placement worked.
+
+## AddAction
+
+**Proven: matched byte for byte** (`cXPerson::AddAction`, `0x1AE2E0`). The queue is a ring of 12 actions at Sim `+0x21C`, each 0x40 bytes, with head `+0x300` and tail `+0x304`. Sim `+0x538` says the first entry is running.
+
+1. No tree table entry returns 0. An immediate entry runs at once, and `RunImmediateAction`'s result is returned.
+2. An entry that doesn't allow repeats returns 0 if the queue's last action has the same icon object and tree table index.
+3. A continuation, push to head or run as sub goes to the front. A continuation that carries its name over takes the current action's name.
+4. `CountVisible` counts visible actions, and actions next to each other with the same `+0x30` count once. Visible means it has an icon object and isn't hidden, and a continuation only counts at the head.
+5. With 8 or more visible, a normal action looks at how many visible ones it could push out: those of lower priority that needn't run. If that leaves fewer than 8, there's room. If not, or if it's going to the front, an action that needn't run returns 0, and one that must is hidden.
+6. Run as sub inserts at 0. Going to the front inserts after the running action.
+7. Anything else cancels each waiting action of lower priority that needn't run (`ActionSkipped`), then goes on the end. If an immediate action is running on this Sim, it's overwritten with this one first.
+
+Flags at `+0x34`: bit 1 continuation, 4 hidden, 5 push to head, 6 carry name over, 10 must run, 15 run as sub. Priority is `+0x28`.
 
 ## GotoRoutingSlot (opcode 0x2D)
 

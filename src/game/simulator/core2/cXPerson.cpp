@@ -237,3 +237,74 @@ long cXPerson::TryIdleForInput(StackElem *elem, XPrimParam *primParam)
     }
     return executeInterruptOnIdlePrimitve(elem, counter, param->mAllow != 0);
 }
+
+extern Interaction *sImmediateAction;
+extern cXPerson *sImmediatePerson;
+
+int cXPerson::AddAction(Interaction *action)
+{
+    TreeTableEntry *entry = action->GetEntry();
+    if (!entry)
+        return 0;
+    if (entry->GetImmediate())
+        return RunImmediateAction(action);
+
+    if (!entry->GetAllowConsecutive() && mActionQueue.Count()) {
+        Interaction *last = mActionQueue.At(mActionQueue.Count() - 1);
+        if (last->GetIconObject() == action->GetIconObject()
+            && last->mTreeTabIndex == action->mTreeTabIndex)
+            return 0;
+    }
+
+    int priority = action->GetPriority();
+    action->SetUniqueID();
+    int toFront = 0;
+    if (action->GetContinuation() || action->GetPushToHead() || action->GetRunAsSub())
+        toFront = 1;
+    if (action->GetContinuation() && action->GetCarryNameOver())
+        action->SetName(GetCurrentAction()->GetName());
+
+    int visible = mActionQueue.CountVisible();
+    if (visible >= 8) {
+        int full = 1;
+        if (!toFront) {
+            int lower = 0;
+            u32 i = 0;
+            if (field_0x538 != 0)
+                i = 1;
+            for (; i < mActionQueue.Count(); i++) {
+                Interaction *queued = mActionQueue.At(i);
+                if ((int)queued->field_0x28 < priority && !queued->GetMustRun()
+                    && mActionQueue.IsVisibleInline(*queued))
+                    lower++;
+            }
+            if (visible - lower <= 7)
+                full = 0;
+        }
+        if (full) {
+            if (!action->GetMustRun())
+                return 0;
+            action->mFlags |= 0x10;
+        }
+    }
+
+    if (action->GetRunAsSub())
+        return mActionQueue.Insert(*action, 0);
+    if (toFront)
+        return mActionQueue.Insert(*action, GetPendingAction());
+
+    for (u32 i = GetPendingAction(); i < mActionQueue.Count();) {
+        Interaction *queued = mActionQueue.At(i);
+        if ((int)queued->field_0x28 < priority && !queued->GetMustRun())
+            ActionSkipped(*queued);
+        else
+            i++;
+    }
+
+    if (sImmediateAction && this == sImmediatePerson) {
+        if (action->GetCarryNameOver())
+            action->SetName(sImmediateAction->GetName());
+        *sImmediateAction = *action;
+    }
+    return mActionQueue.Insert(*action, mActionQueue.Count());
+}
