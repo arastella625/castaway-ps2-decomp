@@ -30,6 +30,8 @@ SHADER_TAG = b'RDHS'  # "SHDR"
 # then the two short forms. Every shader that names a texture does so at one of these.
 SHADER_TEXTURE_OFFSETS = (0x3F, 0x6F, 0x10, 0x0F)
 PREFIX_SIZE = 16
+SUBMODEL_HEADER = 12  # a u32, the node count and the mesh count
+SUBMODEL_NODE_SIZE = 28
 
 # Every mesh record's type is a mask of what its vertices hold.
 MESH_TYPES = (0x16, 0x1A, 0x1E)
@@ -46,19 +48,34 @@ UNPACK_V4_16 = 0x6D
 UNPACK_V4_8 = 0x6E
 UNPACK_ITEM_SIZE = {UNPACK_S32: 4, UNPACK_V2_16: 4, UNPACK_V4_16: 8, UNPACK_V4_8: 4}
 
-SLOT_COUNT, SLOT_POSITION, SLOT_NORMAL, SLOT_UV, SLOT_WEIGHTS = 0, 1, 2, 3, 5
+SLOT_COUNT, SLOT_POSITION, SLOT_NORMAL, SLOT_UV, SLOT_COLOR, SLOT_WEIGHTS = 0, 1, 2, 3, 4, 5
 SLOT_COMMANDS = {SLOT_COUNT: UNPACK_S32, SLOT_POSITION: UNPACK_V4_16, SLOT_NORMAL: UNPACK_V4_8,
-                 SLOT_UV: UNPACK_V2_16, 4: UNPACK_V4_8, SLOT_WEIGHTS: UNPACK_V4_8}
+                 SLOT_UV: UNPACK_V2_16, SLOT_COLOR: UNPACK_V4_8, SLOT_WEIGHTS: UNPACK_V4_8}
 
 NO_DRAW = 0x8000  # in a position's fourth value: this vertex finishes no triangle
 TOP_WEIGHT_MASK = 0xFF  # also there: four times the slot of the vertex's largest weight
 WEIGHT_TOTAL = 255
 FIXED_ONE = 4096  # UVs are stored as 4096ths, and so are most characters' positions
 NORMAL_ONE = 127
+INTENSITY_ONE = 127  # the normal's fourth byte: VU1 scales a lit vertex's RGB by this over 127
+COLOR_ONE = 128  # the GS reads 128 as 1.0 in a vertex colour
 
 GROUP_TAIL_PREFIX = bytes.fromhex('1800000000000000')  # present on all but static groups
 PALETTE_ENTRY_FLAG = 1
 PALETTE_ENTRY_SIZE = 4
+
+# An SHDR body after its size: docs/formats/world.md has the fields, from ERShader::CopyShedData.
+SHADER_LIT_OFFSET = 7  # a word; LIT_FLAG picks normals and intensity over slot 4's colour
+SHADER_LIT_FLAG = 0x08
+SHADER_PASSES_OFFSET = 0x3B
+SHADER_PASS_SIZE = 0x30
+PASS_FORMAT = '<IHB2fBBBB'  # texture, flags, a byte, two floats, then ALPHA, FIX, a byte, UV source
+PASS_SCALE_OFFSET = 0x20
+PASS_BLEND_FLAG = 0x40
+SINGLE_SHADER_KIND = 0  # kind 1 is a multi-shader, a list of day and night shaders
+ALPHA_FIELD_SCREEN = 1  # in the GS ALPHA register, the colour already on the screen
+ALPHA_FIX_MIX = 0x64  # the GS ALPHA register: (source - destination) * FIX + destination
+UV_SCALED = 4  # the mesh's own UVs through the pass's scale; 3 is a reflection
 
 
 @dataclass
@@ -69,6 +86,8 @@ class Batch:
     normals: list
     weights: list
     palette: list = field(default_factory=list)  # bone index for each weight
+    intensities: list = field(default_factory=list)  # baked brightness of a lit vertex
+    colors: list = field(default_factory=list)  # RGBA of an unlit vertex
 
 
 @dataclass
@@ -108,19 +127,24 @@ def read_batch(data, pos, name):
     if any(n != count for slot, (n, _) in slots.items() if slot != SLOT_COUNT):
         raise arc.FormatError('%s: a batch disagrees about its vertex count' % name)
     raw = [struct.unpack_from('<4h', data, slots[SLOT_POSITION][1] + i * 8) for i in range(count)]
-    uvs = normals = []
+    uvs = normals = intensities = colors = []
     if SLOT_UV in slots:
         uvs = [struct.unpack_from('<2h', data, slots[SLOT_UV][1] + i * 4) for i in range(count)]
     if SLOT_NORMAL in slots:
         normals = [struct.unpack_from('<3b', data, slots[SLOT_NORMAL][1] + i * 4)
                    for i in range(count)]
+        intensities = [data[slots[SLOT_NORMAL][1] + i * 4 + 3] for i in range(count)]
+    if SLOT_COLOR in slots:
+        offset = slots[SLOT_COLOR][1]
+        colors = [tuple(data[offset + i * 4:offset + i * 4 + 4]) for i in range(count)]
     weights = []
     if SLOT_WEIGHTS in slots:
         offset = slots[SLOT_WEIGHTS][1]
         weights = [tuple(data[offset + i * 4:offset + i * 4 + 4]) for i in range(count)]
     flags = [v[3] & 0xFFFF for v in raw]
     check_weights(weights, flags, name)
-    return Batch([v[:3] for v in raw], flags, uvs, normals, weights), end
+    return Batch([v[:3] for v in raw], flags, uvs, normals, weights,
+                 intensities=intensities, colors=colors), end
 
 
 def check_weights(weights, flags, name):
@@ -235,6 +259,35 @@ def parse_model(data, shader_hashes, name='model'):
     return meshes
 
 
+def submodels(data, meshes, shader_hashes):
+    """Group a model's meshes by submodel. Each is a run of mesh records, in file order.
+
+    ESubModel::Read puts a u32, a counted list of 28-byte quadtree nodes and a u32 mesh count just
+    before the run's first record.
+    """
+    records = find_mesh_records(data, shader_hashes)
+    groups = []
+    first = 0
+    while first < len(records):
+        count = submodel_size(data, records[first][0], len(records) - first)
+        groups.append(meshes[first:first + count])
+        first += count
+    return groups
+
+
+def submodel_size(data, record, most):
+    count = struct.unpack_from('<I', data, record - 4)[0]
+    nodes = 0
+    while record - SUBMODEL_HEADER - nodes * SUBMODEL_NODE_SIZE >= 0:
+        at = record - SUBMODEL_HEADER - nodes * SUBMODEL_NODE_SIZE
+        if struct.unpack_from('<I', data, at + 4)[0] == nodes:
+            if 0 < count <= most:
+                return count
+            break
+        nodes += 1
+    raise arc.FormatError('no submodel header before the mesh record at %#x' % record)
+
+
 def bones_used(batch):
     """Return a batch's bones. With weights but no palette, slot k simply means bone k."""
     if batch.palette or not batch.weights:
@@ -287,6 +340,49 @@ def shader_texture_hash(data, name, texture_hashes):
     return None
 
 
+@dataclass
+class ShaderPass:
+    texture_hash: int
+    flags: int
+    alpha: int  # the GS ALPHA register: four two-bit fields
+    fix: int  # ALPHA's constant, where 128 is 1.0
+    uv_source: int
+    uv_scale: tuple
+
+
+@dataclass
+class Shader:
+    lit: bool
+    passes: list
+
+    @property
+    def is_alpha(self):
+        """EShaderRenderPassDef::IsAlphaPass on the first pass: does blending read the screen?"""
+        first = self.passes[0]
+        fields = (first.alpha & 3, first.alpha >> 2 & 3, first.alpha >> 6 & 3)  # A, B and D
+        return bool(first.flags & PASS_BLEND_FLAG) and ALPHA_FIELD_SCREEN in fields
+
+
+def read_shader(data, name):
+    """ERShader::CopyShedData. Return None for a multi-shader, which holds no passes itself."""
+    if len(data) < PREFIX_SIZE or data[4:8] != SHADER_TAG:
+        raise arc.FormatError('%s is not an SHDR file' % name)
+    if struct.unpack_from('<I', data, 8)[0] != SINGLE_SHADER_KIND:
+        return None
+    body = PREFIX_SIZE + struct.unpack_from('<I', data, 12)[0] + 4
+    count = data[body]
+    if body + SHADER_PASSES_OFFSET + count * SHADER_PASS_SIZE > len(data):
+        raise arc.FormatError('%s: the passes run off the end of the shader' % name)
+    passes = []
+    for index in range(count):
+        pos = body + SHADER_PASSES_OFFSET + index * SHADER_PASS_SIZE
+        texture, flags, _, _, _, alpha, fix, _, uv_source = struct.unpack_from(PASS_FORMAT, data, pos)
+        scale = struct.unpack_from('<2f', data, pos + PASS_SCALE_OFFSET)
+        passes.append(ShaderPass(texture, flags, alpha, fix, uv_source, scale))
+    lit = bool(struct.unpack_from('<I', data, body + SHADER_LIT_OFFSET)[0] & SHADER_LIT_FLAG)
+    return Shader(lit, passes)
+
+
 def each_model(disc, shader_hashes):
     archive = arc.find_archive(disc, MODEL_ARCHIVE)
     for entry in sorted(arc.read_toc(disc, archive), key=lambda e: e.offset):
@@ -299,6 +395,8 @@ def check(disc):
                 arc.read_toc(disc, arc.find_archive(disc, tex.TEXTURE_ARCHIVE))}
     linked = sum(shader_texture_hash(disc.read(shader_archive.lba, e.offset, e.size), e.name,
                                      textures) is not None for e in shaders.values())
+    parsed = {hash_: read_shader(disc.read(shader_archive.lba, e.offset, e.size), e.name)
+              for hash_, e in shaders.items()}
     totals = collections.Counter()
     failures = []
     for entry, data in each_model(disc, shaders):
@@ -314,13 +412,30 @@ def check(disc):
             totals['batches'] += len(mesh.batches)
             totals['triangles'] += sum(len(list(triangles(b))) for b in mesh.batches)
             totals['weighted vertices'] += sum(len(b.weights) for b in mesh.batches)
+            count_lighting(totals, mesh, parsed[mesh.shader_hash])
     for key, value in sorted(totals.items()):
         print('%-14s %8d' % (key, value))
     print('shaders with a texture: %d of %d' % (linked, len(shaders)))
+    if totals['unlit, no slot 4'] or totals['intensity over 127']:
+        failures.append('a mesh breaks the rule VU1 lights by')
     print('failures: %d' % len(failures))
     for failure in failures[:20]:
         print('   ', failure)
     return 1 if failures else 0
+
+
+def count_lighting(totals, mesh, shader):
+    """VU1 reads normals when a shader is lit and slot 4 when not: the mesh must have that one."""
+    if shader is None:
+        totals['on a multi-shader'] += 1
+        return
+    normals = bool(mesh.vertex_mask & HAS_NORMALS)
+    color = any(batch.colors for batch in mesh.batches)
+    totals['lit, normals' if shader.lit and normals else
+           'lit, no normals' if shader.lit else
+           'unlit, slot 4' if color else 'unlit, no slot 4'] += 1
+    totals['intensity over 127'] += sum(value > INTENSITY_ONE for batch in mesh.batches
+                                        for value in batch.intensities)
 
 
 def obj_lines(mesh_list, materials):

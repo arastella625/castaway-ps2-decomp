@@ -4,12 +4,14 @@
 Usage:
   python -I tools/placed.py check <game.iso>
   python -I tools/placed.py list  <game.iso> <lot_01>
-  python -I tools/placed.py lot   <game.iso> <out.glb> <lot_01>
+  python -I tools/placed.py lot   <game.iso> <out.glb> <lot_01> [--posed]
 
 check decodes every object of every house. list prints one lot's objects. lot writes the lot's
 terrain, its scenery and every placed object that has a model to one .glb, which is game data:
 keep it out of the repo. Terrain is the node named after the lot; placed objects and scenery are
-the other nodes, with names starting 'placed ' and 'scenery '. docs/formats/world.md has the format.
+the other nodes, with names starting 'placed ' and 'scenery '. COLOR_0 holds what VU1 sends the GS
+per vertex, and material extras hold the draw order and any detail pass, whose texture rides in
+occlusionTexture. docs/formats/world.md has the format.
 """
 import collections
 import math
@@ -42,16 +44,27 @@ TYPE_PORTAL = 8
 TYPE_REMOVED = 9  # DoStream swaps these for a placeholder and kills it
 RELATIONS_NEW_FORM = -1  # RelMatrixImpl::DoStream: first word of the form every house uses
 MT_INTS = 6
-RES_MODELS_FROM = 7  # the first word of ResData that may hold a resource hash
+DEF_RES_DATA = 0xC0  # in ObjDefinition: a pointer to its ObjDefinition::ResData row
+ANIM_DEF_SIZE = 0x20  # ObjAnimDef
+ANIM_DEF_ANIMATION = 8
+ANIM_DEF_GRAPHIC = 0x18
+RES_RIG = 8  # the word of a ResData row naming the rig, when the model has one
+ANY_GRAPHIC = -1  # in the first ObjAnimDef: the graphic is simply an index
+GRAPHIC_KEY = 0  # the variable holding an object's graphic
+HIDDEN_KEY = 0x22  # non-zero fails ISimsObjectModel::IsVisible
+HIDES_ON_LOAD = {'zz_move_a__tron'}  # sets HIDDEN_KEY in its load tree; the only such type placed
 # Stand-ins, not decoded. Nothing on the disc ties a palm's leaf to its trunk, and this object's
 # table row names only a rig, so these come from model names and from looking at the models.
-OBJECT_MODELS = {'source_tree_coconutpalm': 'isPalmTreeTrunkEdithFruitFull'}
 PALM_TRUNK = 'isPalmTreeTrunk'
 PALM_LEAF = 'isPalmTreeLeaf'
 PALM_CROWN_HEIGHT = 4.12  # treeanimate3 in isTreeSkeleton
 PALM_LEAVES = 9
 PALM_LEAF_LIFT = 20.0  # degrees above level
+BOUNDS_TOLERANCE = 0.001
+FADE_LIST = 2  # gamedata's third submodel list
+FADE_SUFFIX = ' fade'
 MISSING_TEXTURE = 'missingshader'  # the purple 16x16 behind Maya's default materials
+ALPHA_ADD = 0x68  # the GS ALPHA register: source * FIX + destination
 
 
 class BitReader:
@@ -269,41 +282,67 @@ def read_houses(disc):
             for index, (types, data) in enumerate(house_streams(disc))}
 
 
+def read_anim_defs(data, definition, names):
+    """Return [(graphic, model, animation)]: a ResData row starts with VECTOR<ObjAnimDef>."""
+    if definition + DEF_RES_DATA not in data.pointers:
+        return []
+    start, count = data.vector(data.word(definition + DEF_RES_DATA))
+    anims = []
+    for index in range(count):
+        pos = start + index * ANIM_DEF_SIZE
+        graphic = struct.unpack('<i', struct.pack('<I', data.word(pos + ANIM_DEF_GRAPHIC)))[0]
+        anims.append((graphic, names.get(data.word(pos)),
+                      names.get(data.word(pos + ANIM_DEF_ANIMATION))))
+    return anims
+
+
+def read_rig(data, definition, names):
+    if definition + DEF_RES_DATA not in data.pointers:
+        return None
+    return names.get(data.word(data.word(definition + DEF_RES_DATA) + RES_RIG * 4))
+
+
 def model_table(disc):
-    """Return {GUID: (resource file name, [resource names])}, through the three tables."""
+    """Return {GUID: (resource file name, [(graphic, model, animation)], rig)}."""
     quickdata = gd.load_quickdata(disc)
     names = gd.resource_names(disc)
     data, definitions = gd.find_table(quickdata, 'SimsObjects/ObjDefinition')
     _, files = gd.find_table(quickdata, 'SimsObjects/ResFile')
-    _, resources = gd.find_table(quickdata, 'SimsObjects/ObjDefinition::ResData')
-    guids = {}
-    for index in range(definitions.count):
-        pos = definitions.rows + index * definitions.stride
-        guids[pos] = data.word(pos + DEF_GUID)
-    rows = {}
-    for index in range(resources.count):
-        pos = resources.rows + index * resources.stride
-        words = [data.word(pos + o) for o in range(RES_MODELS_FROM * 4, resources.stride, 4)]
-        rows[data.row_name(resources, index)] = [names[w] for w in words if w in names]
+    rows = {definitions.rows + index * definitions.stride for index in range(definitions.count)}
     table = {}
     for index in range(files.count):
-        pos = files.rows + index * files.stride
         name = data.row_name(files, index)
-        start, count = data.vector(pos)
+        start, count = data.vector(files.rows + index * files.stride)
         for item in range(count):
-            guid = guids.get(data.word(start + 4 * item))
-            if guid is not None:
-                table[guid] = (name, rows.get(name, []))
+            definition = data.word(start + 4 * item)
+            if definition in rows:
+                table[data.word(definition + DEF_GUID)] = (
+                    name, read_anim_defs(data, definition, names),
+                    read_rig(data, definition, names))
     return table
 
 
+def anim_def(anims, graphic):
+    """ISimsObjectModel::GetAnimDef: pick by graphic, falling back on the first."""
+    index = graphic
+    if anims[0][0] != ANY_GRAPHIC:
+        index = next((i for i, anim in enumerate(anims) if anim[0] == graphic), 0)
+    return anims[index if 0 <= index < len(anims) else 0]
+
+
 def object_model(placed, table, available):
+    """The model an object shows for its saved graphic, if any. Trees may change both later."""
     entry = table.get(placed.guid)
-    if entry is None:
+    if entry is None or not entry[1] or placed.variables.get(HIDDEN_KEY)             or entry[0] in HIDES_ON_LOAD:
         return None
-    if OBJECT_MODELS.get(entry[0]) in available:
-        return OBJECT_MODELS[entry[0]]
-    return next((name for name in entry[1] if name in available), None)
+    name = anim_def(entry[1], placed.variables.get(GRAPHIC_KEY, 0))[1]
+    return name if name in available else None
+
+
+def object_pose(placed, table):
+    """Return (animation, rig) for an object's saved graphic, either or both None."""
+    entry = table[placed.guid]
+    return anim_def(entry[1], placed.variables.get(GRAPHIC_KEY, 0))[2], entry[2]
 
 
 def lot_fit(objects, level):
@@ -321,6 +360,28 @@ def fit_at_offset(houses, levels, offset):
     fits = [lot_fit(objects, levels['lot_%02d' % (index + offset)])
             for index, objects in enumerate(houses) if 'lot_%02d' % (index + offset) in levels]
     return sum(fits) / len(fits)
+
+
+def check_submodels(disc, levels):
+    """Each level's submodel bounds must be the exact box of the meshes read for that submodel."""
+    library = gltf.Library(disc)
+    models = {e.name: raw for e, raw in mdl.each_model(disc, library.shaders)}
+    worst = 0.0
+    checked = 0
+    for name, level in levels.items():
+        if not name.startswith('lot_') or name not in models:
+            continue
+        meshes = mdl.parse_model(models[name], library.shaders, name)
+        groups = mdl.submodels(models[name], meshes, library.shaders)
+        for instance in level.submodels:
+            points = [[c * m.scale for c in p] for m in groups[instance.submodel]
+                      for b in m.batches for p in b.positions]
+            found = [min(p[i] for p in points) for i in range(3)] \
+                + [max(p[i] for p in points) for i in range(3)]
+            worst = max(worst, max(abs(a - b) for a, b in zip(found, instance.box)))
+            checked += 1
+    print('%d lot submodels match their bounds, worst by %.4f m' % (checked, worst))
+    return checked > 0 and worst < BOUNDS_TOLERANCE
 
 
 def check(disc):
@@ -360,6 +421,7 @@ def check(disc):
         print('  offset %+3d: mean fit %.3f' % (offset, score))
     best = max(scores, key=scores.get)
     passed &= best == FIRST_LOT_OFFSET
+    passed &= check_submodels(disc, levels)
     print('failures: %d' % (not passed))
     return 0 if passed else 1
 
@@ -402,19 +464,30 @@ def add_triangle(cells, a, b, c):
                 cells[(x, y)] = max(z, cells.get((x, y), z))
 
 
+def adds_nothing(shader):
+    """True if every pass blends to source * 0 + destination: the GS leaves the screen as it was."""
+    return shader is not None and all(p.flags & mdl.PASS_BLEND_FLAG and p.alpha == ALPHA_ADD
+                                      and p.fix == 0 for p in shader.passes)
+
+
 def textured(meshes, library):
-    """Leave out meshes on the purple placeholder. How the game draws them is open."""
-    def is_placeholder(mesh):
+    """Leave out what isn't seen: meshes that add nothing, and those on the purple placeholder.
+
+    What the game does with the placeholder is open. docs/formats/world.md has what's known.
+    """
+    def is_hidden(mesh):
         texture = library.texture_for(mesh.shader_hash)
-        return texture is not None and texture.name == MISSING_TEXTURE
-    return [mesh for mesh in meshes if not is_placeholder(mesh)]
+        return (texture is not None and texture.name == MISSING_TEXTURE) \
+            or adds_nothing(library.shader(mesh.shader_hash))
+    return [mesh for mesh in meshes if not is_hidden(mesh)]
 
 
 def add_mesh(builder, library, name, meshes, cache):
     primitives = []
     for mesh in textured(meshes, library):
-        material = gltf.add_material(builder, library, mesh.shader_hash, cache)
-        primitive = gltf.add_primitive(builder, mesh, material, False)
+        material = gltf.add_material(builder, library, mesh.shader_hash, cache, layers=True)
+        primitive = gltf.add_primitive(builder, mesh, material, False,
+                                       library.shader(mesh.shader_hash))
         if primitive:
             primitives.append(primitive)
     builder.gltf['meshes'].append({'name': name, 'primitives': primitives})
@@ -455,7 +528,16 @@ def read_lot_level(disc, lot):
     return gd.read_level(disc.read(archive.lba, entry.offset, entry.size), entry.name)
 
 
-def export_lot(disc, out_path, lot):
+def split_terrain(terrain, data, level, shader_hashes):
+    """Return (drawn ground, list 3). List 3 is the floor Sims stand on, and the game never draws it."""
+    groups = mdl.submodels(data, terrain, shader_hashes)
+    ground, fading = [], []
+    for reference, instance in enumerate(level.submodels, 1):
+        (fading if reference in level.lists[FADE_LIST] else ground).extend(groups[instance.submodel])
+    return ground, fading
+
+
+def export_lot(disc, out_path, lot, posed=False):
     objects = read_houses(disc).get(lot)
     if objects is None:
         raise arc.FormatError('no placed objects for %s' % lot)
@@ -465,12 +547,20 @@ def export_lot(disc, out_path, lot):
     table = model_table(disc)
     available = {e.name: (e, raw) for e, raw in mdl.each_model(disc, library.shaders)}
     terrain = mdl.parse_model(available[lot][1], library.shaders, lot)
-    heights = ground_heights(textured(terrain, library))
+    level = read_lot_level(disc, lot)
+    solid, fading = split_terrain(terrain, available[lot][1], level, library.shaders)
+    # Objects go on the drawn ground. List 3 counts only where that has none.
+    heights = {**ground_heights(textured(fading, library)),
+               **ground_heights(textured(solid, library))}
     builder = gltf.GlbBuilder()
     cache = {}
     meshes = {}
-    ground = add_mesh(builder, library, lot, terrain, cache)
+    ground = add_mesh(builder, library, lot, solid, cache)
     nodes = [builder.add_node({'name': lot, 'mesh': ground})]
+    if textured(fading, library):
+        name = lot + FADE_SUFFIX
+        nodes.append(builder.add_node({
+            'name': name, 'mesh': add_mesh(builder, library, name, fading, cache)}))
 
     def mesh_for(name):
         if name not in meshes:
@@ -478,8 +568,25 @@ def export_lot(disc, out_path, lot):
             meshes[name] = add_mesh(builder, library, name, parsed, cache) if parsed else None
         return meshes[name]
 
+    if posed:
+        import anim  # only here, as pose.py needs this module
+        import pose
+        animations = pose.load_animations(disc)
+
+    def posed_mesh_for(name, item):
+        """The mesh for an object, standing as its animation says if it has one and a rig."""
+        animation_name, rig = object_pose(item, table)
+        if not posed or not animation_name or not rig or rig.lower() not in library.characters:
+            return mesh_for(name)
+        key = (name, animation_name)
+        if key not in meshes:
+            parsed = mdl.parse_model(available[name][1], library.shaders, name)
+            animation = anim.parse_animation(animations[animation_name], animation_name)
+            stood = pose.pose_meshes(parsed, library.characters[rig.lower()], animation)
+            meshes[key] = add_mesh(builder, library, '%s %s' % key, stood, cache)                 if pose.triangle_count(stood) else None
+        return meshes[key]
+
     names = gd.resource_names(disc)
-    level = read_lot_level(disc, lot)
     scenery_count = 0
     for index, item in enumerate(level.objects):
         name = names.get(item.model_hash)
@@ -498,12 +605,13 @@ def export_lot(disc, out_path, lot):
     placed_count = 0
     for placed in objects:
         name = object_model(placed, table, available) if placed.on_lot else None
-        if name is None or mesh_for(name) is None:
+        mesh = posed_mesh_for(name, placed) if name else None
+        if mesh is None:
             continue
         x, y = placed.metres
         z = heights.get((math.floor(x), math.floor(y)), 0.0)
         half = placed.direction * EIGHTH_TURN / 2
-        node = {'name': 'placed %s %d' % (placed.name, placed.object_id), 'mesh': meshes[name],
+        node = {'name': 'placed %s %d' % (placed.name, placed.object_id), 'mesh': mesh,
                 'translation': list(gltf.to_y_up((x, y, z))),
                 'rotation': [0.0, math.sin(half), 0.0, math.cos(half)]}
         if name.startswith(PALM_TRUNK):
@@ -523,8 +631,8 @@ def main(argv):
         return check(arc.Disc(argv[2]))
     if len(argv) == 4 and argv[1] == 'list':
         return list_lot(arc.Disc(argv[2]), argv[3])
-    if len(argv) == 5 and argv[1] == 'lot':
-        return export_lot(arc.Disc(argv[2]), argv[3], argv[4])
+    if len(argv) in (5, 6) and argv[1] == 'lot' and argv[5:] in ([], ['--posed']):
+        return export_lot(arc.Disc(argv[2]), argv[3], argv[4], len(argv) == 6)
     print(__doc__)
     return 2
 

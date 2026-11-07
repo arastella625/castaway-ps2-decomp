@@ -211,8 +211,10 @@ just versions), then 1 to 3 `EIStaticSubModel` v0 and one `ERLevel` v7, which is
 | u32 | Submodel index |
 | f32 x 4 | Bounding sphere |
 
-No transform: terrain is already in lot space, in metres after scaling. `tools/model.py` doesn't
-split by submodel yet, so use the whole model.
+No transform: terrain is already in lot space, in metres after scaling. `model.submodels` splits a
+model's meshes by submodel. Each is a run of mesh records, and `ESubModel::Read` puts a u32, a counted
+list of 28-byte quadtree nodes and a u32 mesh count just before the first. **Proven:** the bounds here
+are the exact box of those meshes on all 63 lot submodels, which `placed.py check` tests.
 
 `ERLevel` v7:
 
@@ -225,13 +227,17 @@ split by submodel yet, so use the whole model.
 | u32 | Open: 1 on `casroom_01` and `worldmap`, else 0 |
 | u32 + refs | Submodel list 1, empty on all |
 | u32 x 2 | 0 on all |
-| u32 + refs | Submodel list 2 |
-| u32 + refs | Submodel list 3 |
-| u32 + refs | Instance list. A lot's submodels are split between this and list 3 |
+| u32 + refs | Submodel list 2: `ERLevel +0x2AD1C` on Wii. Empty on all 33 levels. Only this list fades |
+| u32 + refs | Submodel list 3: Wii `+0x2AF7C`. The floor Sims stand on, never drawn |
+| u32 + refs | Instance list: what's drawn. A lot's submodels are split between this and list 3 |
 | u32, then items | Mid-lot objects |
 | grid x 3 | Tile grids |
 
-The lists sort a lot's submodels into groups; which group means what is open.
+The lists sort a lot's submodels into groups. References count from 1 in file order. **Proven**, from
+the stream order in `ERLevel::Read`: lists 2 and 3 are separate arrays, and an earlier version of this
+page mixed them up. The instance list goes in the array `Draw` and
+`DrawOuterLotInstancesWithShadow` walk. See "How ground is drawn" for list 3. `placed.py lot` writes it
+as a separate node, `lot_24 fade`, a name left from that mistake.
 
 ### Mid-lot objects
 
@@ -418,6 +424,97 @@ in `### Arry`; this score picks the best-fitting grid per lot.
 The objects have no height. `placed.py lot` drops each onto the terrain's highest surface over its
 one-metre cell, which is a stand-in for what the game does and will be wrong on steep ground.
 
+### Neighbourhood: NGBH, NBRS and FAMI
+
+`tools/neighborhood.py check` reads kind 1's 8 chunks. **Proven:** each ends on its exact last byte, and
+one data word too few, a byte out of place, a chunk cut short and a byte added are all rejected. All
+13 neighbors have a definition, their IDs differ, and all 7 family members are neighbors. `export`
+writes them as JSON. Each chunk is u32 0, u32 version 0x82, the tag reversed, then a plain `ReconBuffer`
+stream from offset 12, with every field below in file order. Text is either a zero, or 0xFFFE then
+UTF-16 to a zero. Narrow text ends in a zero and is padded to even length with 0xCD.
+
+`NGBH`, id 1, from `Neighborhood::DoStream`:
+
+| Type | Meaning |
+|---|---|
+| i16 x 0x24 | Neighbourhood variables, `SetNeighborhoodVar` |
+| text | Name: `Whiskerton` |
+| i32 x 2 | `BitFlags` at +0x150 and +0x154: event flags. Both 0 |
+| i8 x 0x80 | `GoalUnlock`, below |
+| i16 count, i16 each | `PlanManager`: unlocked plans. One, plan 29 |
+| i16 count, (i16, i32) each | `LotManager`, lots 1 to 27: flags 1 visited, 2 has a tiki; seconds at last exit |
+| i16 | `WhereIsHomeTiki`: -1 on the disc |
+| i16 count, i8 each | `LotManager`, transitions 1 up: 1 open, 4 used. `LotToLotTransition::UpdateAvailability` needs 1 and 2 both set before a route is offered for travel |
+| (i32, i16, i8, i8) x 100 | `WeatherManager` events |
+| i32 x 2, f32 x 4 | Weather state, from version 0x82 |
+| i16 count, (i32, i32) each | `LotHelper`: dataset hash and a mask of lots, bit 0 for lot 1 |
+
+**Proven:** `LotHelper` tells the game which datasets a lot's objects need. Taking each entry's dataset
+as the `ResFile` row of that name, its lots match where such objects are placed on nearly every test,
+and one lot out doesn't: `neighborhood.py check` prints both. 140 of 180 hashes name a `DATASETS` entry.
+Lots 1 and 6 start visited, at 32,400 seconds, which is the game's 9:00.
+
+**`GoalUnlock`. Proven**, from `GetUnlockIndex`. These are 128 bytes, indexed by type and number:
+
+| Type | Number | Byte |
+|---|---|---|
+| 0 book | 1 to 6 | number - 1 |
+| 1 page | book x 10 + page, page 1 to 3 | 6 + (book - 1) x 3 + page - 1 |
+| 2 goal | book x 100 + page x 10 + goal, goal 1 to 4 | 0x18 + (book - 1) x 12 + (page - 1) x 4 + goal - 1 |
+| 2 goal | 1000 up | number - 896 |
+| 4 unlock | any | 0x60 + number / 8, as bit number % 8 |
+
+A status is -1 unused, 0 locked, 1 open, 2 satisfied, 3 completed. `ClearGoalsAndUnlocks` starts goals
+at 1. For an unlock, `GetStatus` gives the bit. All 34 literal goals in `CompleteGoal` nodes land on used
+bytes, and none does with the types moved round. The last byte, 127, doubles as `DoStream`'s sign that
+the data is current. `neighborhood.py export` writes `goals` as [type, number, byte, status].
+
+`NBRS`, id 1, is a u32 count, 88, then an i32 present flag before each. 13 are present. A neighbor,
+from `Neighbor::DoStream`:
+
+| Type | Meaning |
+|---|---|
+| narrow text | Name, like `maid` |
+| i32 | At +0x14. 0 on all |
+| i32 | `Neighbor +0`, the person data version. Non-zero means data words follow. 7 have them |
+| i16 x 0x31 | Neighbor data, at +0x6C. Word 0x2C is the Sim type, and 1 is a chimp |
+| f32 x 16, twice | At +0x114 and +0x154: motives, by Decomp's reading. All are 0 or 20.0 |
+| i16 | ID |
+| i32 | GUID |
+| relations | `RelMatrixImpl::DoStream`, as in `ObjM`. Empty on all |
+| text | Chimps only. It's `Chimp` on 7 |
+
+The game tests `IsChimp` for that text, which needs the Sim type set from the selector, so neighbors
+with no data words can have it. All 4 with data words and that text have Sim type 1, and the 3 without it don't. The reader looks for the 0xFFFE instead: any other neighbor's next
+word is a 0 or 1 flag.
+
+`FAMI`, 6 chunks. IDs 0, 11, 12, 13 and 18, and 0x4001 for the player's family. `FamilyImpl::DoStream`:
+
+| Type | Meaning |
+|---|---|
+| i32 | House number |
+| i32 | Creation order |
+| i32 | Funds |
+| i32 | Pet points |
+| i32 | House value |
+| i32 | Friend count |
+| i32 | Flags: 1 phone, 2 baby, 4 just moved in, 8 freeplay, 0x10 finished Create-a-Family |
+| u32 count, i32 each | Members: neighbors' GUIDs |
+| text | Name, `#house00`. Reading replaces it with the house's real name |
+| i16 count | `InventoryItems`. 0 on all, so the tribe starts with nothing |
+| i8 | Inventory's ID, 0 on all |
+| i32 count, i32 each | 10 words, all 0. **Likely** the tokens ever collected |
+| i16 x 0x19 | Player's family only |
+
+**For a port:** the tribe's stock starts empty, so token column 12 gives -1. **Likely** column 16 gives 0.
+Column 15 is `GetHarvestTool`: `DoesSimHaveTool` for the tool in columns 3 and 4, looking through the
+inventory for the best token of that kind, and 0 if there's none. So it also starts at 0. If column 3 is
+0, no tool is needed and the call says yes without setting a tool. **Proven** from the code.
+
+`HOUS`, kind 0, 28 chunks in lot order: u32 0, a version, the tag, then the house's narrow name.
+**Proven:** `House::DoStream` reads only that from version 0x5A, and every chunk ends on its last byte.
+`neighborhood.py` reads them all. Some names are empty, and the rest are `The Girls' House`.
+
 ### Arry
 
 **Proven** for the stream, and for bit 0x10 meaning "not routable". **Likely** for the mesh surface
@@ -453,13 +550,13 @@ Runs work on bytes, not items. Items are row after row.
 | Bit | Meaning | From | Status |
 |---|---|---|---|
 | 0x01 | Buildable: `IsBuildable` | Grid 0 at load | Code |
-| 0x02 | Set on every tile off the array's border | All 94,632 tiles | Pattern proven; reader open |
+| 0x02 | Set on every tile off the array's border. `ComputeRooms` clears it along with 0x04 | All 94,632 tiles | Pattern proven; reader open |
 | 0x04 | Outside: `IsOutside`. Set on every tile | All tiles | Code |
 | 0x08 | Roofed: `HasRoof`. Never set on disc | `UpdateRoomStyles` | Code |
-| 0x10 | **Not routable** | Grid 1 at load | Proven |
-| 0x20 | Not editable: `MayEditTile`, `IsPlaceable` | Grid 1 at load | Code |
+| 0x10 | **Not routable**, and `TestPlace`'s rule for Sims | Grid 1 at load | Proven |
+| 0x20 | Not editable: `MayEditTile`, `IsPlaceable`. With 0x10, blocks non-Sims, except the object with GUID 0x437 | Grid 1 at load | Code |
 | 0x40 | Read by `cXPerson::GatherInteractions`. On 32 tiles of `lot_08` | Disc | Open |
-| 0x80 | No building or placing: `IsBuildable`, `IsPlaceable`, `TestPlace` | Grid 2 at load | Code |
+| 0x80 | No building or placing: `IsBuildable`, `IsPlaceable`, and `TestPlace`'s rule for chimps and boars | Grid 2 at load | Code |
 
 **The three level grids are this array's flags.** Load replaces those bits on every tile, with the
 same logic in the PS2 code at 0x1C4E30 and Wii `cFixedWorld::Load`, so grid 1 alone decides bit 0x10
@@ -471,6 +568,17 @@ and 0x20 always move together. The rest looks stale, as if the disc's flags were
 grids. **Likely**, not proven, that the grids win in play: Load skips them if the level's grids
 aren't ready, and nothing here watched a running game. That the flags were plainly made from grids
 is good evidence that they are ready.
+
+#### Routing export
+
+`lotgrid.py routing` writes everything `XRoute` reads from a lot, as JSON by lot: `columns` and `rows`,
+`flags` as loaded and `floor` as hex rows, one byte a tile, `walls` as `[x, y, the 8 bytes in hex]` for
+each tile that has any, and `wall_edges` as tile pairs. Objects and slots come from `objects.json` and
+`slots.py`. **Proven:** the flags give exactly `walkable` on all 28 lots, and bit 0x01 instead matches
+on none. Every lot has at most one wall edge, and one edge can't enclose anything, and no placed
+object is type 8. So a whole lot is one room. **Proven**, by Decomp: `cFixedWorld::ComputeRooms`
+(`0x1C64E8`) gives the border room 0 and floods from ID 0, starting at (1, 1), so an open lot is room 0.
+Room IDs count from 0, and 0xFFFB is a diagonal tile holding two rooms, not outside.
 
 #### Where a Sim can walk
 
@@ -541,23 +649,206 @@ These make a lot look right and are **not decoded**:
   for its name and hash finds only archive tables and one preload list, and the executable has no
   such string, so how the game attaches leaves to `isPalmTreeTrunk` is **open**. The tool repeats
   the frond nine times at `treeanimate3`, 4.12 m up, lifted 20 degrees. The count and lift are guesses.
-- **`source_tree_coconutpalm`** names only a rig and an action queue, so it uses
-  `isPalmTreeTrunkEdithFruitFull`, chosen by name.
 
 The port also blocks tiles under placed objects over 0.5 m tall. Which objects really block is
 **open**.
 
+### How ground is drawn
+
+Lots do **not** blend ground textures by vertex alpha. That idea was tested first and failed: `lot_24`'s
+ground has no vertex colour at all, and no ground texture but two has any alpha. What a lot has
+instead is below.
+
+**Proven, baked brightness.** The fourth byte of a normal is a brightness, 0 to 127, that scales a lit
+vertex's RGB and leaves alpha alone. The VU1 routine at 0xD20 does `MULw.xyz vf11, vf11, vf10w` after
+adding up the lights, and 1/127 is folded into the light colours first. On Wii,
+`SetupTEVStageVertexIntensity` multiplies the rasterised colour by its alpha for the same flag. No
+vertex on the disc is over 127. Where two sheets share a vertex they mostly agree on it (651 of 652 on
+`lot_15`, 93 of 98 on `lot_01`, about half on `lot_24`), and the two values never add up to a constant,
+so it isn't a weight between layers. `lot_01` shows its use: it reaches 127 over the play area and
+falls away towards the edges.
+
+**Proven, lit or not.** Bit 8 of the shader word at body + 7 picks where a vertex's colour comes from.
+Set, VU1 lights the normal as above. Clear, it copies slot 4 to the GS untouched, as RGBA with 128 as
+1.0. Wii tests the same bit. Over all 9,827 meshes on the disc, 7,693 lit ones have normals, 531 unlit
+ones have slot 4, and none is unlit without it. 1,575 use multi-shaders, which this doesn't read. **Open:**
+28 meshes are lit with no normals, all roof fringes and walls of the `connect_west` family and one
+`am_lb_shsisal_sr`. None is on a lot.
+
+**Proven, a second pass.** Most ground shaders have two passes. The second is `terrain_grass_noise_detail`
+or similar with ALPHA 0x64, so `mix(first pass, second pass, FIX / 128)`, FIX being 12 to 32 on ground (96 on `new_sand`, which mixes in `floor_sand`).
+UV source 4 is the mesh's own UVs through the pass's scale. **Likely** `uv * scale`, not `uv / scale`:
+0.24 repeats the noise about every 20 m and hides the base texture's tiling, but the code that builds
+that matrix wasn't followed to the multiply. `placed.py lot` writes this pass as `occlusionTexture`
+plus `extras`, because glTF has no such layer.
+
+**Proven, draw order.** `UpdateShaderFlags` calls `IsAlphaShader`, which is `IsAlphaPass` on the first
+pass: blend flag set, and field A, B or D of ALPHA reads the screen. `DrawNormal` draws other shaders at
+once and sends these to the order table, keyed by the header's i16 at + 1, so alpha ground lands on
+top of opaque ground. **Likely** the rest of the order is the file's: all but one lot mesh has priority 0,
+and how the table orders ties wasn't read. `placed.py lot` writes `extras.draw_rank`: 0 for opaque,
+then rising in file order.
+
+That order matters because some sheets repeat the triangles of the sheet below them exactly (24 to
+33% of `riverSand` and `rockMoss` on `lot_15`, 6 to 14% of `is3Path` and `isGroundGreen` on `lot_24`).
+Their depths tie, so the order alone picks a winner. Godot sorts surfaces as it likes, which makes
+mesh-shaped blocks. Reversing `draw_rank` changes 60,321 pixels of `lot_15`, so it does settle them.
+Every such tie on the 7 lots below involves list 3, so none is ever drawn.
+
+**Proven, depth, from the PS2 code.** `0x42ACC0` builds an 8-byte register table for each pass from
+pass byte + 6, and `0x42B010` copies it into the GS state:
+
+| Bit of + 6 | GS effect |
+|---|---|
+| 0x08 | `TEST`: set, ZTST is GEQUAL; clear, ALWAYS. ZTE is always on |
+| 0x10 | `ZBUF`: clear sets ZMSK, so depth isn't written |
+| 0x04 | `TEST`: alpha test GEQUAL against threshold x 128 |
+
+Across the lots' shaders, 50 first passes are 0x18 and 12 of 14 second passes are 0x08: the first pass
+tests and writes, and the detail pass tests the same vertices without writing. GEQUAL means larger Z
+is nearer, and a tie goes to whatever is drawn later.
+
+**Proven, depth buffer.** `0x419BC8` sets the only value the Z mode ever has, 1. That picks PSMZ24
+storage, but the Z range the viewport code gets from `0x4338E8` is 65535. VU1 turns screen Z to an
+integer with `FTOI4`, which multiplies by 16, so Z runs to about 2^20. The clamps at VU memory 2 and 3
+are 1 and 16777215. **Likely:** that's a step of under 1 mm at 30 m, with near 1 to 1.5 and far 55 to 65
+from `SimsCameraParameters`, whose constants `0x307D28` also has. No frame has been captured to check it.
+
+**Proven, list 3 is the floor, and it's never drawn.** This is what the patches on lots were. Besides
+loading, saving and freeing, the array holding list 3 is read in one place, `FindOuterLotInteresection`
+(PS2 `0x18C1E8`), which raycasts onto it whenever its count isn't 0, and onto the instance list only
+when it is. No draw code touches it, on Wii or at any of its PS2 sites, and the instance list doesn't
+hold these submodels. So Sims stand on list 3, and standing 12 cm above the visible ground on `lot_24`
+is what the game does. **Likely** nothing else reaches these submodels: a running game hasn't confirmed it.
+
+The vertex bit 0x10 fits: list 3 has it on 32% to 77% of vertices, and the other sheets on 0%, on 8 of
+the 11 lots with one. The exceptions are `lot_28` and `lot_29`, with a drawn sheet at 82%, and `lot_30`,
+whose list 3 has none.
+
+**Corrected.** This page said list 3 fades around the player. `ERLevel::Draw` (PS2 `0x188134`) does
+have a fade, dropping alpha by 2 a second while the player's inside a submodel's bounds or the line
+from the camera crosses them, and raising it by 3 a second otherwise. But it walks list 2, which is
+empty on every level, so it does nothing on the disc. The port still fades list 3's node away. That
+gives the same picture, as all 9,030 walkable tiles of the 9 list 3 lots with a grid are inside its
+bounds.
+
+What leaving it out does to seams, where a seam is two sheets lying within 25 cm of each other, using the 7 lots
+with 10 m or more. Contrast is percent of local brightness across the seam, and the floor is the same
+measure 4.5 m away, so texture alone scores about that:
+
+| Lot | Seam m, every sheet | Without list 3 | Exact ties m^2 | Without | Contrast, every sheet | Without | Floor |
+|---|---|---|---|---|---|---|---|
+| `lot_02` | 45.5 | 0 | 1.7 | 0 | 54.4 | 15.4 | 19.2 |
+| `lot_09` | 10.0 | 10.0 | 0 | 0 | 33.9 | 33.9 | 16.8 |
+| `lot_15` | 889.5 | 7.5 | 388.3 | 0 | 35.9 | 14.4 | 18.6 |
+| `lot_22` | 13.5 | 13.5 | 0 | 0 | 33.8 | 33.8 | 21.8 |
+| `lot_24` | 512.5 | 39.5 | 143.1 | 0 | 28.1 | 22.6 | 24.2 |
+| `lot_27` | 11.5 | 11.5 | 0 | 0 | 29.1 | 29.1 | 17.9 |
+| `lot_28` | 45.5 | 0 | 1.7 | 0 | 54.4 | 15.4 | 19.2 |
+
+Lots 09 and 27 have no list 3, and `lot_22`'s holds only placeholders, so nothing there changes: a
+control. Taking away the biggest ground submodel instead also removes seams on some lots, since a
+crossing needs two sheets, but it costs far more ground: 60 m^2 uncovered on `lot_02` against 0, 936
+against 298 on `lot_15`, 1,264 against 104 on `lot_24`, where seams don't fall at all.
+
+**Proven, depth precision isn't why ground looks patchy.** With every sheet shown, moving Godot's near and
+far from 0.05 and 4000 to the game's 1 and 60 changes 0.03 to 0.09% of pixels on Forward+, and 1.5 to
+2.2% on Compatibility. Turning the depth pre-pass off changes none. Patches stay in all of them.
+
+**Proven, why brightness made seams look worse.** Sheets that cross have different baked brightness.
+Showing them together, turning brightness off alone puts contrast back near its old level on all 7
+lots (`lot_02` 54.4 to 25.4, `lot_24` 28.1 to 15.2), and turning off the detail pass or draw order
+barely moves it. List 3 removes that on the lots that have it. Lots 09 and 22 keep their rise, 10
+to 13 points on 10 to 14 m of cliff edge, which is the disc's own brightness.
+
+**Likely, water shows where only list 3 has a surface.** That's 104 m^2 on `lot_24`, none of it
+walkable, and 298 on `lot_15`, of which 160 is walkable. With scenery drawn, top-down renders show
+ocean in all of it. `lot_15`'s strip is seabed about 10 m down, in the bay with the pirate ship, under
+`lot15_transition` and `outer_ocean`. No ground is missing there, but a running game hasn't confirmed it.
+
+**Why ground is in list 3.** It's the floor. Over walkable tiles it lies on the drawn ground, a median
+of 0 to 1 cm above on every lot with textured list 3 and a grid. Away from them it climbs: 84% of
+`lot_21`'s is over 1 m above the ground, 36% of `lot_24`'s and 13% of `lot_15`'s, while `lot_02`'s is 88%
+within 5 cm. **Likely** the climbing parts just aren't meant to be walked.
+
+**Likely:** the stone and moss on `lot_24`, both ground sheets, still cross each other along the built
+features. That's 256 m in Blender, and it looks authored, but no screenshot has confirmed it.
+
+**Proven, some lots face down.** All of `lot_02`, 28 and 29's flat ground has stored normals pointing
+down, 100% by area, against 88 to 100% up on all 27 other lots. That is in the batch bytes. The strip
+order says the same: counted from each restart, 71% of it agrees with the normals, as 85 to 93% does
+on `lot_01`, 16 and 24. Levels place terrain with no transform, so nothing turns it over. `model.py`
+winds triangles to match the normals, so the export is faithful. VU1 doesn't cull, or this ground
+wouldn't draw. **Open:** how the sun lights it, since those normals face away.
+
+**Open:** the overall light level. VU1 multiplies this brightness by lights the port doesn't decode, so
+`terrain.gdshader` treats 127 as the texture's own colour and leaves the rest to Godot's sun. Pixels
+follow brightness / 127 in both renderers, measured on `lot_01`, so ground is darker than it was. It
+may well be too dark. `lot_24`'s plate at 127 now shows as a pale shape with a hard edge; whether the
+game's lights hide that is open.
+
+**What this did to the patches: it didn't remove them.** Seven of lots 1 to 28 have ten metres or more of
+seam where sheets lie on each other (`lot_02`, 09, 15, 22, 24, 27, 28). All seven still do. Seam
+contrast, as a share of local brightness, rose on six of them (`lot_24` from 17% to 28%, `lot_02` from
+29% to 54%) and fell on `lot_27`; absolute contrast fell on most, but only because the ground got
+darker. The four lots with exact ties (`lot_02`, 15, 24, 28) now settle them as the game does. The seam
+test finds only sheets lying on each other, not plain painted edges like `lot_01`'s sand and grass.
+
+#### `SHDR`
+
+From `ERShader::CopyShedData`. Offsets count from just after the body's size word. Kind 1 at file offset
+8 is a multi-shader, a list of day and night shaders; `read_shader` skips those.
+
+| Offset | Type | Meaning |
+|---|---|---|
+| 0 | u8 | Pass count |
+| 1 | i16 | Order table priority |
+| 3 | u32 | Flags. Bits 0x200 to 0x4000 look like a lighting model; 0x2000 is the default. Open |
+| 7 | u32 | Bit 8: lit |
+| 0xB | f32 x 8 | Two colours. Open |
+| 0x2B | 16 bytes | Open |
+| 0x3B | pass x count | 0x30 bytes each |
+
+A pass:
+
+| Offset | Type | Meaning | Status |
+|---|---|---|---|
+| 0 | u32 | Texture hash | Proven |
+| 4 | u16 | Flags: 0x40 blends. 0x08, 0x10 and 0x80 are open | 0x40 proven |
+| 6 | u8 | Depth and alpha test, above | Proven |
+| 7 | f32 | Alpha test threshold | Likely |
+| 0xB | f32 | -1.4 on some; a mipmap bias? | Open |
+| 0xF | u8 | The GS ALPHA register | Proven |
+| 0x10 | u8 | ALPHA's FIX, 128 being 1.0 | Proven |
+| 0x12 | u8 | UV source: 0 the mesh's, 3 reflection (every `reflection_*`), 4 scaled, 5 and 6 scrolled | 3 and 4 by shape |
+| 0x18 | f32 x 2 | UV scroll speed | Likely |
+| 0x20 | f32 x 2 | UV scale | Likely |
+| 0x28 | f32 x 2 | UV offset | Likely |
+
+ALPHA is four two-bit fields, `(A - B) * C + D`, the GS's own. `IsAlphaPass` reads it as such, and
+`SetupFinalBlendMode` switches on it: 0x44 is ordinary alpha, 0x54 uses the screen's alpha, 0x64 mixes
+by FIX and 0x68 adds by FIX. The loader caps FIX at 0x7F only for 0x68, and sets 0x2A when the blend
+flag is clear.
+
 ### Purple terrain
 
-Seven lots (`lot_02`, 04, 15, 16, 22, 23, 30) hold meshes on the shaders `lambert1` and `phong1`,
-which are Maya's defaults and point at the 16x16 purple texture `missingshader`. This is on the
-disc, not a decoding fault. **Proven:** all 354 such batches are type 0x16 (no normals, with slot
-4), and on `lot_16` they lie on the ground, a median of 2 mm from it. Their slot 4 bytes are grey,
-all four alike, from 0 to about 128.
+Seven lots (`lot_02`, 04, 15, 16, 22, 23, 30) hold 354 batches on the shaders `lambert1` and `phong1`,
+which are Maya's defaults and point at the 16x16 purple texture `missingshader`. This is on the disc,
+not a decoding fault. They are type 0x16, unlit, and their slot 4 reaches the GS as RGBA.
 
-**Likely** these are an overlay faded by vertex alpha: the only other terrain of type 0x16 is 13
-meshes of `global_transparent` on a white texture, plus `Lava` and `templeBigStones`. **Open:** what
-the game draws. `placed.py lot` leaves them out, and `PLAYTEST.md` step 15 looks for them.
+**Proven they aren't a faded overlay.** A fade would run to 0 at a patch's edge. All of `lot_16` is
+exactly 91, and all of `lot_23` and `lot_30` exactly 128. Under 4% of edge vertices are 0 on any lot, and
+edges average brighter than the middle on three of the four lots where the value varies. The bytes are
+grey with alpha equal to the grey, so at 128 they'd be solid purple.
+
+**Proven they're in the floor.** All 354 batches are in list 3 and none in the drawn sheets, so they're
+floor data and never drawn. That fits what they are: their pass byte + 6 is 0, so no depth test or
+write, the shaders' two header colours have alpha 0, and their pass flags include 0x80, which elsewhere
+is mostly on `ico_*` UI shaders with the same placeholder. `placed.py lot` leaves them out. **Open:**
+what their grey slot 4 values mean, if anything. `PLAYTEST.md` step 15 looks for them.
+
+`global_transparent`, on 19 batches, is settled: ALPHA 0x68 with FIX 0 is `source * 0 + screen`, so it
+changes nothing on screen. `placed.py lot` leaves that out too.
 
 ## QUICKDAT.ARC
 
@@ -666,16 +957,91 @@ it. So `ranger` is torso, lowerBody and shoes `ranger` and the rest `none`. `def
   +0x0C. **Proven:** the hash equals the row name's `CalcId` on 694 of 698, and those 694 are the 694
   Edith tree sets, one to one. 597 also have a dataset of that name. `0x53545223` in its data is
   `STR#`. Vector +0 holds ObjDefinition pointers; the others are open.
-- **ObjDefinition::ResData**: interactions, with names like `Fire - Test` and action hashes.
-- **Models for objects:** no model hash appears in ObjDefinition. The chain, **proven** to connect
-  by names and hashes: the GUID at ObjDefinition +0x1C; the ResFile whose vector +0 points at that
-  ObjDefinition row (1,335 of 1,335 rows); the ObjDefinition::ResData row with the ResFile's name;
-  then resource hashes from word 7 of that row, of which word 8 is usually the model. Of 2,611
-  placed objects, 2,610 have a ResFile, 1,576 reach a model or rig, and 1,448 of those are in
-  `MODELS.ARC`. `placed.py lot` draws only those: rigged ones in `CHARACTE.ARC` are left out.
-  911 have no ResData row, mostly invisible helpers (`portal_basic`, `spawner_object`), though
-  `plumbing_hottub_hotspring` is one too. 123 have a row with no model (`source_tree_koa`).
-  **Open:** models shared by many objects (`isTreeSkeleton`) suggest variants chosen at run time.
+- **ObjDefinition::ResData**: what an object looks like, below. Rows are named after objects, like `Fire - Test`.
+- **Models for objects. Proven.** `ObjDefinition +0xC0` points to the object's
+  `ObjDefinition::ResData` row, and that row starts with a `VECTOR<ObjAnimDef>`, 0x20 bytes each:
+
+  | Offset | Meaning |
+  |---|---|
+  | 0 | Model hash |
+  | 4 | Effect attachment ID |
+  | 8 | Animation hash, like `o_isTreeBananaPose` |
+  | 0xC | Search shader hash |
+  | 0x10 | Shader hash |
+  | 0x14 | Light |
+  | 0x18 | Graphic, s32 |
+
+  `ISimsObjectModel::GetAnimDef` takes the object's variable 0 and picks the entry with that graphic,
+  or the first if none matches. If the first entry's graphic is -1, the variable is an index. So
+  `source_tree_banana` is `isBananaTreeTrunkFruitFull`, `FruitSome` and `isBananaTreeTrunk` for graphics
+  0, 1 and 2. 1,993 of 2,000 entries name a model or rig. Word 1 finds 1, word 2 finds 24, and strides
+  of 0x1C and 0x24 find 657 and 665. 719 definitions have no row. Of a multi-tile object's definitions,
+  only the lead has one, so one model is drawn for the whole object.
+
+  `ISimsObjectModel::IsVisible` fails when variable 0x22 is non-zero. All 278 `portal_basic` and 37
+  `spawner_object` have it saved as 1, which hides their `placeholder_01` cubes. `zz_move_a__tron`, the
+  28 gnomes, sets it in its `load` tree, and a cheat tree clears it. Of all 694 tree sets, 3 do that
+  in `load` or `init`, and it's the only one placed.
+
+  The row's word 7 is `*_action_queue`, a shader and texture, not a model. Word 8 is a rig when the
+  model has one. `placed.py` shows the saved state. **Open:** trees can change variables 0 and 0x22
+  once they run.
+
+  **Proven, no placed object goes missing for its rig.** Every visible object's model is in
+  `MODELS.ARC`: 1,681 are drawn, and the rest are 347 hidden and 218 with no entries. `CHARACTE.ARC`
+  holds rigs only, and the ResData row's word 8 names the object's rig.
+
+  **Proven, an object's animation chooses what shows.** 1,562 drawn objects name an animation, and
+  its first frame matters mostly through the visibility channel, a node's fourth field: 0 means no
+  channel, otherwise an index into the float table, and a value of 0 hides that bone. One model often
+  holds every variant. `isStalkVariations` is bamboo, sugarcane and corn on separate bones, and
+  `source_plant_bamboo` and `source_plant_sugarcane` differ only by animation: the first keeps
+  `bambooLeaves`, the second `isSugarCaneLeaves`. 1,133 drawn objects lose triangles, of 76 of 116
+  types. No object's animation has a visibility track, only constants.
+
+  Position matters on far fewer. 1,345 objects move under 1 mm. Banana (51) lowers its top 1.29 m, as
+  it shares the palm's rig. Fish (131) swim up to 0.91 m from their stored pose. `resource_chicken`
+  (19) is a feather pile: `o-chicken-feathers` moves the body bones 604 m away, which `pose.py` treats
+  as hidden. A few portals and tools also move. **Likely:** the channel's meaning, read from the names
+  above, as the game's code for it wasn't found.
+
+  `placed.py lot --posed` bakes frame 0 into the mesh, using the entry for the object's saved
+  graphic. Without it, output is unchanged. Baking is the simple choice: the port needs no skeleton,
+  but a tree that changes graphic in play, such as losing its fruit, needs the next entry's bake.
+  **Open:** animations that loop, like the fish's swim, stand still at frame 0, and scale channels,
+  on 35 objects, aren't applied.
+
+- **Routing slots.** `ResFile +0x28` is a vector of 8-byte entries, a pointer to a `VECTOR` of 0x48-byte
+  slots and the set's ID. **Proven**, from `cXObject::Initialize`: `ObjDefinition +0x28` is the ID, 0
+  means none, and from 1000 the set is in the semi-global row. If it isn't there `SlotLoader` loads
+  nothing, so the object has no slots. That's 59 definitions: 54 name ID 1024, like the `hut_placement`
+  and `wall_placement` helpers, and only `controller_dance` (28) and `scenery_earthquake_rock` (14) are
+  placed. `ObjectModule` loads
+  set 100 of the `global` row for global slots, 39 of them. A slot's low byte is its type: 0 object,
+  1 sprite, 3 routing. A routing slot's number is its place among the routing slots of its set.
+  `tools/slots.py export` writes them, 3,013 on 998 definitions, keyed by signed GUID like `objects.json`.
+  All 113 `GotoRoutingSlot` nodes with a literal slot are in range of their own object, against 75
+  with the next object's slots. Reading the ID at +0x2A loses 174 sets instead of 59.
+
+  | Offset | Type | Meaning, from `RoutingSlot`'s accessors |
+  |---|---|---|
+  | 0 | u32 | Type, in the low byte. The rest is 0xFAFA padding |
+  | 4 | f32 x 3 | Offset |
+  | 0x10 | 12 bytes | Unused by routing slots |
+  | 0x1C | i32 x 3 | Multipliers by vertical position. **Likely** standing, sitting, ground |
+  | 0x28 | u32 | Flags, below |
+  | 0x2C | i32 | Snap target slot, or -1 |
+  | 0x30 | i32 x 3 | Minimum, maximum and optimal distance, in 1/16 tile |
+  | 0x3C | f32 | Gradient |
+  | 0x40 | i32 | Facing: 0 to 7 a direction, -1 away from the object, -2 towards it, -3 any |
+  | 0x44 | i32 | Resolution |
+
+  Flags: bits 0 to 7 allow each direction, and with none set the slot is on top of the object. 0x100
+  any rotation, 0x200 absolute, 0x800 ignore rooms, 0x1000 snap to direction, 0x2000 random scoring,
+  0x4000 failure trees allowed, 0x8000 different altitudes, 0x10000 use the average object location,
+  0x20000 a TS2 routing slot. Bit 0x400 is a leftover: `SlotDescriptor::DoStream` turns it into facing
+  -1 on slots older than version 9, as it does 0x200 into -3, and it multiplies distances before
+  version 10 by 16. No slot on the disc sets 0x400, and one sets 0x200.
 
 ## Disagreements with docs/ASSET_FORMATS.md
 
@@ -699,10 +1065,13 @@ it. So `ranger` is torso, lowerBody and shoes `ranger` and the rest `none`. `def
 Open:
 - In `Arry`: floor values, flags 0x02 and 0x40, the lone wall edge, the trees that change flag 0x10, and whether the mesh bit is vertex flag 0x10.
 - Object height, the sense of direction, and how shared models pick a variant.
-- How `missingshader` terrain is drawn.
+- What the `lambert1` and `phong1` meshes are for, and whether the game draws them.
+- The light level behind a vertex's baked brightness. Pass flags 0x08, 0x10 and 0x80.
+- Whether `lot_24`'s ragged ground edges match the running game. No saved screenshot shows a lot.
 - How palm leaves attach, and which objects block a Sim.
 - Scale for rigged mid-lot objects.
-- ObjDefinition, ResFile and most `world` columns. `ERLevel`'s submodel list groups.
+- ObjDefinition, ResFile and most `world` columns.
 - The bodies of most BHAV primitives and some expression scopes; see [bhav.md](bhav.md).
+- How the 16 neighbour motives map onto a Sim's, and which set is which.
 - Kind 0 of `DEFAULT.NGH` holds `TATT`, `SIMI` and `HOUS` chunks. Kind 1 holds `NGBH`, `NBRS` and `FAMI`: `bhav.md`'s Neighbourhood section has them.
 - Which of languages 0 and 1 is the US text. Sample word bit 31.
