@@ -438,14 +438,35 @@ UTF-16 to a zero. Narrow text ends in a zero and is padded to even length with 0
 |---|---|
 | i16 x 0x24 | Neighbourhood variables, `SetNeighborhoodVar` |
 | text | Name: `Whiskerton` |
-| i32 x 2 | At +0x150 and +0x154. Open |
-| i8 x 0x80 | `GoalUnlock` |
+| i32 x 2 | `BitFlags` at +0x150 and +0x154: event flags. Both 0 |
+| i8 x 0x80 | `GoalUnlock`, below |
 | i16 count, i16 each | `PlanManager`: unlocked plans. One, plan 29 |
-| i16 count, (i16, i32) each | `LotManager`: 27 lots. Open beyond that |
-| i16, i16 count, i8 each | `LotManager`: a current lot, then 72 bytes |
+| i16 count, (i16, i32) each | `LotManager`, lots 1 to 27: flags 1 visited, 2 has a tiki; seconds at last exit |
+| i16 | `WhereIsHomeTiki`: -1 on the disc |
+| i16 count, i8 each | `LotManager`, transitions 1 up: 1 open, 4 used. `IsTransitionOpen` tests 2 as well when asked; what it means is open |
 | (i32, i16, i8, i8) x 100 | `WeatherManager` events |
 | i32 x 2, f32 x 4 | Weather state, from version 0x82 |
-| i16 count, (i32, i32) each | `LotHelper`: 180 entries. Open |
+| i16 count, (i32, i32) each | `LotHelper`: dataset hash and a mask of lots, bit 0 for lot 1 |
+
+**Proven:** `LotHelper` tells the game which datasets a lot's objects need. Taking each entry's dataset
+as the `ResFile` row of that name, its lots match where such objects are placed on nearly every test,
+and one lot out doesn't: `neighborhood.py check` prints both. 140 of 180 hashes name a `DATASETS` entry.
+Lots 1 and 6 start visited, at 32,400 seconds, which is the game's 9:00.
+
+**`GoalUnlock`. Proven**, from `GetUnlockIndex`. These are 128 bytes, indexed by type and number:
+
+| Type | Number | Byte |
+|---|---|---|
+| 0 book | 1 to 6 | number - 1 |
+| 1 page | book x 10 + page, page 1 to 3 | 6 + (book - 1) x 3 + page - 1 |
+| 2 goal | book x 100 + page x 10 + goal, goal 1 to 4 | 0x18 + (book - 1) x 12 + (page - 1) x 4 + goal - 1 |
+| 2 goal | 1000 up | number - 896 |
+| 4 unlock | any | 0x60 + number / 8, as bit number % 8 |
+
+A status is -1 unused, 0 locked, 1 open, 2 satisfied, 3 completed. `ClearGoalsAndUnlocks` starts goals
+at 1. For an unlock, `GetStatus` gives the bit. All 34 literal goals in `CompleteGoal` nodes land on used
+bytes, and none does with the types moved round. The last byte, 127, doubles as `DoStream`'s sign that
+the data is current. `neighborhood.py export` writes `goals` as [type, number, byte, status].
 
 `NBRS`, id 1, is a u32 count, 88, then an i32 present flag before each. 13 are present. A neighbor,
 from `Neighbor::DoStream`:
@@ -454,9 +475,9 @@ from `Neighbor::DoStream`:
 |---|---|
 | narrow text | Name, like `maid` |
 | i32 | At +0x14. 0 on all |
-| i32 | Non-zero means data words follow. 7 have them |
+| i32 | `Neighbor +0`, the person data version. Non-zero means data words follow. 7 have them |
 | i16 x 0x31 | Neighbor data, at +0x6C. Word 0x2C is the Sim type, and 1 is a chimp |
-| f32 x 16, twice | At +0x114 and +0x154. Open. All are 0 or 20.0 |
+| f32 x 16, twice | At +0x114 and +0x154: motives, by Decomp's reading. All are 0 or 20.0 |
 | i16 | ID |
 | i32 | GUID |
 | relations | `RelMatrixImpl::DoStream`, as in `ObjM`. Empty on all |
@@ -485,7 +506,13 @@ word is a 0 or 1 flag.
 | i16 x 0x19 | Player's family only |
 
 **For a port:** the tribe's stock starts empty, so token column 12 gives -1. **Likely** column 16 gives 0.
-Where column 15's harvest tool comes from is open.
+Column 15 is `GetHarvestTool`: `DoesSimHaveTool` for the tool in columns 3 and 4, looking through the
+inventory for the best token of that kind, and 0 if there's none. So it also starts at 0. If column 3 is
+0, no tool is needed and the call says yes without setting a tool. **Proven** from the code.
+
+`HOUS`, kind 0, 28 chunks in lot order: u32 0, a version, the tag, then the house's narrow name.
+**Proven:** `House::DoStream` reads only that from version 0x5A, and every chunk ends on its last byte.
+`neighborhood.py` reads them all. Some names are empty, and the rest are `The Girls' House`.
 
 ### Arry
 
@@ -948,7 +975,12 @@ it. So `ranger` is torso, lowerBody and shoes `ranger` and the rest `none`. `def
 
   The row's word 7 is `*_action_queue`, a shader and texture, not a model. Word 8 is a rig when the
   model has one. `placed.py` shows the saved state. **Open:** trees can change variables 0 and 0x22
-  once they run. Rigged models in `CHARACTE.ARC` are still left out.
+  once they run.
+
+  **Proven, no placed object goes missing for its rig.** Every visible object's model is in
+  `MODELS.ARC`: 1,681 are drawn, and the rest are 347 hidden and 218 with no entries. `CHARACTE.ARC`
+  holds rigs only. 1,564 of those objects have one, 1,562 name an animation and 471 have skinned
+  meshes, so they stand in their stored pose, not the pose their `o_` animation gives.
 
 - **Routing slots.** `ResFile +0x28` is a vector of 8-byte entries, a pointer to a `VECTOR` of 0x48-byte
   slots and the set's ID. **Proven**, from `cXObject::Initialize`: `ObjDefinition +0x28` is the ID, 0
@@ -1011,5 +1043,5 @@ Open:
 - Scale for rigged mid-lot objects.
 - ObjDefinition, ResFile and most `world` columns.
 - The bodies of most BHAV primitives and some expression scopes; see [bhav.md](bhav.md).
-- Kind 0 of `DEFAULT.NGH`'s `HOUS` chunks. What the neighbour floats, `lot_resources` and two NGBH words mean.
+- How the 16 neighbour motives map onto a Sim's, and which set is which.
 - Which of languages 0 and 1 is the US text. Sample word bit 31.

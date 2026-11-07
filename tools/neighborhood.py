@@ -9,6 +9,7 @@ check reads kind 1's NGBH, NBRS and FAMI chunks to their exact last byte and tes
 against ObjDefinition, with controls. Output is game data: keep it out of the repo.
 docs/formats/world.md has the format.
 """
+import collections
 import json
 import os
 import struct
@@ -16,6 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I leaves this out
 import arc  # noqa: E402
+import bhav  # noqa: E402
 import gamedata as gd  # noqa: E402
 import placed  # noqa: E402
 
@@ -32,6 +34,18 @@ RELATIONS_NEW_FORM = -1
 PLAYER_FAMILY_WORDS = 0x19
 PLAYER_FAMILY_FLAG = 0x4000  # in a FAMI chunk's ID
 WIDE_MARK = b'\xfe\xff'  # 0xFFFE, little-endian: UTF-16 text in the disc's byte order
+HOUSE_SECTION = 0
+BOOK, PAGE, GOAL, UNLOCK = 0, 1, 2, 4  # IGoalUnlock::UnlockType
+BOOKS, PAGES, GOALS = 6, 3, 4
+PAGE_BASE = 6  # bytes of goal_unlocks: books first
+GOAL_BASE = 0x18
+LATE_GOALS, LATE_GOAL_BASE, LATE_GOAL_END = 1000, 104, 1023
+UNLOCK_BASE = 0x60  # eight bytes of bits, not statuses
+LOT_VISITED, LOT_HAS_TIKI = 1, 2
+TRANSITION_OPEN, TRANSITION_SECOND, TRANSITION_USED = 1, 2, 4
+COMPLETE_GOAL = 0x38
+LITERAL_SCOPE = 7
+OLD_GOAL_PRIMITIVE = 3  # either bit in operand +6: does nothing
 
 
 def wide_string(reader):
@@ -81,6 +95,66 @@ def finish(reader, tag):
         raise arc.FormatError('%s: stream ends at %d of %d' % (tag, reader.pos, len(reader.data)))
 
 
+def goal_index(kind, number):
+    """GoalUnlock::GetUnlockIndex: where a book, page or goal's status byte is, or -1.
+
+    A page number is book * 10 + page, and a goal's book * 100 + page * 10 + goal, each from 1.
+    For UNLOCK this is the byte, and bit number % 8 of it is the flag.
+    """
+    if kind == BOOK:
+        return number - 1 if 1 <= number <= BOOKS else -1
+    if kind == PAGE:
+        book, page = number // 10, number % 10
+        return (book - 1) * PAGES + page - 1 + PAGE_BASE \
+            if 1 <= book <= BOOKS and 1 <= page <= PAGES else -1
+    if kind == GOAL:
+        if number >= LATE_GOALS:
+            return number - LATE_GOALS + LATE_GOAL_BASE if number <= LATE_GOAL_END else -1
+        book, page, goal = number // 100, number % 100 // 10, number % 10
+        if 1 <= book <= BOOKS and 1 <= page <= PAGES and 1 <= goal <= GOALS:
+            return (book - 1) * PAGES * GOALS + (page - 1) * GOALS + goal - 1 + GOAL_BASE
+        return -1
+    if kind == UNLOCK:
+        return number // 8 + UNLOCK_BASE
+    return -1
+
+
+def goal_numbers():
+    """Every (kind, number) with its own status byte."""
+    yield from ((BOOK, book) for book in range(1, BOOKS + 1))
+    for book in range(1, BOOKS + 1):
+        for page in range(1, PAGES + 1):
+            yield PAGE, book * 10 + page
+            for goal in range(1, GOALS + 1):
+                yield GOAL, book * 100 + page * 10 + goal
+    yield from ((GOAL, number) for number in range(LATE_GOALS, LATE_GOAL_END + 1))
+
+
+def goal_table(unlocks):
+    """[[kind, number, status byte, status]]. Status -1 is unused, then locked, open, satisfied, done."""
+    return [[kind, number, goal_index(kind, number), unlocks[goal_index(kind, number)]]
+            for kind, number in goal_numbers()]
+
+
+def lot_table(rows):
+    """LotManager's rows, for lots 1 up."""
+    return [{'lot': index, 'visited': bool(flags & LOT_VISITED), 'has_tiki': bool(flags & LOT_HAS_TIKI),
+             'exit_seconds': seconds} for index, (flags, seconds) in enumerate(rows, 1)]
+
+
+def transition_table(flags):
+    """LotManager's bytes, for transitions 1 up."""
+    return [{'transition': index, 'open': bool(value & TRANSITION_OPEN),
+             'second': bool(value & TRANSITION_SECOND), 'used': bool(value & TRANSITION_USED)}
+            for index, value in enumerate(flags, 1)]
+
+
+def lot_datasets(rows):
+    """LotHelper: [dataset hash, the lots whose objects it serves]. Bit 0 is lot 1."""
+    return [[struct.unpack('<I', struct.pack('<i', name))[0],
+             [bit + 1 for bit in range(32) if mask >> bit & 1]] for name, mask in rows]
+
+
 def read_neighborhood(data):
     """Neighborhood::DoStream at version 0x82."""
     reader = open_chunk(data, 'NGBH')
@@ -98,6 +172,11 @@ def read_neighborhood(data):
     result['lot_resources'] = [integers(reader, 32, 2)  # LotHelper
                                for _ in range(reader.integer(16))]
     finish(reader, 'NGBH')
+    result['goals'] = goal_table(result['goal_unlocks'])
+    result['lot_table'] = lot_table(result['lots'])
+    result['home_tiki'] = result['lot_current']  # WhereIsHomeTiki
+    result['transitions'] = transition_table(result['lot_flags'])
+    result['datasets'] = lot_datasets(result['lot_resources'])
     return result
 
 
@@ -158,10 +237,29 @@ def read_family(data, chunk_id):
     return result
 
 
-def read_chunks(disc):
+def read_house(data):
+    """House::DoStream from version 0x5A: only a name. Each chunk has its own version."""
+    if data[8:12] != b'SUOH':
+        raise arc.FormatError('a chunk is not HOUS')
+    reader = placed.BitReader(data, CHUNK_BODY)
+    name = narrow_string(reader)
+    finish(reader, 'HOUS')
+    return name
+
+
+def read_sections(disc):
     entry = disc.find(gd.NGH_FILE)
-    sections = gd.read_ngh_sections(disc.read(entry.lba, 0, entry.size))
-    return gd.house_chunks(next(s for s in sections if s.kind == NEIGHBORS_SECTION))
+    return gd.read_ngh_sections(disc.read(entry.lba, 0, entry.size))
+
+
+def read_chunks(disc):
+    return gd.house_chunks(next(s for s in read_sections(disc) if s.kind == NEIGHBORS_SECTION))
+
+
+def read_house_names(disc):
+    """Kind 0's HOUS chunks, in lot order like its SIMI chunks."""
+    chunks = gd.house_chunks(next(s for s in read_sections(disc) if s.kind == HOUSE_SECTION))
+    return [read_house(data) for kind, _, data in chunks if kind == 'HOUS']
 
 
 def read_all(chunks):
@@ -177,6 +275,57 @@ def definition_guids(disc):
     data, table = gd.find_table(gd.load_quickdata(disc), 'SimsObjects/ObjDefinition')
     return {struct.unpack_from('<i', data.image, table.rows + index * table.stride + gd.OBJD_GUID)[0]
             for index in range(table.count)}
+
+
+def literal_goals(disc):
+    """Yield (type, number) from each CompleteGoal that names a goal outright."""
+    archive = arc.find_archive(disc, 'EDITHTRE')
+    for entry in arc.read_toc(disc, archive):
+        data = disc.read(archive.lba, entry.offset, entry.size)
+        for _, _, _, nodes in bhav.read_trees(data, entry.name):
+            for node in nodes:
+                if struct.unpack_from('<H', node, 0)[0] == COMPLETE_GOAL and node[9] == LITERAL_SCOPE \
+                        and not node[10] & OLD_GOAL_PRIMITIVE and node[11] in (BOOK, PAGE, GOAL):
+                    yield node[11], struct.unpack_from('<h', node, 6)[0]
+
+
+def goal_fits(goals, unlocks, index_of):
+    return sum(0 <= index_of(kind, number) < len(unlocks) and unlocks[index_of(kind, number)] != -1
+               for kind, number in goals)
+
+
+def check_goals(disc, unlocks):
+    goals = list(literal_goals(disc))
+    passed = gd.report('literal CompleteGoal on used bytes', goal_fits(goals, unlocks, goal_index),
+                       len(goals))
+    moved = {BOOK: PAGE, PAGE: GOAL, GOAL: BOOK}
+    wrong = goal_fits(goals, unlocks, lambda kind, number: goal_index(moved[kind], number))
+    print('  control: with the types moved round, %d of %d fit' % (wrong, len(goals)))
+    return passed and wrong < len(goals) / 2
+
+
+def check_datasets(disc, world):
+    """LotHelper's lots must be where objects of that dataset's name are placed."""
+    archive = arc.find_archive(disc, 'DATASETS')
+    names = {e.name_hash: e.name for e in arc.read_toc(disc, archive)}
+    table = placed.model_table(disc)
+    placed_on = collections.defaultdict(set)
+    for lot, objects in placed.read_houses(disc).items():
+        for item in objects:
+            if item.guid in table:
+                placed_on[table[item.guid][0]].add(int(lot[len('lot_'):]))
+    lots = range(1, len(world['neighborhood']['lot_table']) + 1)
+    agree, control, total = 0, 0, 0
+    for name, served in world['neighborhood']['datasets']:
+        wanted = placed_on.get(names.get(name))
+        if wanted is None:
+            continue
+        for lot in lots:
+            total += 1
+            agree += (lot in served) == (lot in wanted)
+            control += (lot + 1 in served) == (lot in wanted)
+    print('LotHelper lots match placed objects on %d of %d; a lot out, %d' % (agree, total, control))
+    return agree > total * 0.99 and control < total * 0.9
 
 
 def check(disc):
@@ -198,6 +347,10 @@ def check(disc):
           % (sum(n['data'] is not None for n in neighbors),
              sum(n['chimp_name'] is not None for n in neighbors),
              sum(any(f['token_words']) for f in families)))
+    passed &= check_goals(disc, world['neighborhood']['goal_unlocks'])
+    passed &= check_datasets(disc, world)
+    houses = read_house_names(disc)
+    print('%d HOUS chunks: %s' % (len(houses), sorted(set(houses))))
     print('controls:')
     nbrs = next(data for kind, _, data in chunks if kind == 'NBRS')
     ngbh = next(data for kind, _, data in chunks if kind == 'NGBH')
@@ -215,6 +368,7 @@ def check(disc):
 
 def export(disc, out_path):
     world = read_all(read_chunks(disc))
+    world['houses'] = read_house_names(disc)
     with open(out_path, 'w', encoding='ascii') as out:
         json.dump(world, out, separators=(',', ':'))
     print('wrote %s: %d neighbors, %d families'
