@@ -227,16 +227,17 @@ are the exact box of those meshes on all 63 lot submodels, which `placed.py chec
 | u32 | Open: 1 on `casroom_01` and `worldmap`, else 0 |
 | u32 + refs | Submodel list 1, empty on all |
 | u32 x 2 | 0 on all |
-| u32 + refs | Submodel list 2 |
-| u32 + refs | Submodel list 3 |
-| u32 + refs | Instance list. A lot's submodels are split between this and list 3 |
+| u32 + refs | Submodel list 2: `ERLevel +0x2AD1C` on Wii. Empty on all 33 levels. Only this list fades |
+| u32 + refs | Submodel list 3: Wii `+0x2AF7C`. The floor Sims stand on, never drawn |
+| u32 + refs | Instance list: what's drawn. A lot's submodels are split between this and list 3 |
 | u32, then items | Mid-lot objects |
 | grid x 3 | Tile grids |
 
-The lists sort a lot's submodels into groups. **Likely** the instance list is the outer lot: in
-version 7 `Read` puts it in the array that `DrawOuterLotInstancesWithShadow` walks. References count
-from 1 in file order. **Proven:** list 3 fades out around the player, so it isn't seen from on the
-lot. See "How ground is drawn". `placed.py lot` writes it as a separate node, `lot_24 fade`.
+The lists sort a lot's submodels into groups. References count from 1 in file order. **Proven**, from
+the stream order in `ERLevel::Read`: lists 2 and 3 are separate arrays, and an earlier version of this
+page mixed them up. The instance list goes in the array `Draw` and
+`DrawOuterLotInstancesWithShadow` walk. See "How ground is drawn" for list 3. `placed.py lot` writes it
+as a separate node, `lot_24 fade`, a name left from that mistake.
 
 ### Mid-lot objects
 
@@ -549,13 +550,13 @@ Runs work on bytes, not items. Items are row after row.
 | Bit | Meaning | From | Status |
 |---|---|---|---|
 | 0x01 | Buildable: `IsBuildable` | Grid 0 at load | Code |
-| 0x02 | Set on every tile off the array's border | All 94,632 tiles | Pattern proven; reader open |
+| 0x02 | Set on every tile off the array's border. `ComputeRooms` clears it along with 0x04 | All 94,632 tiles | Pattern proven; reader open |
 | 0x04 | Outside: `IsOutside`. Set on every tile | All tiles | Code |
 | 0x08 | Roofed: `HasRoof`. Never set on disc | `UpdateRoomStyles` | Code |
-| 0x10 | **Not routable** | Grid 1 at load | Proven |
-| 0x20 | Not editable: `MayEditTile`, `IsPlaceable` | Grid 1 at load | Code |
+| 0x10 | **Not routable**, and `TestPlace`'s rule for Sims | Grid 1 at load | Proven |
+| 0x20 | Not editable: `MayEditTile`, `IsPlaceable`. With 0x10, blocks non-Sims, except the object with GUID 0x437 | Grid 1 at load | Code |
 | 0x40 | Read by `cXPerson::GatherInteractions`. On 32 tiles of `lot_08` | Disc | Open |
-| 0x80 | No building or placing: `IsBuildable`, `IsPlaceable`, `TestPlace` | Grid 2 at load | Code |
+| 0x80 | No building or placing: `IsBuildable`, `IsPlaceable`, and `TestPlace`'s rule for chimps and boars | Grid 2 at load | Code |
 
 **The three level grids are this array's flags.** Load replaces those bits on every tile, with the
 same logic in the PS2 code at 0x1C4E30 and Wii `cFixedWorld::Load`, so grid 1 alone decides bit 0x10
@@ -574,9 +575,10 @@ is good evidence that they are ready.
 `flags` as loaded and `floor` as hex rows, one byte a tile, `walls` as `[x, y, the 8 bytes in hex]` for
 each tile that has any, and `wall_edges` as tile pairs. Objects and slots come from `objects.json` and
 `slots.py`. **Proven:** the flags give exactly `walkable` on all 28 lots, and bit 0x01 instead matches
-on none. Every lot has at most one wall edge, and one edge can't enclose anything, so a lot has no
-separate rooms, and no portal joins any: no placed object is type 8. **Likely** every tile is room
-0xFFFB, outside, as all have the outside flag. `ComputeRooms` itself wasn't followed.
+on none. Every lot has at most one wall edge, and one edge can't enclose anything, and no placed
+object is type 8. So a whole lot is one room. **Proven**, by Decomp: `cFixedWorld::ComputeRooms`
+(`0x1C64E8`) gives the border room 0 and floods from ID 0, starting at (1, 1), so an open lot is room 0.
+Room IDs count from 0, and 0xFFFB is a diagonal tile holding two rooms, not outside.
 
 #### Where a Sim can walk
 
@@ -690,7 +692,7 @@ That order matters because some sheets repeat the triangles of the sheet below t
 33% of `riverSand` and `rockMoss` on `lot_15`, 6 to 14% of `is3Path` and `isGroundGreen` on `lot_24`).
 Their depths tie, so the order alone picks a winner. Godot sorts surfaces as it likes, which makes
 mesh-shaped blocks. Reversing `draw_rank` changes 60,321 pixels of `lot_15`, so it does settle them.
-Every such tie on the 7 lots below involves list 3, so none remain around the player.
+Every such tie on the 7 lots below involves list 3, so none is ever drawn.
 
 **Proven, depth, from the PS2 code.** `0x42ACC0` builds an 8-byte register table for each pass from
 pass byte + 6, and `0x42B010` copies it into the GS state:
@@ -711,15 +713,25 @@ integer with `FTOI4`, which multiplies by 16, so Z runs to about 2^20. The clamp
 are 1 and 16777215. **Likely:** that's a step of under 1 mm at 30 m, with near 1 to 1.5 and far 55 to 65
 from `SimsCameraParameters`, whose constants `0x307D28` also has. No frame has been captured to check it.
 
-**Proven, list 3 fades out around the player.** This is what the patches on lots were. `ERLevel::Draw`,
-at `0x188134` on PS2, walks list 3 after the instance list. For each submodel it drops alpha by 2 a
-second while the player's position is inside its bounds on the map, or the line from the camera to the
-player crosses them, and otherwise raises it by 3 a second. Alpha stops at 0 and 1. The point is set in
-`SetupInterestFade` from the player's interactor. `FindOuterLotInteresection` walks the instance list
-and not list 3, so a Sim never stands on these sheets. All 9,030 walkable tiles of the 9 list 3 lots with a
-grid are inside its bounds, so while a Sim is on a lot, its list 3 is gone.
+**Proven, list 3 is the floor, and it's never drawn.** This is what the patches on lots were. Besides
+loading, saving and freeing, the array holding list 3 is read in one place, `FindOuterLotInteresection`
+(PS2 `0x18C1E8`), which raycasts onto it whenever its count isn't 0, and onto the instance list only
+when it is. No draw code touches it, on Wii or at any of its PS2 sites, and the instance list doesn't
+hold these submodels. So Sims stand on list 3, and standing 12 cm above the visible ground on `lot_24`
+is what the game does. **Likely** nothing else reaches these submodels: a running game hasn't confirmed it.
 
-What that does to seams, where a seam is two sheets lying within 25 cm of each other, using the 7 lots
+The vertex bit 0x10 fits: list 3 has it on 32% to 77% of vertices, and the other sheets on 0%, on 9 of
+the 11 lots with one. The exceptions are `lot_28` and `lot_29`, with a drawn sheet at 82%, and `lot_30`,
+whose list 3 has none.
+
+**Corrected.** This page said list 3 fades around the player. `ERLevel::Draw` (PS2 `0x188134`) does
+have a fade, dropping alpha by 2 a second while the player's inside a submodel's bounds or the line
+from the camera crosses them, and raising it by 3 a second otherwise. But it walks list 2, which is
+empty on every level, so it does nothing on the disc. The port still fades list 3's node away. That
+gives the same picture, as all 9,030 walkable tiles of the 9 list 3 lots with a grid are inside its
+bounds.
+
+What leaving it out does to seams, where a seam is two sheets lying within 25 cm of each other, using the 7 lots
 with 10 m or more. Contrast is percent of local brightness across the seam, and the floor is the same
 measure 4.5 m away, so texture alone scores about that:
 
@@ -748,17 +760,15 @@ lots (`lot_02` 54.4 to 25.4, `lot_24` 28.1 to 15.2), and turning off the detail 
 barely moves it. List 3 removes that on the lots that have it. Lots 09 and 22 keep their rise, 10
 to 13 points on 10 to 14 m of cliff edge, which is the disc's own brightness.
 
-**Likely, water shows where list 3 was the only surface.** That's 104 m^2 on `lot_24`, none of it
+**Likely, water shows where only list 3 has a surface.** That's 104 m^2 on `lot_24`, none of it
 walkable, and 298 on `lot_15`, of which 160 is walkable. With scenery drawn, top-down renders show
 ocean in all of it. `lot_15`'s strip is seabed about 10 m down, in the bay with the pirate ship, under
 `lot15_transition` and `outer_ocean`. No ground is missing there, but a running game hasn't confirmed it.
 
-**Likely, list 3 is a skin over the lot.** Over walkable tiles it lies on the ground, a median of 0 to
-1 cm above on every lot with textured list 3 and a grid. Away from them it climbs: 84% of `lot_21`'s
-is over 1 m above the ground, 36% of `lot_24`'s and 13% of `lot_15`'s, while `lot_02`'s is 88% within
-5 cm. So it's one surface that follows the play area and then rises over what's in front of the camera.
-Fading it opens the lot up. **Open:** when it's ever seen, since every walkable tile is inside
-its bounds, and only `ERLevel::Draw` reads the list.
+**Why ground is in list 3.** It's the floor. Over walkable tiles it lies on the drawn ground, a median
+of 0 to 1 cm above on every lot with textured list 3 and a grid. Away from them it climbs: 84% of
+`lot_21`'s is over 1 m above the ground, 36% of `lot_24`'s and 13% of `lot_15`'s, while `lot_02`'s is 88%
+within 5 cm. **Likely** the climbing parts just aren't meant to be walked.
 
 **Likely:** the stone and moss on `lot_24`, both ground sheets, still cross each other along the built
 features. That's 256 m in Blender, and it looks authored, but no screenshot has confirmed it.
@@ -830,12 +840,11 @@ exactly 91, and all of `lot_23` and `lot_30` exactly 128. Under 4% of edge verti
 edges average brighter than the middle on three of the four lots where the value varies. The bytes are
 grey with alpha equal to the grey, so at 128 they'd be solid purple.
 
-**Proven they fade away around the player.** All 354 batches are in list 3 and none in ground sheets,
-so `ERLevel::Draw` fades them out while a Sim is on the lot. Their pass byte + 6 is 0, so they'd have
-no depth test or write, which is why they'd paint over walls and Sims if they ever showed. The
-shaders' two header colours have alpha 0, and their pass flags include 0x80, which elsewhere is mostly
-on `ico_*` UI shaders with the same placeholder. `placed.py lot` leaves them out. **Open:** what
-they're for, and whether they show from off the lot. `PLAYTEST.md` step 15 looks for them.
+**Proven they're in the floor.** All 354 batches are in list 3 and none in the drawn sheets, so they're
+floor data and never drawn. That fits what they are: their pass byte + 6 is 0, so no depth test or
+write, the shaders' two header colours have alpha 0, and their pass flags include 0x80, which elsewhere
+is mostly on `ico_*` UI shaders with the same placeholder. `placed.py lot` leaves them out. **Open:**
+what their grey slot 4 values mean, if anything. `PLAYTEST.md` step 15 looks for them.
 
 `global_transparent`, on 19 batches, is settled: ALPHA 0x68 with FIX 0 is `source * 0 + screen`, so it
 changes nothing on screen. `placed.py lot` leaves that out too.

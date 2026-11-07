@@ -529,7 +529,7 @@ def read_lot_level(disc, lot):
 
 
 def split_terrain(terrain, data, level, shader_hashes):
-    """Return (ground, fading). ERLevel::Draw fades list 3's submodels out around the player."""
+    """Return (drawn ground, list 3). List 3 is the floor Sims stand on, and the game never draws it."""
     groups = mdl.submodels(data, terrain, shader_hashes)
     ground, fading = [], []
     for reference, instance in enumerate(level.submodels, 1):
@@ -549,7 +549,7 @@ def export_lot(disc, out_path, lot, posed=False):
     terrain = mdl.parse_model(available[lot][1], library.shaders, lot)
     level = read_lot_level(disc, lot)
     solid, fading = split_terrain(terrain, available[lot][1], level, library.shaders)
-    # The game stands things on the ground only. Fading sheets count only where it has none.
+    # Objects go on the drawn ground. List 3 counts only where that has none.
     heights = {**ground_heights(textured(fading, library)),
                **ground_heights(textured(solid, library))}
     builder = gltf.GlbBuilder()
