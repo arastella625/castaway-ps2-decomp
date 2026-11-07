@@ -30,6 +30,8 @@ SHADER_TAG = b'RDHS'  # "SHDR"
 # then the two short forms. Every shader that names a texture does so at one of these.
 SHADER_TEXTURE_OFFSETS = (0x3F, 0x6F, 0x10, 0x0F)
 PREFIX_SIZE = 16
+SUBMODEL_HEADER = 12  # a u32, the node count and the mesh count
+SUBMODEL_NODE_SIZE = 28
 
 # Every mesh record's type is a mask of what its vertices hold.
 MESH_TYPES = (0x16, 0x1A, 0x1E)
@@ -255,6 +257,35 @@ def parse_model(data, shader_hashes, name='model'):
     if any(not mesh.batches for mesh in meshes):
         raise arc.FormatError('%s: a mesh record has no vertices' % name)
     return meshes
+
+
+def submodels(data, meshes, shader_hashes):
+    """Group a model's meshes by submodel. Each is a run of mesh records, in file order.
+
+    ESubModel::Read puts a u32, a counted list of 28-byte quadtree nodes and a u32 mesh count just
+    before the run's first record.
+    """
+    records = find_mesh_records(data, shader_hashes)
+    groups = []
+    first = 0
+    while first < len(records):
+        count = submodel_size(data, records[first][0], len(records) - first)
+        groups.append(meshes[first:first + count])
+        first += count
+    return groups
+
+
+def submodel_size(data, record, most):
+    count = struct.unpack_from('<I', data, record - 4)[0]
+    nodes = 0
+    while record - SUBMODEL_HEADER - nodes * SUBMODEL_NODE_SIZE >= 0:
+        at = record - SUBMODEL_HEADER - nodes * SUBMODEL_NODE_SIZE
+        if struct.unpack_from('<I', data, at + 4)[0] == nodes:
+            if 0 < count <= most:
+                return count
+            break
+        nodes += 1
+    raise arc.FormatError('no submodel header before the mesh record at %#x' % record)
 
 
 def bones_used(batch):

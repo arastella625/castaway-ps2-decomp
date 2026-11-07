@@ -211,8 +211,10 @@ just versions), then 1 to 3 `EIStaticSubModel` v0 and one `ERLevel` v7, which is
 | u32 | Submodel index |
 | f32 x 4 | Bounding sphere |
 
-No transform: terrain is already in lot space, in metres after scaling. `tools/model.py` doesn't
-split by submodel yet, so use the whole model.
+No transform: terrain is already in lot space, in metres after scaling. `model.submodels` splits a
+model's meshes by submodel. Each is a run of mesh records, and `ESubModel::Read` puts a u32, a counted
+list of 28-byte quadtree nodes and a u32 mesh count just before the first. **Proven:** the bounds here
+are the exact box of those meshes on all 63 lot submodels, which `placed.py check` tests.
 
 `ERLevel` v7:
 
@@ -232,8 +234,9 @@ split by submodel yet, so use the whole model.
 | grid x 3 | Tile grids |
 
 The lists sort a lot's submodels into groups. **Likely** the instance list is the outer lot: in
-version 7 `Read` puts it in the array that `DrawOuterLotInstancesWithShadow` walks, and list 3 holds
-the sheet over the walkable lot on the lots that have one. What else list 3 does is open.
+version 7 `Read` puts it in the array that `DrawOuterLotInstancesWithShadow` walks. References count
+from 1 in file order. **Proven:** list 3 fades out around the player, so it isn't seen from on the
+lot. See "How ground is drawn". `placed.py lot` writes it as a separate node, `lot_24 fade`.
 
 ### Mid-lot objects
 
@@ -588,18 +591,79 @@ That order matters because some sheets repeat the triangles of the sheet below t
 33% of `riverSand` and `rockMoss` on `lot_15`, 6 to 14% of `is3Path` and `isGroundGreen` on `lot_24`).
 Their depths tie, so the order alone picks a winner. Godot sorts surfaces as it likes, which makes
 mesh-shaped blocks. Reversing `draw_rank` changes 60,321 pixels of `lot_15`, so it does settle them.
+Every such tie on the 7 lots below involves list 3, so none remain around the player.
 
-**Proven, depth.** Pass byte + 6 is depth and alpha test, from `ENgcRenderer::SetShaderPass`: 0x08 tests
-depth with LEQUAL, 0x10 writes it, 0x04 alpha-tests at the float at + 7. All ground passes that draw
-first are 0x18, so sheets test and write depth like any solid. Wii reads this byte; PS2's use of it
-wasn't traced.
+**Proven, depth, from the PS2 code.** `0x42ACC0` builds an 8-byte register table for each pass from
+pass byte + 6, and `0x42B010` copies it into the GS state:
 
-**Likely, the rest of the patches are the game's own.** Where two sheets lie close without repeating
-triangles they cross each other, and with depth on, nearest wins. `lot_24`'s `is3Path` and
-`isGroundGreen` overlap on 885 m^2, a median of 1.6 cm apart, either side of each other. Their edge
-there is the line where they cross, so its shape is in the geometry. This could be how the artists got ragged edges with no vertex alpha. It hasn't been checked
-against a running game, as none of the saved screenshots show a lot. If the real ground is smoother
-there, something here is still missing.
+| Bit of + 6 | GS effect |
+|---|---|
+| 0x08 | `TEST`: set, ZTST is GEQUAL; clear, ALWAYS. ZTE is always on |
+| 0x10 | `ZBUF`: clear sets ZMSK, so depth isn't written |
+| 0x04 | `TEST`: alpha test GEQUAL against threshold x 128 |
+
+Across the lots' shaders, 50 first passes are 0x18 and 12 of 14 second passes are 0x08: the first pass
+tests and writes, and the detail pass tests the same vertices without writing. GEQUAL means larger Z
+is nearer, and a tie goes to whatever is drawn later.
+
+**Proven, depth buffer.** `0x419BC8` sets the only value the Z mode ever has, 1. That picks PSMZ24
+storage, but the Z range the viewport code gets from `0x4338E8` is 65535. VU1 turns screen Z to an
+integer with `FTOI4`, which multiplies by 16, so Z runs to about 2^20. The clamps at VU memory 2 and 3
+are 1 and 16777215. **Likely:** that's a step of under 1 mm at 30 m, with near 1 to 1.5 and far 55 to 65
+from `SimsCameraParameters`, whose constants `0x307D28` also has. No frame has been captured to check it.
+
+**Proven, list 3 fades out around the player.** This is what the patches on lots were. `ERLevel::Draw`,
+at `0x188134` on PS2, walks list 3 after the instance list. For each submodel it drops alpha by 2 a
+second while the player's position is inside its bounds on the map, or the line from the camera to the
+player crosses them, and otherwise raises it by 3 a second. Alpha stops at 0 and 1. The point is set in
+`SetupInterestFade` from the player's interactor. `FindOuterLotInteresection` walks the instance list
+and not list 3, so a Sim never stands on these sheets. All 8,030 walkable tiles of the 9 list 3 lots with a
+grid are inside its bounds, so while a Sim is on a lot, its list 3 is gone.
+
+What that does to seams, where a seam is two sheets lying within 25 cm of each other, using the 7 lots
+with 10 m or more. Contrast is percent of local brightness across the seam, and the floor is the same
+measure 4.5 m away, so texture alone scores about that:
+
+| Lot | Seam m, every sheet | Without list 3 | Exact ties m^2 | Without | Contrast, every sheet | Without | Floor |
+|---|---|---|---|---|---|---|---|
+| `lot_02` | 45.5 | 0 | 1.7 | 0 | 54.4 | 15.4 | 19.2 |
+| `lot_09` | 10.0 | 10.0 | 0 | 0 | 33.9 | 33.9 | 16.8 |
+| `lot_15` | 889.5 | 7.5 | 388.3 | 0 | 35.9 | 14.4 | 18.6 |
+| `lot_22` | 13.5 | 13.5 | 0 | 0 | 33.8 | 33.8 | 21.8 |
+| `lot_24` | 512.5 | 39.5 | 143.1 | 0 | 28.1 | 22.6 | 24.2 |
+| `lot_27` | 11.5 | 11.5 | 0 | 0 | 29.1 | 29.1 | 17.9 |
+| `lot_28` | 45.5 | 0 | 1.7 | 0 | 54.4 | 15.4 | 19.2 |
+
+Lots 09 and 27 have no list 3, and `lot_22`'s holds only placeholders, so nothing there changes: a
+control. Taking away the biggest ground submodel instead also removes seams on some lots, since a
+crossing needs two sheets, but it costs far more ground: 60 m^2 uncovered on `lot_02` against 0, 936
+against 298 on `lot_15`, 1,264 against 104 on `lot_24`, where seams don't fall at all.
+
+**Proven, depth precision isn't why ground looks patchy.** With every sheet shown, moving Godot's near and
+far from 0.05 and 4000 to the game's 1 and 60 changes 0.03 to 0.09% of pixels on Forward+, and 1.5 to
+2.2% on Compatibility. Turning the depth pre-pass off changes none. Patches stay in all of them.
+
+**Proven, why brightness made seams look worse.** Sheets that cross have different baked brightness.
+Showing them together, turning brightness off alone puts contrast back near its old level on all 7
+lots (`lot_02` 54.4 to 25.4, `lot_24` 28.1 to 15.2), and turning off the detail pass or draw order
+barely moves it. List 3 removes that on the lots that have it. Lots 09 and 22 keep their rise, 10
+to 13 points on 10 to 14 m of cliff edge, which is the disc's own brightness.
+
+**Open:** what shows through where list 3 was the only surface. That's 104 m^2 on `lot_24`, none of it
+walkable, and 298 on `lot_15`, of which 160 is walkable. It's nearly all a strip about 6 m wide along
+`lot_15`'s low western edge, 10 m below the play area. Whether the game shows a gap there needs a
+screenshot. Also open: why ground is in list 3 at all, when the fade suits overhanging rock like
+`lot_21`'s `is3MountainTerrain`, 12 m above the ground.
+
+**Likely:** the stone and moss on `lot_24`, both ground sheets, still cross each other along the built
+features. That's 256 m in Blender, and it looks authored, but no screenshot has confirmed it.
+
+**Proven, some lots face down.** All of `lot_02`, 28 and 29's flat ground has stored normals pointing
+down, 100% by area, against 88 to 100% up on all 27 other lots. That is in the batch bytes. The strip
+order says the same: counted from each restart, 71% of it agrees with the normals, as 85 to 93% does
+on `lot_01`, 16 and 24. Levels place terrain with no transform, so nothing turns it over. `model.py`
+winds triangles to match the normals, so the export is faithful. VU1 doesn't cull, or this ground
+wouldn't draw. **Open:** how the sun lights it, since those normals face away.
 
 **Open:** the overall light level. VU1 multiplies this brightness by lights the port doesn't decode, so
 `terrain.gdshader` treats 127 as the texture's own colour and leaves the rest to Godot's sun. Pixels
@@ -635,7 +699,7 @@ A pass:
 |---|---|---|---|
 | 0 | u32 | Texture hash | Proven |
 | 4 | u16 | Flags: 0x40 blends. 0x08, 0x10 and 0x80 are open | 0x40 proven |
-| 6 | u8 | Depth and alpha test, above | Proven on Wii |
+| 6 | u8 | Depth and alpha test, above | Proven |
 | 7 | f32 | Alpha test threshold | Likely |
 | 0xB | f32 | -1.4 on some; a mipmap bias? | Open |
 | 0xF | u8 | The GS ALPHA register | Proven |
@@ -661,11 +725,12 @@ exactly 91, and all of `lot_23` and `lot_30` exactly 128. Under 4% of edge verti
 edges average brighter than the middle on three of the four lots where the value varies. The bytes are
 grey with alpha equal to the grey, so at 128 they'd be solid purple.
 
-**Likely** they don't show as drawn here. Their pass byte + 6 is 0, so no depth test and no depth write,
-and they'd paint over walls and Sims regardless of distance. The shaders' two header colours have
-alpha 0, and their pass flags include 0x80, which elsewhere is mostly on `ico_*` UI shaders with the
-same placeholder. `placed.py lot` leaves them out. **Open:** what they're for and whether the game
-draws them at all. `PLAYTEST.md` step 15 looks for them.
+**Proven they fade away around the player.** All 354 batches are in list 3 and none in ground sheets,
+so `ERLevel::Draw` fades them out while a Sim is on the lot. Their pass byte + 6 is 0, so they'd have
+no depth test or write, which is why they'd paint over walls and Sims if they ever showed. The
+shaders' two header colours have alpha 0, and their pass flags include 0x80, which elsewhere is mostly
+on `ico_*` UI shaders with the same placeholder. `placed.py lot` leaves them out. **Open:** what
+they're for, and whether they show from off the lot. `PLAYTEST.md` step 15 looks for them.
 
 `global_transparent`, on 19 batches, is settled: ALPHA 0x68 with FIX 0 is `source * 0 + screen`, so it
 changes nothing on screen. `placed.py lot` leaves that out too.
@@ -815,7 +880,7 @@ Open:
 - Whether `lot_24`'s ragged ground edges match the running game. No saved screenshot shows a lot.
 - How palm leaves attach, and which objects block a Sim.
 - Scale for rigged mid-lot objects.
-- ObjDefinition, ResFile and most `world` columns. What `ERLevel`'s list 3 does.
+- ObjDefinition, ResFile and most `world` columns.
 - The bodies of most BHAV primitives and some expression scopes; see [bhav.md](bhav.md).
 - Kinds 0 and 1 of `DEFAULT.NGH`: kind 0 holds `TATT`, `SIMI` and `HOUS` chunks and kind 1 `NGBH`, `NBRS` and `FAMI`. Those are likely the neighbourhood, neighbours and families.
 - Which of languages 0 and 1 is the US text. Sample word bit 31.

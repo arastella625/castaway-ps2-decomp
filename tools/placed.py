@@ -53,6 +53,9 @@ PALM_LEAF = 'isPalmTreeLeaf'
 PALM_CROWN_HEIGHT = 4.12  # treeanimate3 in isTreeSkeleton
 PALM_LEAVES = 9
 PALM_LEAF_LIFT = 20.0  # degrees above level
+BOUNDS_TOLERANCE = 0.001
+FADE_LIST = 2  # gamedata's third submodel list
+FADE_SUFFIX = ' fade'
 MISSING_TEXTURE = 'missingshader'  # the purple 16x16 behind Maya's default materials
 ALPHA_ADD = 0x68  # the GS ALPHA register: source * FIX + destination
 
@@ -326,6 +329,28 @@ def fit_at_offset(houses, levels, offset):
     return sum(fits) / len(fits)
 
 
+def check_submodels(disc, levels):
+    """Each level's submodel bounds must be the exact box of the meshes read for that submodel."""
+    library = gltf.Library(disc)
+    models = {e.name: raw for e, raw in mdl.each_model(disc, library.shaders)}
+    worst = 0.0
+    checked = 0
+    for name, level in levels.items():
+        if not name.startswith('lot_') or name not in models:
+            continue
+        meshes = mdl.parse_model(models[name], library.shaders, name)
+        groups = mdl.submodels(models[name], meshes, library.shaders)
+        for instance in level.submodels:
+            points = [[c * m.scale for c in p] for m in groups[instance.submodel]
+                      for b in m.batches for p in b.positions]
+            found = [min(p[i] for p in points) for i in range(3)] \
+                + [max(p[i] for p in points) for i in range(3)]
+            worst = max(worst, max(abs(a - b) for a, b in zip(found, instance.box)))
+            checked += 1
+    print('%d lot submodels match their bounds, worst by %.4f m' % (checked, worst))
+    return checked > 0 and worst < BOUNDS_TOLERANCE
+
+
 def check(disc):
     streams = house_streams(disc)
     shapes = object_shapes(disc)
@@ -363,6 +388,7 @@ def check(disc):
         print('  offset %+3d: mean fit %.3f' % (offset, score))
     best = max(scores, key=scores.get)
     passed &= best == FIRST_LOT_OFFSET
+    passed &= check_submodels(disc, levels)
     print('failures: %d' % (not passed))
     return 0 if passed else 1
 
@@ -469,6 +495,15 @@ def read_lot_level(disc, lot):
     return gd.read_level(disc.read(archive.lba, entry.offset, entry.size), entry.name)
 
 
+def split_terrain(terrain, data, level, shader_hashes):
+    """Return (ground, fading). ERLevel::Draw fades list 3's submodels out around the player."""
+    groups = mdl.submodels(data, terrain, shader_hashes)
+    ground, fading = [], []
+    for reference, instance in enumerate(level.submodels, 1):
+        (fading if reference in level.lists[FADE_LIST] else ground).extend(groups[instance.submodel])
+    return ground, fading
+
+
 def export_lot(disc, out_path, lot):
     objects = read_houses(disc).get(lot)
     if objects is None:
@@ -479,12 +514,20 @@ def export_lot(disc, out_path, lot):
     table = model_table(disc)
     available = {e.name: (e, raw) for e, raw in mdl.each_model(disc, library.shaders)}
     terrain = mdl.parse_model(available[lot][1], library.shaders, lot)
-    heights = ground_heights(textured(terrain, library))
+    level = read_lot_level(disc, lot)
+    solid, fading = split_terrain(terrain, available[lot][1], level, library.shaders)
+    # The game stands things on the ground only. Fading sheets count only where it has none.
+    heights = {**ground_heights(textured(fading, library)),
+               **ground_heights(textured(solid, library))}
     builder = gltf.GlbBuilder()
     cache = {}
     meshes = {}
-    ground = add_mesh(builder, library, lot, terrain, cache)
+    ground = add_mesh(builder, library, lot, solid, cache)
     nodes = [builder.add_node({'name': lot, 'mesh': ground})]
+    if textured(fading, library):
+        name = lot + FADE_SUFFIX
+        nodes.append(builder.add_node({
+            'name': name, 'mesh': add_mesh(builder, library, name, fading, cache)}))
 
     def mesh_for(name):
         if name not in meshes:
@@ -493,7 +536,6 @@ def export_lot(disc, out_path, lot):
         return meshes[name]
 
     names = gd.resource_names(disc)
-    level = read_lot_level(disc, lot)
     scenery_count = 0
     for index, item in enumerate(level.objects):
         name = names.get(item.model_hash)
