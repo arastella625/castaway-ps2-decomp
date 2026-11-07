@@ -647,11 +647,17 @@ lots (`lot_02` 54.4 to 25.4, `lot_24` 28.1 to 15.2), and turning off the detail 
 barely moves it. List 3 removes that on the lots that have it. Lots 09 and 22 keep their rise, 10
 to 13 points on 10 to 14 m of cliff edge, which is the disc's own brightness.
 
-**Open:** what shows through where list 3 was the only surface. That's 104 m^2 on `lot_24`, none of it
-walkable, and 298 on `lot_15`, of which 160 is walkable. It's nearly all a strip about 6 m wide along
-`lot_15`'s low western edge, 10 m below the play area. Whether the game shows a gap there needs a
-screenshot. Also open: why ground is in list 3 at all, when the fade suits overhanging rock like
-`lot_21`'s `is3MountainTerrain`, 12 m above the ground.
+**Likely, water shows where list 3 was the only surface.** That's 104 m^2 on `lot_24`, none of it
+walkable, and 298 on `lot_15`, of which 160 is walkable. With scenery drawn, top-down renders show
+ocean in all of it. `lot_15`'s strip is seabed about 10 m down, in the bay with the pirate ship, under
+`lot15_transition` and `outer_ocean`. No ground is missing there, but a running game hasn't confirmed it.
+
+**Likely, list 3 is a skin over the lot.** Over walkable tiles it lies on the ground, a median of 0 to
+1 cm above on every lot with textured list 3 and a grid. Away from them it climbs: 84% of `lot_21`'s
+is over 1 m above the ground, 36% of `lot_24`'s and 13% of `lot_15`'s, while `lot_02`'s is 88% within
+5 cm. So it's one surface that follows the play area and then rises over what's in front of the camera.
+Fading it opens the lot up. **Open:** when it's ever seen, since every walkable tile is inside
+its bounds, and only `ERLevel::Draw` reads the list.
 
 **Likely:** the stone and moss on `lot_24`, both ground sheets, still cross each other along the built
 features. That's 256 m in Blender, and it looks authored, but no screenshot has confirmed it.
