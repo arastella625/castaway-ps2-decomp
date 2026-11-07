@@ -1570,6 +1570,60 @@ If placing fails the tree ends with an error. Afterwards it sets person data 0xF
 
 **For a port:** on arrival by lot transition, put the lead on the `transition_triggerplate` whose attribute 1 is the transition number, using the spiral search from it. On a new game use the first `portal_green_arrow`, then plates. The rest of the family use the harvestable source rule.
 
+## LotTransition (opcode 0x45)
+
+**Proven: read line by line on PS2** (`0x23A448`), and `LotManager` compared on both builds where marked. Not matched. 11 uses.
+
+The primitive never reads the 72-entry table. It picks who's going and where, and the costs come later.
+
+`+0` and `+1` are small operand codes, the same scheme for both:
+
+| Byte | Reads |
+|---|---|
+| 0 | My object variable 0xB |
+| 1 | The stack object ID |
+| 2 to 9 | Temp 0 to 7 |
+| 0xA to 0x11 | Local 0 to 7 |
+| 0x12 to 0x19 | Parameter 0 to 7 |
+| Others | Literal, the byte - 0x7E |
+
+**With `+2` non-zero it only lists.** Temps 0 to 5 are cleared. If the transition type (`EGlobal +0x200`) is 4, temp 0 is the transitioning neighbour (`+0x4C8`). Otherwise temps 0 to 5 get the IDs of the first six neighbours with person data 0x2B set. That's how `Lead Transitioner` finds the lead.
+
+**With `+2` zero it transitions:**
+
+1. `+0` gives a neighbour ID. No such neighbour falls back to the player's.
+2. Person data 0x2B is cleared on every other neighbour.
+3. `+1` gives the destination.
+4. Globals 0, 1, 5, 7 and 8 are saved in neighbourhood variables 0x15 to 0x19.
+5. The transition type becomes 3.
+6. `TransitionToLot(neighbour, destination, the neighbour's word 0x2E)`.
+
+`TransitionToLot` clears 0x2B on everyone, then sets it to the current lot's number on each ID in my temps 0 to 5. So **0x2B is the lot a Sim left from**, and non-zero means it's in transit. It records the destination and word 0x2E as the transition ID, and moves the family's house number. **Word 0x2E is the transition number**, which is what picks the plate on arrival.
+
+**Costs. Likely, Wii.** `LotManager::PerformLotToLotTransition` is where the table is read. With a transition ID above 0 it calls `GetTransitionCost`, and otherwise `BuildTransitionList` finds a route through the lots. Time then passes in the game clock in steps, with `WeatherManager::AdvanceTime`, and `ApplyDamageOverTimeOnLotLoad` runs. See Lot transitions for the fields.
+
+**The flags.** `LotManager +0xDA` is one byte per transition. Scope 0x44 reads them.
+
+| Bit | Meaning |
+|---|---|
+| 0 | **Open.** Set at reset where table 0x200B, Default Locked State, is 0, and by events |
+| 1 | **Toolkit's `second`.** Likely: Sims other than the player may use it |
+| 2 | Used (`TransitionUsed`, `HasTransitionBeenUsed`) |
+
+`IsTransitionOpen(id, both)`: IDs 1 to 0x47 only, and false otherwise. With `both` clear it's bit 0, and with `both` set it's bits 0 and 1 together.
+
+`Reset` sets bit 1 on every transition except 0xF, 0x15, 0x16, 0x19, 0x1A, 0x1F, 0x20, 0x23, 0x24, 0x31, 0x32, 0x39, 0x3A, 0x47 and 0x48, and PS2's list is the same (`0x1FC830`). The table's labels name those as the raft, secret passage, Skull Rock, a basic path, the chasm, the steam vent, the cliff dive and the catamaran. `UpdateAvailability` passes `both` set for a neighbour with a person who isn't the player, and otherwise leaves the table as it is. That's why bit 1 looks like an NPC permission. Some events in `EventHappened` set bits 0 and 1 together.
+
+## Passive influence
+
+**Proven on Wii, and on PS2 no stream code was found:** the map is **not** read back during a load, and it isn't saved.
+
+- `PassiveInfluenceSystem::DoStream` only calls `IsReading`, from version 0x5C, and stores nothing.
+- `cFixedWorld::Load` deletes the old `InfluenceMap` and `PassiveInfluenceMap` and makes new empty ones.
+- `KillAllObjects` calls `FlushSystem`, which empties the map.
+
+So it's rebuilt by behaviour. Most uses of primitive 0x41 that set one up are in `Function - Load`, entry point 2, which runs in `PostLoad`, with some in `Function - Main`. After reading objects, `ObjectModule::DoStream` calls `MoveObjectInWorld` on each one in the world, to refresh items already there. **For a port:** start with an empty map on each lot load, and let load trees fill it.
+
 ## What a RAM snapshot would settle
 
 The code answers most of this, but three things are worth reading from a snapshot taken just after a lot has loaded, before much has run. `tools/livecheck.py snapshot` saves the memory. All offsets are PS2.
