@@ -768,7 +768,7 @@ The first s16 of a descriptor is its type. Type 0 becomes an `ObjectSlot`, 1 a `
 | `+0x40` s32 | `+0x34` | Facing: 0 to 7, -2 towards the object, -3 any |
 | `+0x44` s32 | `+0x38` | Resolution, in 1/16 tile. 16 by default |
 
-**A slot's offset depends on the Sim. Proven: `GetXOffset` and `GetYOffset` match.** `RoutingSlot` `+0x34`, the facing, picks an extra offset by sim type, and both functions add it to the slot's own x or y. `kStraightOffset` is at `0x4B66E0` and `kCornerOffset` at `0x510568`, which isn't in the file: it's filled in at run time, and what fills it is **open**.
+**A slot's offset depends on the Sim. Proven: `GetXOffset` and `GetYOffset` match.** `RoutingSlot` `+0x34`, the facing, picks an extra offset by sim type, and both functions add it to the slot's own x or y. `kStraightOffset` is at `0x4B66E0`, in 1/16 tile: 0, 0, 2.944, 6.08, 2.944, 0 for sim types 0 to 5. `kCornerOffset` at `0x510568` is worked out by a static initialiser (`0x1D8400`): entries 0 and 1 are 0, entries 2 to 4 are `sqrt(pow(straight, 2) * 0.5)`, and entry 5 stays 0. So that's the straight offset divided by the square root of 2: 0, 0, 2.0817, 4.2992, 2.0817, 0.
 
 | Facing | Added to x | Added to y |
 |---|---|---|
@@ -853,7 +853,14 @@ Wii differs from PS2 in only two ways here. Wii takes the square root with `fast
    - Goals become 1-tile rectangles, with penalty (best score - score) x 16. Goals with a score of 0 or less aren't used.
    - The iteration limit is the smaller of the caller's limit and goal count x area + 50.
    - In a room above 256 tiles, a first pass without smoothing tests that a path exists: none gives result 3 and returns 0.
-6. **`Path`** is next on the list. **Likely** until then: A* over the partition, `InitPath`, `AdvancePath` until `PathComplete`, then `GetFinalPath` and `GetChosenGoal`.
+6. **`Path`.** Proven on PS2 for the stages, which `FindPath` has inlined: state 1 runs `OpenANode` (`0x1BC8A0`) until it's done, then state 2 runs `DoOneSmooth` (`0x1BD0B8`) if smoothing is on, and state 0 is finished. Each step counts against the limit. **Likely for the inside**, read on Wii and paired by calls, not line by line: A* over the nodes of a `SpacePartition`, which are the rectangles left by the room's partition and the penalty rectangles, not tiles. `DoOneSmooth` moves each point along the edge between two rectangles to shorten the path, 100 at a time.
+7. **`CanPlace` (`0x253938`) for a Sim.** It builds a `PlacementSpec` and calls `TestPlace` (`0x2104C8`). **Proven on PS2** for this first part, where a failure sets `gPlacementError`:
+   - Out of bounds: 1.
+   - The tile has flag 0x10, I'm not a ghost and Sim `+0x120` is clear: I'm allowed on if I'm standing on a 0x10 tile already. Otherwise chimps and boars are refused, any Sim but the player (`0x514EA4`) is refused, and the player needs `CollisionMap::IsLocationGood` (`0x3157A8`) to pass. A refusal is 1, and so is my own tile being out of bounds.
+   - The tile has flag 0x80, and I'm a chimp or a boar: refused unless my own tile has 0x80 or is out of bounds.
+   - Level outside 1 to 3: 2.
+
+   **Likely for the rest**, read on Wii, with PS2's error codes coming in the same order: 0xB for a roof or a slot conflict, 0x1B and 0x1C for walls, 0x13 if variable 0x2A bit 0 is clear and the tile isn't grass, 0x14 if bit 1 is clear and it is, 9 and 0xA from variable 0x1E (must be outside or inside), then `TestIntersection`. That returns true at once for a ghost. Otherwise it looks at objects on the 3 x 3 tiles around, testing rectangles, and a Sim only clashes with a Sim it isn't ignoring.
 
 ### Rooms
 
@@ -866,7 +873,7 @@ Wii differs from PS2 in only two ways here. Wii takes the square root with `fast
 
 So on a lot with no closed walls the fill from (1, 1) reaches every tile, and everything, the border too, is room 0. `RoomManager` has a `Room` for 0, because only IDs above 0xFFFA are refused. One wall edge can't close anything off. Objects copy their tile's room into variable 0x1D in `SetLocation`.
 
-**For a port:** treat a lot with no closed walls as one room, ID 0, with a `Room`. Set variable 0x1D to 0 on everything, and it passes every room test above. Then the goals are the slot's wedge search, and a plain A* around object rectangles should give the same result on open ground. `CanPlace` decides the last step: the next pass reads it.
+**For a port:** treat a lot with no closed walls as one room, ID 0, with a `Room`. Set variable 0x1D to 0 on everything, and it passes every room test above. Then the goals are the slot's wedge search, and a plain A* around object rectangles should give the same result on open ground. `CanPlace` decides the last step, and for a Sim on open ground the tests that matter are tile flag 0x10, grass (variable 0x2A) and rectangles.
 
 ## GotoRelative (opcode 0x1B)
 
