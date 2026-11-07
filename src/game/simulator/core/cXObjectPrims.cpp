@@ -6,6 +6,7 @@
 #include "game/simulator/core/Lot.h"
 #include "game/simulator/core/Neighborhood.h"
 #include "game/simulator/core/cXMTObject.h"
+#include "game/simulator/core2/ObjTestSim.h"
 #include "game/simulator/core2/cXPerson.h"
 #include "game/simulator/objectdata/XObjLang.h"
 
@@ -32,6 +33,16 @@ public:
     void ClearInfluenceMotiveDeltas(cXObject *object);
     void SetInfluenceMotiveDelta(cXObject *object, u8 motive, f32 delta, s16 limit, s8 type);
 };
+
+inline u32 Behavior::GetNamespaceIDInline()
+{
+    return mSelector->mNamespaceID;
+}
+
+inline u32 Behavior::GetSemiGlobalNamespaceIDInline()
+{
+    return mSelector->mSemiNamespaceID;
+}
 
 // Primitive 0xf, TreeBreak.
 struct TreeBreakParam {
@@ -118,16 +129,6 @@ long cXObject::TryRandom(StackElem *elem, XPrimParam *primParam)
         return -1;
     }
     return 1;
-}
-
-inline u32 Behavior::GetNamespaceIDInline()
-{
-    return mSelector->mNamespaceID;
-}
-
-inline u32 Behavior::GetSemiGlobalNamespaceIDInline()
-{
-    return mSelector->mSemiNamespaceID;
 }
 
 #ifdef NON_MATCHING
@@ -721,6 +722,72 @@ long cXObject::TrySetMotiveDelta(StackElem *elem, XPrimParam *primParam)
     GetSimulator()->mPassiveInfluence->SetInfluenceMotiveDelta(object, param->mMotive, perTick, limit, type);
     return 1;
 }
+
+#ifdef NON_MATCHING
+// 162 of the 164 words line up. The two that differ are swapped: the game stores 0 into the
+// AUTOPTR before calling DestroyInstance, and here that store is in the call's delay slot.
+// Primitive 0x32: the words a tree shows on a menu, or above a Sim.
+class MakeActionStringParam {
+public:
+    s16 mStringSet; // 0x00
+    u16 mFlags;     // 0x02  bit 0 the string comes from an operand
+    u8 mString;     // 0x04
+    u8 mScope;      // 0x05
+    s16 mData;      // 0x06
+
+    bool GetUseOwnerCombo() const { return mFlags & 1; }
+};
+
+long cXObject::TryMakeActionString(StackElem *elem, XPrimParam *primParam)
+{
+    MakeActionStringParam *param = (MakeActionStringParam *)primParam;
+    int menu = ObjTestSim::IsMenuInProgress();
+    int mainSim = TreeSim::sInMainSim;
+    if (!menu && !mainSim)
+        return 1;
+
+    s16 index;
+    if (param->GetUseOwnerCombo()) {
+        if (InterpValue(param->mScope, param->mData, 0, 0, &index, 0) == -1)
+            return -1;
+        index++;
+    } else {
+        index = param->mString;
+    }
+
+    AUTOPTR<StringSet> strings;
+    strings.CreateInstance();
+    strings->Load(elem->mBehavior->GetNamespaceIDInline(), param->mStringSet);
+    s16 wanted = index;
+    if (!(wanted >= 0 && strings->GetStringCount(-1) >= wanted)) {
+        OBJECT_ERROR_CHECK(false, 0x62);
+    }
+
+    BString2 text;
+    ELocString loc = strings->GetLocString(index);
+    if ((const u16 *)loc)
+        text.assign((const u16 *)loc);
+
+    s16 object[4];
+    memset(object, 0, sizeof(object));
+    ObjSelector *selector;
+    ParseUIString(text, elem, object, &selector, false);
+    if (menu) {
+        if (object[0] == 0) {
+            if (elem)
+                object[0] = elem->mStackObject;
+            else
+                object[0] = 0;
+        }
+        ObjTestSim::MakeNewMenuItem(text.c_str(), object, elem, mVars[0x32]);
+    } else if (mainSim) {
+        cXPerson *person = GetPerson();
+        if (person)
+            person->SetCurrentActionText(text);
+    }
+    return 1;
+}
+#endif
 
 // A whole tile: x, y, level. Built from numbers, it turns anything that doesn't fit in a byte to 0.
 class CTilePt {

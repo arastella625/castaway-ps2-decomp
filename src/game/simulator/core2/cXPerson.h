@@ -94,9 +94,14 @@ public:
 
     long TryGotoRoutingSlot(StackElem *elem, XPrimParam *primParam);
     long TrySetMotiveDelta(StackElem *elem, XPrimParam *primParam);
+    long TryGotoRelative(StackElem *elem, XPrimParam *primParam);
+    long TryIdleForInput(StackElem *elem, XPrimParam *primParam);
+    int ShouldInterrupt();
+    long executeInterruptOnIdlePrimitve(StackElem *elem, s16 *counter, bool allow);
     long GotoRoutingSlot(cXObject *object, const RoutingSlot *slot, int &state);
     int IsModelLoaded();
     int IsIdle();
+    void SetCurrentActionText(const BString2 &text);
     int AddAction(Interaction *action);
 
 

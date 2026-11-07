@@ -706,6 +706,81 @@ The change is the value times 1/1800, so it's per tick.
 
 **On a Sim**, an influence bit means the non-Sim path. Without one, it's the Sim's own list at `+0x200`, 12 bytes an entry: motive, change, limit. Clear all empties it. It holds 16, and a full list quietly drops the new one. All paths without an error are **true**.
 
+## GotoRelative (opcode 0x1B)
+
+**Proven** for the primitive: `cXPerson::TryGotoRelative` (`0x1AD320`) matches the game byte for byte. 157 uses. It's Sim-only. It builds a routing slot around the stack object, then runs the same route as GotoRoutingSlot, so that section's states and results apply.
+
+| Operand | Meaning |
+|---|---|
+| `+2` s8 | Where, below |
+| `+3` s8 | Facing: -2 towards the object, -1 any, 0 to 7 a direction. Anything else is **false** |
+| `+6` bit 1 | Clear means failure trees may run |
+| `+6` bit 2 | Allow a different level |
+
+| `+2` | Slot |
+|---|---|
+| -2 | On top of the object |
+| -1, and anything past 7 | All of 0, 2, 4, 6, from 1 to 2 tiles away |
+| 0, 2, 4, 6 | That direction, 1 tile away |
+| 1, 3, 5, 7 | The two directions either side: 0 and 2, 2 and 4, 4 and 6, 6 and 0 |
+
+The Sim's model not being loaded returns 2. With frame `+8` set, the route already under way carries on.
+
+## IdleForInput (opcode 0x11)
+
+**Proven**: `cXPerson::TryIdleForInput` (`0x1AEEC0`) matches the game byte for byte. 3 uses, Sim-only. Its callee `executeInterruptOnIdlePrimitve` isn't read.
+
+`+0` s16 is the parameter holding a countdown, and past the frame's count is error 8. `+2` s16 non-zero allows the interruption.
+
+1. If `ShouldInterrupt` says so, it returns what `executeInterruptOnIdlePrimitve` does.
+2. Otherwise, with the countdown at 0, it clears bit 6 of variable 8 and returns 1.
+3. Otherwise it takes 1 off the countdown and returns 2.
+
+NotifyStackObject ends the wait by setting the countdown to 0.
+
+## MakeActionString (opcode 0x32)
+
+**Proven in all but two swapped words**: the C++ for `0x2284F8` is parked under `NON_MATCHING`, 162 of 164. 320 uses.
+
+| Operand | Meaning |
+|---|---|
+| `+0` s16 | `STR#` set, in the running tree's private namespace |
+| `+2` bit 0 | The string number comes from `+5` scope and `+6` data, plus 1. Clear: it's `+4` |
+| `+4` u8 | String number, counting from 1 |
+
+It does nothing, and returns 1, unless a menu is being built or this is the main simulation. A string number below 0 or past the set's count is error 0x62. `ParseUIString` fills in the string's tokens. Then:
+
+- **Building a menu:** `ObjTestSim::MakeNewMenuItem` adds the text, with variable 0x32 and the first object the string named, or the stack object if it named none.
+- **Main simulation:** on a Sim, it becomes the current action's text.
+
+It returns 1 in every case but the error, so a port with no menus can return 1.
+
+## Snap (opcode 0x2E)
+
+**Likely**, read from the Wii build, with the opening compared with PS2 (`0x238B88`). Not matched: it's 4,416 bytes with its helper. 115 uses.
+
+It moves me to a place relative to the stack object, which must exist or it's error 0x15.
+
+| Operand | Meaning |
+|---|---|
+| `+0` s16 | The slot's number, or the parameter holding it |
+| `+2` s16 | Where, below. Anything else is error 0x24 |
+| `+4` bit 0 | Origin only: keep the offset between me and my first tile |
+| `+4` bit 1 | Ask a Sim in the way to move |
+| `+4` bit 2 | Use the footprint |
+
+| `+2` | Place |
+|---|---|
+| 0 | Routing slot in the stack object's list, its number in parameter `+0`. A bad parameter is error 8, a bad slot error 0x1B |
+| 1 | The stack object's tile, keeping my direction |
+| 2 | One tile ahead of the stack object, keeping my direction |
+| 3 | Routing slot `+0` |
+| 4 | Global routing slot `+0` |
+
+A slot can give a direction and a facing, added to the stack object's direction, and it can name an object slot to snap to: a missing one is error 0x20.
+
+Afterwards variable 0x34 says how it went: 0 by default, 1 if a Sim was asked to move, 2 if the place was out of bounds. Variable 0x36 is the ID of the object in the way, or 0. It returns whether the placement worked.
+
 ## GotoRoutingSlot (opcode 0x2D)
 
 It's Sim-only: `cXPerson::TryGotoRoutingSlot` (`0x1A8CA8`). 418 uses. **Proven** for the primitive, which matches the game byte for byte, and **likely** for the route states, read from the Wii build.

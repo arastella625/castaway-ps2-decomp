@@ -1,6 +1,7 @@
 #ifndef GAME_SIMULATOR_OBJECTDATA_XOBJLANG_H
 #define GAME_SIMULATOR_OBJECTDATA_XOBJLANG_H
 
+#include "common/EGlobal.h"
 #include "common/ERQuickdata.h"
 #include "common/types.h"
 #include "game/simulator/core/Behavior.h"
@@ -36,9 +37,47 @@ public:
     virtual void Slot10();
     virtual void Slot11();
     virtual void Slot12();
-    virtual void Slot13();
+    virtual int GetStringCount(int language);
     virtual void Slot14();
     virtual const char *GetString(int index, int language);
+    virtual ELocString GetLocString(int index);
+    virtual void Slot17();
+    virtual void Slot18();
+    virtual void Slot19();
+    virtual void Slot20();
+    virtual void Slot21();
+    virtual void Slot22();
+    virtual void Slot23();
+    virtual void Slot24();
+    virtual void Slot25();
+    virtual void Slot26();
+    virtual void Slot27();
+    virtual void Slot28();
+    virtual void Load(u32 namespaceID, s16 id);
+
+    static StringSet *CreateInstance();
+    static void DestroyInstance(StringSet *strings);
+};
+
+// Wii: AUTOPTR, owning a thing made by its class's CreateInstance.
+template <class T>
+class AUTOPTR {
+public:
+    T *mObject;
+
+    AUTOPTR() : mObject(0) {}
+    ~AUTOPTR() { Reset(); }
+    void Reset()
+    {
+        T::DestroyInstance(mObject);
+        mObject = 0;
+    }
+    void CreateInstance()
+    {
+        Reset();
+        mObject = T::CreateInstance();
+    }
+    T *operator->() const { return mObject; }
 };
 
 // Wii: NamespaceSelector. What a namespace ID resolves to.

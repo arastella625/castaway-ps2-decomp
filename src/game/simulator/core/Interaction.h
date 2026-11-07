@@ -14,7 +14,10 @@ public:
     u32 field_0x0;
 
     BString2();
+    BString2(const BString2 &other);
     ~BString2();
+    void assign(const u16 *text);
+    const u16 *c_str() const;
 };
 
 // One queued action. The layout is from the Wii constructor; PS2 offsets are the same, with

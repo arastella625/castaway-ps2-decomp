@@ -121,3 +121,119 @@ long cXPerson::TrySetMotiveDelta(StackElem *elem, XPrimParam *primParam)
     }
     return 1;
 }
+
+// Primitive 0x1b: go to a place around the stack object.
+class GotoRelativeParam {
+public:
+    u16 pad_0x0;
+    s8 mLocation;  // 0x02
+    s8 mDirection; // 0x03
+    u16 pad_0x4;
+    u8 mFlags;     // 0x06  bit 1 no failure trees, 2 allow different levels
+
+    bool GetAllowFailureTrees() const { return ((mFlags >> 1) ^ 1) & 1; }
+    bool GetAllowDifferentAlts() const { return (mFlags >> 2) & 1; }
+};
+
+long cXPerson::TryGotoRelative(StackElem *elem, XPrimParam *primParam)
+{
+    GotoRelativeParam *param = (GotoRelativeParam *)primParam;
+    if (!IsModelLoaded())
+        return 2;
+    cXObject *object = GetObjectFromID(elem->mStackObject);
+    if (elem->mWaiting) {
+        ((SAnimator2 *)mAnimator)->EnableSmoothRoute();
+        return GotoRoutingSlot(object, 0, (int &)elem->mWaiting);
+    }
+    RoutingSlot slot;
+    slot.mMultiplier = 1;
+    slot.SetTileDistances(1.0f, 1.0f, 1.0f);
+    slot.SetAllowFailureTrees(param->GetAllowFailureTrees());
+    slot.SetAllowDifferentAlts(param->GetAllowDifferentAlts());
+    switch (param->mLocation) {
+    case -2:
+        slot.SetIsOnTopOfObject();
+        break;
+    case -1:
+        slot.AllowDirection(0);
+        slot.AllowDirection(2);
+        slot.AllowDirection(4);
+        slot.AllowDirection(6);
+        slot.SetTileDistances(1.0f, 2.0f, 1.0f);
+        break;
+    case 0:
+    case 2:
+    case 4:
+    case 6:
+        slot.AllowDirection(param->mLocation);
+        break;
+    case 1:
+        slot.AllowDirection(0);
+        slot.AllowDirection(2);
+        break;
+    case 3:
+        slot.AllowDirection(2);
+        slot.AllowDirection(4);
+        break;
+    case 5:
+        slot.AllowDirection(4);
+        slot.AllowDirection(6);
+        break;
+    case 7:
+        slot.AllowDirection(6);
+        slot.AllowDirection(0);
+        break;
+    default:
+        slot.AllowDirection(0);
+        slot.AllowDirection(2);
+        slot.AllowDirection(4);
+        slot.AllowDirection(6);
+        slot.SetTileDistances(1.0f, 2.0f, 1.0f);
+        break;
+    }
+    switch (param->mDirection) {
+    case -2:
+        slot.mFacing = -2;
+        break;
+    case -1:
+        slot.mFacing = -3;
+        break;
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+    case 7:
+        slot.SetFacingDirection(param->mDirection);
+        break;
+    default:
+        return 0;
+    }
+    return GotoRoutingSlot(object, &slot, (int &)elem->mWaiting);
+}
+
+// Primitive 0x11: count a parameter down, and watch for an interruption.
+struct IdleForInputParam {
+    s16 mParam; // 0x00
+    s16 mAllow; // 0x02
+};
+
+long cXPerson::TryIdleForInput(StackElem *elem, XPrimParam *primParam)
+{
+    IdleForInputParam *param = (IdleForInputParam *)primParam;
+    int interrupt = ShouldInterrupt();
+    TREE_CHECK(this, param->mParam >= 0 && param->mParam < elem->mNumParams, 8, return -1);
+    s16 *counter = &elem->GetParams()[param->mParam];
+    if (!interrupt) {
+        if (*counter == 0) {
+            s16 flags = mVars[8];
+            mVars.WriteVar(8, flags & ~0x40);
+            return 1;
+        }
+        --*counter;
+        return 2;
+    }
+    return executeInterruptOnIdlePrimitve(elem, counter, param->mAllow != 0);
+}

@@ -97,19 +97,41 @@ public:
 };
 STATIC_ASSERT(ObjectSlot_size, sizeof(ObjectSlot) == 0x24);
 
-// Wii: RoutingSlot, a place to stand, 0x3c bytes.
-class RoutingSlot {
+// A base holding only the vptr, which puts it at offset 0.
+class RoutingSlotVirtuals {
 public:
-    u32 pad_0x0[7];  // 0x00
-    int mFlags;      // 0x1c  bit 14 failure trees may run
-    u32 pad_0x20[7]; // 0x20
+    virtual void Slot0();
+};
 
+// Wii: RoutingSlot, a place to stand, 0x3c bytes.
+class RoutingSlot : public RoutingSlotVirtuals {
+public:
+    u32 pad_0x4[3];   // 0x04
+    int mMultiplier;  // 0x10  SetMultiplier
+    u32 pad_0x14[2];  // 0x14
+    int mFlags;       // 0x1c  low byte the directions, 14 failure trees, 15 different levels
+    u32 pad_0x20[5];  // 0x20
+    int mFacing;      // 0x34  -2 towards the object, -3 any
+    u32 pad_0x38;     // 0x38
+
+    RoutingSlot();
+    virtual ~RoutingSlot() {}
     void SetAllowFailureTrees(bool allow)
     {
         mFlags &= ~0x4000;
         if (allow)
             mFlags |= 0x4000;
     }
+    void SetAllowDifferentAlts(bool allow)
+    {
+        mFlags &= ~0x8000;
+        if (allow)
+            mFlags |= 0x8000;
+    }
+    void SetIsOnTopOfObject() { mFlags &= ~0xff; }
+    void AllowDirection(int direction);
+    void SetTileDistances(f32 min, f32 max, f32 preferred);
+    void SetFacingDirection(int direction);
 };
 STATIC_ASSERT(RoutingSlot_size, sizeof(RoutingSlot) == 0x3c);
 
@@ -206,6 +228,7 @@ public:
     }
     cXObject *GetNext() { return mNext; }
     cXObject *GetInteractionLeader();
+    void ParseUIString(class BString2 &text, StackElem *elem, s16 *object, ObjSelector **selector, bool a);
     bool IsInteractionLeader() const
     {
         bool leader = true;
