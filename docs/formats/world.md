@@ -720,7 +720,7 @@ when it is. No draw code touches it, on Wii or at any of its PS2 sites, and the 
 hold these submodels. So Sims stand on list 3, and standing 12 cm above the visible ground on `lot_24`
 is what the game does. **Likely** nothing else reaches these submodels: a running game hasn't confirmed it.
 
-The vertex bit 0x10 fits: list 3 has it on 32% to 77% of vertices, and the other sheets on 0%, on 9 of
+The vertex bit 0x10 fits: list 3 has it on 32% to 77% of vertices, and the other sheets on 0%, on 8 of
 the 11 lots with one. The exceptions are `lot_28` and `lot_29`, with a drawn sheet at 82%, and `lot_30`,
 whose list 3 has none.
 
