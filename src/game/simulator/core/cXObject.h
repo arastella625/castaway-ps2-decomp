@@ -163,6 +163,7 @@ public:
     void SetIdleStatus(int status) { mModule->SetIdleStatus(mID, status); }
     inline bool AllowIdleOptimization();
     s16 GetType() const { return mDef[9]; }
+    bool IsPerson() const { return GetType() == 2; }
     bool IsMultiTile() const { return mDef[0xa] != 0; }
     bool IsInWorld() const
     {

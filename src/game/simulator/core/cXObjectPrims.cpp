@@ -539,9 +539,6 @@ walked:
     return 0;
 }
 
-#ifdef NON_MATCHING
-// The logic is complete, and 131 of the 189 words line up: the gotos give the game's shared
-// return blocks, but the hoisted locals change registers.
 // Primitive 0x35: questions about the object in an operand.
 struct CheckObjectParam {
     s16 mData;  // 0x00
@@ -553,50 +550,42 @@ long cXObject::TryCheckObject(StackElem *elem, XPrimParam *primParam)
 {
     CheckObjectParam *param = (CheckObjectParam *)primParam;
     s16 id = -1;
-    int value;
-    void *found;
-    cXObject *object;
-    cXPerson *person;
-    InteractorModule::InteractorManager *manager;
-    InteractorModule::DirectInteractor *interactor;
 
     if (InterpValue(param->mScope, param->mData, 0, 0, &id, 0) == -1)
         return -1;
     switch (param->mTest) {
     case 0: {
         // The player's Sim, under direct control.
-        object = GetObjectFromID(id);
+        cXObject *object = GetObjectFromID(id);
         if (!object)
             return 0;
-        person = object->GetPerson();
+        cXPerson *person = object->GetPerson();
         if (!person)
             return 0;
-        manager = InteractorModule::InteractorManager::GetSingleton();
-        if (_globals.mPlayerPerson != person)
-            return 0;
-        interactor = manager->GetPlayerInteractor(0, 0);
-        if (!interactor)
-            return 0;
-        value = interactor->mAutonomous;
-        goto isZero;
+        InteractorModule::InteractorManager *manager = InteractorModule::InteractorManager::GetSingleton();
+        if (_globals.mPlayerPerson == person) {
+            InteractorModule::DirectInteractor *interactor = manager->GetPlayerInteractor(0, 0);
+            if (interactor) {
+                if (!interactor->mAutonomous)
+                    return 1;
+            }
+        }
+        break;
     }
     case 1:
-        found = GetObjectFromID(id);
-        goto isNonZero;
+        if (GetObjectFromID(id))
+            return 1;
+        break;
     case 2: {
-        object = GetObjectFromID(id);
-        if (!object)
-            return 0;
-        value = object->GetType() ^ 2;
-    isZero:
-        if (value)
-            return 0;
-        return 1;
+        cXObject *object = GetObjectFromID(id);
+        if (object) {
+            if (object->IsPerson())
+                return 1;
+        }
+        break;
     }
     case 3:
-        found = GetNeighborhood()->FindNeighborByIDInline(id);
-    isNonZero:
-        if (found)
+        if (GetNeighborhood()->FindNeighborByIDInline(id))
             return 1;
         break;
     case 4: {
@@ -604,39 +593,36 @@ long cXObject::TryCheckObject(StackElem *elem, XPrimParam *primParam)
         s16 count = 0;
         OBJECT_ERROR_CHECK(mTemps[0] > 0 && mTemps[0] < 10, 0x14);
         s16 type = mTemps[0];
-        object = GetObjectFromID(id);
+        cXObject *object = GetObjectFromID(id);
         if (object) {
-            person = object->GetPerson();
-            if (person)
-                count = GetNeighborhood()->FindNeighborByIDInline(person->GetNeighborID())->CountRelationshipsOfType(type, false);
+            cXPerson *person = object->GetPerson();
+            if (person) {
+                s16 neighbor = person->GetNeighborID();
+                count = GetNeighborhood()->FindNeighborByIDInline(neighbor)->CountRelationshipsOfType(type, false);
+            }
         }
         mTemps[0] = count;
         return 1;
     }
     case 5: {
         // The player's Sim with no interactor.
-        object = GetObjectFromID(id);
+        cXObject *object = GetObjectFromID(id);
         if (!object)
             return 0;
-        person = object->GetPerson();
+        cXPerson *person = object->GetPerson();
         if (!person)
             return 0;
-        manager = InteractorModule::InteractorManager::GetSingleton();
-        if (_globals.mPlayerPerson != person)
-            return 0;
-        if (manager->GetPlayerInteractor(0, 0) == 0)
-            return 1;
-        return 0;
+        InteractorModule::InteractorManager *manager = InteractorModule::InteractorManager::GetSingleton();
+        if (_globals.mPlayerPerson == person) {
+            if (!manager->GetPlayerInteractor(0, 0))
+                return 1;
+        }
+        break;
     }
     }
     return 0;
 }
-#endif
 
-#ifdef NON_MATCHING
-// The logic is all here, and 69 of the 121 words line up. Still different: the registers of the
-// selector and the hash lookup's variables are one along from the game's, and the compare in
-// the bit 2 case branches the other way round.
 // Primitive 0x20: is the object in an operand of a given type?
 struct TestObjectTypeParam {
     int mGUID;  // 0x00
@@ -661,34 +647,27 @@ long cXObject::TryTestObjectType(StackElem *elem, XPrimParam *primParam)
     u8 flags = param->mFlags;
     if (flags & 4) {
         int wanted = (mTemps[1] << 16) | (u16)mTemps[2];
-        if (selector->GetGUID() != wanted)
-            return 0;
-        goto matched;
-    }
-    if (flags & 1) {
-        ObjSelector *other = GetObjectFolder()->GetSelectorByGUID(guid);
-        if (other && selector->mSemiNamespaceID == other->mSemiNamespaceID)
+        if (selector->GetGUID() == wanted)
             return 1;
-        return 0;
-    }
-    if (flags & 2) {
+    } else if (flags & 1) {
+        ObjSelector *other = GetObjectFolder()->GetSelectorByGUID(guid);
+        if (other) {
+            if (selector->mSemiNamespaceID == other->mSemiNamespaceID)
+                return 1;
+        }
+    } else if (flags & 2) {
         mTemps[2] = guid;
         mTemps[1] = guid >> 16;
-    matched:
         return 1;
+    } else {
+        if (selector->GetGUID() == guid)
+            return 1;
+        if (selector->GetMasterSelector()->GetGUID() == guid)
+            return 1;
     }
-    if (selector->GetGUID() == guid)
-        return 1;
-    if (selector->GetMasterSelector()->GetGUID() == guid)
-        return 1;
     return 0;
 }
-#endif
 
-#ifdef NON_MATCHING
-// 69 of the 70 words line up. The game has one more: a nop that aligns the label after the
-// behaviour test to eight bytes. A do/while around the lookup or the range test doesn't give it,
-// and one around the whole test changes the registers.
 class AnimRef;
 class PassiveInfluenceSystem {
 public:
@@ -711,8 +690,7 @@ long cXObject::TryAnimate(StackElem *elem, const AnimateNewParam *param)
     } else if (behavior == 8) {
         object = GetObjectModule()->GetObjectFromIDInline(elem->mStackObject);
     } else {
-        TREE_ERROR(5);
-        return -1;
+        OBJECT_ERROR_CHECK(false, 5);
     }
     bool skill = 0;
     long result = resolveSkillForPassiveInfluence(object, elem, param, anim, skill);
@@ -720,7 +698,6 @@ long cXObject::TryAnimate(StackElem *elem, const AnimateNewParam *param)
         GetSimulator()->mPassiveInfluence->SetSkillNameID(object, anim);
     return result;
 }
-#endif
 
 // Primitive 0x3d. Wii keeps this as a function; PS2 inlines it.
 inline void cXObject::TryParticleEffect(ParticleEffectParam effect, long &result)

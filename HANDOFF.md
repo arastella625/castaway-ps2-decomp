@@ -89,7 +89,7 @@ Creating functions at all vtable slot targets (`tools/CreateFunctionsAt.java`) a
 
 Names now total 2,173 of 13,231 functions (16.4%), including 650 in `game/simulator/core` and `core2`. The jump came from `tools/vtable_order.py`, which pairs tables by order and slot counts (940 names). To rebuild, loop `vtable_order.py`, `vtables.py --all-tiers`, `order_fill.py` and `match.py`, feeding each `castaway_ps2_names.csv` back in, until nothing new appears (5 rounds here). Still open: 2,955 of 4,538 vtable slot targets are unnamed, and Wii seems to combine multiple-inheritance tables that PS2 keeps separate, so those don't match on length.
 
-**Status, 2026-11-06, primitives (branch `decomp/primitives`):** 879 functions match, with `TrySetToNext` new: at 4,284 bytes it's the largest function matched so far.
+**Status, 2026-11-06, primitives (branch `decomp/primitives`):** 882 functions match. New: `TrySetToNext`, which at 4,284 bytes is the largest function matched so far, then the parked `TryTestObjectType`, `TryCheckObject` and `cXObject::TryAnimate`. All three fell to the same fixes: the Wii's branch shape (one `return 0` at the end, `if (x) return 1;` above it), and `findItem` written as the Wii has it.
 
 **Status, 2026-11-06, run-time state (branch `decomp/operands`):** 878 functions match, with `TryRandom` new. This round was mostly behaviour, not matching. The main find: `tools/placed.py` read an extra i32 in each `ObjM` object, which misaligned everything after the position, so attributes and variables looked missing. It now decodes every object exactly to its stream mark, and that decode answered most of the round: variable `0xB` is the object's ID, attributes are the three lists, each object has one frame on its main tree. `bhav.md` also has entry points (`ObjFnData`), list order, the load sequence, `SetToNext` skipping, `CreateObject`, and a short list of what a RAM snapshot would settle. Most placed objects reset on load, because the disc's trees are newer than the saved houses: 2,027 of 2,610. `tools/bhav.py` now reruns the two attribute count proofs.
 
@@ -101,10 +101,9 @@ About byte counts: `verify.py` counts functions' code. `rebuild.py` prints a hig
 
 **Status, 2026-11-06, operands (branch `decomp/operands`):** 875 functions match. `cXObject` now derives from `TreeSim`, with its virtuals in Wii order (`verify_vtables.py` checks them against `0x4BC630`) and its fields at offsets taken from the Wii constructor and the PS2 destructor: past `TreeSim`, a PS2 offset is the Wii offset plus 4. `cXObject::InterpWriteValue` and `TryElement` match. `TryElement` matching proves all 73 primitive numbers and the inlined cases.
 
-Five functions are parked under `NON_MATCHING` (`TryAnimate` and `TryCheckObject`, from later rounds, are among them), with the differences listed in a comment above each. All three have complete logic, and what's left is compiler detail, so `docs/formats/bhav.md` uses them as strong evidence:
+Functions are parked under `NON_MATCHING`, with the differences listed in a comment above each. All three have complete logic, and what's left is compiler detail, so `docs/formats/bhav.md` uses them as strong evidence:
 - `cXObject::InterpValue`: 2,872 of 3,060 words line up. Register allocation, stack frame and block order agree. Five things differ (`data == 7` test in scope 0x22, `lw`/`move` in the neighbour lookup, a `v0`/`v1` swap in scopes 0x34 to 0x37, a retest in scope 0x1A, a null test in scope 0x2A).
 - `cXObject::TryExpression`: 575 of 628 words line up, and it's four words too long.
-- `cXObject::TryTestObjectType`: 69 of 121 words line up. The logic is complete; most of the rest is registers one along, and one compare the other way round.
 
 Not started then: `PlaySound`, `Dialog`.
 
@@ -127,6 +126,7 @@ More of what the compiler does with source shape, from this round:
 - If `int` and `s16` accessors give different code, keep the Wii's shape and try the return types. `SetToNextParam` needs `if`/`return` bodies returning `int`, not ternaries returning `s16`.
 - A call that returns something the caller ignores still ties up `$v0`. `ObjectIterator::operator++` returns a reference, and declaring it `void` moves the next load from `$v1` to `$v0`.
 - A local's stack slot follows the order temporaries are made. `object->GetCTilePt() - centreTile` makes the result first, and a named `tile` local makes it second.
+- An error branch that's the last thing before a label wants `OBJECT_ERROR_CHECK(false, code)`, not `TREE_ERROR` and `return`: the do/while gives the aligned label. That was the last word of `cXObject::TryAnimate`.
 - A test the compiler drops because it "knows" the answer can come back if the code before an `else` can't run off its end. See the comment in `TrySetToNext`.
 - When a stream decodes "well enough", make it end exactly on its marks before trusting any field. A reader that stops early can be wrong from an early field on and still look right.
 - Disassembly `nop`s before a label are alignment. They follow from sizes earlier in the function, so leave them until everything before is right.

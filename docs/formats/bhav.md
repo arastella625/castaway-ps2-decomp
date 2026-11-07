@@ -455,7 +455,7 @@ The stack object is the frame's object ID. A call passes it on to the called tre
 
 The full list is `*Param` in the Wii symbols. `tools/bhav.py` doesn't test any of this table.
 
-`cXObject::TryTestObjectType`'s C++ is in `cXObjectPrims.cpp` under `NON_MATCHING`.
+`cXObject::TryTestObjectType` matches the game, so its row is proven.
 
 ## SetToNext (opcode 0x1F)
 
@@ -624,7 +624,7 @@ The generator is at `0x262AF0`: `state = state * 0x41C64E6D + 0x3039`, returning
 
 ## CheckObject (opcode 0x35)
 
-**Likely**, from both builds; the C++ is under `NON_MATCHING`, 131 of 189 words.
+**Proven**: `TryCheckObject` matches the game byte for byte.
 
 `+0` data and `+2` scope give an object ID, and `+4` s16 is the test. Reading the value can fail with the usual errors. Any other test is false.
 

@@ -1114,6 +1114,7 @@
 
 # game/simulator/core/cXObjectPrims.cpp: SetToNext
 0x0050A6A0 gFixedWorld
+0x0050A680 gSimulator
 0x0050A69C gObjectFolder
 0x001E4330 OutOfGrid__C11cFixedWorldRC7CTilePt
 0x00254C50 __14ObjectIteratorRC7CTilePtQ214ObjectIterator11IterateType
