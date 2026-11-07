@@ -639,7 +639,7 @@ The generator is at `0x262AF0`: `state = state * 0x41C64E6D + 0x3039`, returning
 
 ## GotoRoutingSlot (opcode 0x2D)
 
-**Likely**, read from the Wii build, with the operands and error codes compared with the PS2 code (`0x1A8CA8`). It's Sim-only: `cXPerson::TryGotoRoutingSlot`. 418 uses.
+It's Sim-only: `cXPerson::TryGotoRoutingSlot` (`0x1A8CA8`). 418 uses. **Proven** for the primitive, which matches the game byte for byte, and **likely** for the route states, read from the Wii build.
 
 | Operand | Meaning |
 |---|---|
@@ -689,7 +689,7 @@ Person data 0x1C ends up holding the route's result: 0 worked, 1 failed, 4 inter
 
 ## PushAction (opcode 0x0D)
 
-**Likely**, read from the Wii build, with the operands and error codes matching the PS2 code (`0x228788`). 334 uses.
+**Proven** for the primitive: `TryPushAction` (`0x228788`) matches the game byte for byte. `AddAction` is **likely**, from the Wii build. 334 uses.
 
 It puts an interaction on a Sim's queue. The Sim is the stack object, and the interaction belongs to another object.
 
@@ -771,7 +771,7 @@ Then, with the list and the key:
 
 ## CallNamedTree (opcode 0x1C)
 
-**Likely**, read from the Wii build, and the PS2 function (`0x226948`) has the same opening. 356 uses.
+**Proven** in all but name: the C++ for `0x226948` has 410 of its 411 words, and the other is a branch that behaves the same. It's parked under `NON_MATCHING`. 356 uses.
 
 It finds a tree by name and runs it on the stack object.
 

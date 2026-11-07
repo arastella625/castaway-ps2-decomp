@@ -1129,3 +1129,11 @@
 # game/simulator/core/cXObjectPrims.cpp: CallNamedTree
 0x002010F8 GetCacheItem__17NamespaceSelectorsPvUii
 0x0049242C _7TreeSim$sBreakOnCallTreeStringFailure
+
+# game/simulator/core/cXObjectPrims.cpp: PushAction
+0x002142E8 GetInteractionLeader__8cXObject
+0x001DA440 GetTreeTab__11ObjSelector
+0x001F8FD8 __11InteractionP8cXPersonP8cXObjectii
+0x001DCAA8 IsIdle__8cXPerson
+0x001AE2E0 AddAction__8cXPersonP11Interaction
+0x00261698 _$_8BString2

@@ -42,6 +42,7 @@ public:
     int GetGUID() const;
     bool compare(int guid) const { return guid == GetGUID(); }
     ObjSelector *GetMasterSelector();
+    class TreeTab *GetTreeTab();
     int CountTypeAttributes();
     s16 *GetTypeAttributes();
 };

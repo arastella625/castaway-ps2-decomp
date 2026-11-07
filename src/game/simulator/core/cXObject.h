@@ -188,6 +188,7 @@ public:
         return true;
     }
     cXObject *GetNext() { return mNext; }
+    cXObject *GetInteractionLeader();
     s16 GetID() const { return mID; }
     u16 GetRoom() const { return mVars[0x1d]; }
     inline CTilePt GetCTilePt() const;

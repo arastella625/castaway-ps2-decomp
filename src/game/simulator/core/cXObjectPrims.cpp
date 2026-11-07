@@ -192,8 +192,7 @@ long cXObject::TryCallNamedTree(StackElem *elem, XPrimParam *primParam)
 
     cXObject *object = GetObjectFromID(elem->mStackObject);
     if (!object) {
-        TREE_ERROR_LOOP(0x15);
-        return -1;
+        OBJECT_ERROR_CHECK(false, 0x15);
     }
     cXObject *runner;
     cXObject *target;
@@ -238,6 +237,129 @@ long cXObject::TryCallNamedTree(StackElem *elem, XPrimParam *primParam)
 }
 
 #endif
+
+// Wii: the object's TTAB. Only the slot PushAction calls.
+class TreeTab {
+public:
+    virtual void Slot0();
+    virtual void Slot1();
+    virtual void Slot2();
+    virtual void Slot3();
+    virtual void Slot4();
+    virtual void Slot5();
+    virtual void Slot6();
+    virtual void Slot7();
+    virtual void Slot8();
+    virtual void Slot9();
+    virtual void Slot10();
+    virtual void Slot11();
+    virtual void Slot12();
+    virtual void Slot13();
+    virtual void Slot14();
+    virtual void Slot15();
+    virtual void *GetEntry(int index);
+};
+
+// Primitive 0xd: put an interaction on a Sim's queue.
+class PushActionParam {
+public:
+    u8 mInteraction; // 0x00
+    u8 mObject;      // 0x01
+    u8 mPriority;    // 0x02
+    u8 mFlags;       // 0x03
+    u8 mIconLocal;   // 0x04
+
+    bool GetUseSpecialIcon() const { return mFlags & 1; }
+    bool GetUseLocal() const { return (mFlags >> 1) & 1; }
+    bool GetContinue() const { return (mFlags >> 2) & 1; }
+    bool GetCarryNameOver() const { return (mFlags >> 3) & 1; }
+    bool GetPushToHead() const { return (mFlags >> 4) & 1; }
+    bool GetRunAsSub() const { return (mFlags >> 5) & 1; }
+    bool GetUseTemp() const { return (mFlags >> 6) & 1; }
+};
+
+long cXObject::TryPushAction(StackElem *elem, XPrimParam *primParam)
+{
+    PushActionParam *param = (PushActionParam *)primParam;
+    int index = param->mObject;
+    s16 id;
+    if (param->GetUseLocal()) {
+        OBJECT_ERROR_CHECK(index >= 0 && index <= elem->mNumLocals, 0x34);
+        id = elem->GetLocals()[index];
+    } else {
+        OBJECT_ERROR_CHECK(index >= 0 && index <= elem->mNumParams, 8);
+        id = elem->GetParams()[index];
+    }
+    cXObject *object = GetObjectFromID(id);
+    if (!object) {
+        OBJECT_ERROR_CHECK(false, 0x17);
+    }
+    if (object->IsMultiTile())
+        object = object->GetInteractionLeader();
+
+    int interaction;
+    if (param->GetUseTemp()) {
+        OBJECT_ERROR_CHECK(param->mInteraction < 8, 2);
+        interaction = mTemps[param->mInteraction];
+    } else {
+        interaction = param->mInteraction;
+    }
+
+    TreeTab *tab = object->mSelector->GetTreeTab();
+    if (tab) {
+        if (!tab->GetEntry(interaction)) {
+            OBJECT_ERROR_CHECK(false, 0x16);
+        }
+    } else {
+        OBJECT_ERROR_CHECK(false, 0x1f);
+    }
+
+    cXObject *stack = GetObjectFromID(elem->mStackObject);
+    if (stack) {
+        cXPerson *person = stack->GetPerson();
+        if (!(stack->GetType() == 2 && person)) {
+            OBJECT_ERROR_CHECK(false, 0x1c);
+        }
+        int priority = 1;
+        switch (param->mPriority) {
+        case 0:
+            if (GetType() == 2) {
+                cXPerson *me = GetPerson();
+                if (me)
+                    priority = me->mPersonData[0xe];
+            }
+            break;
+        case 1:
+            priority = 100;
+            break;
+        case 2:
+            priority = 2;
+            break;
+        case 3:
+            priority = 0x32;
+            break;
+        default:
+            OBJECT_ERROR_CHECK(false, 0x2e);
+        }
+        Interaction action(person, object, interaction, priority);
+        action.SetCarryNameOver(param->GetCarryNameOver());
+        if (param->GetUseSpecialIcon()) {
+            int local = param->mIconLocal;
+            OBJECT_ERROR_CHECK(local >= 0 && local < elem->mNumLocals, 0x34);
+            action.SetIconObject(GetObjectFromID(elem->GetLocals()[local]));
+        }
+        action.SetContinuation(param->GetContinue());
+        action.SetPushToHead(param->GetPushToHead());
+        action.SetRunAsSub(param->GetRunAsSub());
+        if (action.GetContinuation()) {
+            OBJECT_ERROR_CHECK(!person->IsIdle(), 0x4b);
+        }
+        if (person->AddAction(&action))
+            return 1;
+        return 0;
+    }
+    OBJECT_ERROR_CHECK(false, 0x15);
+}
 
 // A whole tile: x, y, level. Built from numbers, it turns anything that doesn't fit in a byte to 0.
 class CTilePt {

@@ -80,6 +80,8 @@ public:
     long TryGotoRoutingSlot(StackElem *elem, XPrimParam *primParam);
     long GotoRoutingSlot(cXObject *object, const RoutingSlot *slot, int &state);
     int IsModelLoaded();
+    int IsIdle();
+    int AddAction(Interaction *action);
 
 
     u32 ReconType();

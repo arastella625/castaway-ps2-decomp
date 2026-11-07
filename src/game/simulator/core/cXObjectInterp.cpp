@@ -993,12 +993,9 @@ inline void OnEdithSetFlagField1(int mask, bool wasSet, bool isSet)
 }
 
 #ifdef NON_MATCHING
-// 575 of the 628 words line up, and this is four words too long; much of the rest is alignment
-// that follows from these. What differs:
-// - Where the left operand might be a motive, the game tests the float pointer in a0 and takes
-//   a branch-likely with its delay slot from the target. OBJECT_CHECK gets a0 but not the
-//   branch-likely; a plain if gets the branch-likely but puts the pointer in v0.
-// - The order of result = 1 and wrote = true among the arguments of the write calls.
+// 618 of the 632 words line up, and the size is right. What's left is alignment nops: after each
+// failed float test the game has no nop where this has one, and it has one at the end of the
+// if/else instead. The checks are nested in an if, which gives the branch-likely and registers.
 // Primitive 2. Reads two operands and compares or changes the left one. Motives are floats
 // underneath, so where the left operand has no s16 to write through it uses the float.
 long cXObject::TryExpression(ExpressionParam *param)
@@ -1037,8 +1034,7 @@ long cXObject::TryExpression(ExpressionParam *param)
             leftValue = *leftRef;
         } else {
             if (!leftFloat) {
-                TREE_ERROR(0x13);
-                return -1;
+                OBJECT_CHECK(false, 0x13);
             }
             *leftFloat -= 1.0f;
             leftValue = *leftRef;
@@ -1059,15 +1055,15 @@ long cXObject::TryExpression(ExpressionParam *param)
         break;
     case 0x0d:
         OBJECT_CHECK(leftRef, 0x13);
+        InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef & rightValue);
         result = 1;
         wrote = true;
-        InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef & rightValue);
         break;
     case 0x12:
         OBJECT_CHECK(leftRef, 0x13);
+        InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef | rightValue);
         result = 1;
         wrote = true;
-        InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef | rightValue);
         break;
     case 0x0c:
         // left %= right, with both made positive first.
@@ -1077,9 +1073,9 @@ long cXObject::TryExpression(ExpressionParam *param)
             InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, -*leftRef);
         if (rightValue < 0)
             rightValue = -rightValue;
+        InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef % rightValue);
         result = 1;
         wrote = true;
-        InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef % rightValue);
         break;
     case 0x0b:
         // ++left, then left < right.
@@ -1088,8 +1084,7 @@ long cXObject::TryExpression(ExpressionParam *param)
             leftValue = *leftRef;
         } else {
             if (!leftFloat) {
-                TREE_ERROR(0x13);
-                return -1;
+                OBJECT_CHECK(false, 0x13);
             }
             *leftFloat += 1.0f;
             leftValue = *leftRef;
@@ -1113,8 +1108,7 @@ long cXObject::TryExpression(ExpressionParam *param)
             InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, rightValue);
         } else {
             if (!leftFloat) {
-                TREE_ERROR(0x13);
-                return -1;
+                OBJECT_CHECK(false, 0x13);
             }
             *leftFloat = rightValue;
         }
@@ -1126,8 +1120,7 @@ long cXObject::TryExpression(ExpressionParam *param)
             InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef + rightValue);
         } else {
             if (!leftFloat) {
-                TREE_ERROR(0x13);
-                return -1;
+                OBJECT_CHECK(false, 0x13);
             }
             *leftFloat += rightValue;
         }
@@ -1139,8 +1132,7 @@ long cXObject::TryExpression(ExpressionParam *param)
             InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef - rightValue);
         } else {
             if (!leftFloat) {
-                TREE_ERROR(0x13);
-                return -1;
+                OBJECT_CHECK(false, 0x13);
             }
             *leftFloat -= rightValue;
         }
@@ -1152,8 +1144,7 @@ long cXObject::TryExpression(ExpressionParam *param)
             InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef * rightValue);
         } else {
             if (!leftFloat) {
-                TREE_ERROR(0x13);
-                return -1;
+                OBJECT_CHECK(false, 0x13);
             }
             *leftFloat *= rightValue;
         }
@@ -1166,8 +1157,7 @@ long cXObject::TryExpression(ExpressionParam *param)
             InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef / rightValue);
         } else {
             if (!leftFloat) {
-                TREE_ERROR(0x13);
-                return -1;
+                OBJECT_CHECK(false, 0x13);
             }
             *leftFloat /= rightValue;
         }
@@ -1177,7 +1167,9 @@ long cXObject::TryExpression(ExpressionParam *param)
     case 0x09: {
         // Set bit right of left. Bits count from 1.
         OBJECT_CHECK(rightValue < 0x11, 13);
-        OBJECT_CHECK(leftRef, 0x13);
+        if (!leftRef) {
+            OBJECT_CHECK(false, 0x13);
+        }
         wrote = true;
         s16 before = *leftRef;
         int mask = 1 << (rightValue - 1);
@@ -1191,7 +1183,9 @@ long cXObject::TryExpression(ExpressionParam *param)
     case 0x0a: {
         // Clear bit right of left. This one doesn't count as a write below.
         OBJECT_CHECK(rightValue < 0x11, 13);
-        OBJECT_CHECK(leftRef, 0x13);
+        if (!leftRef) {
+            OBJECT_CHECK(false, 0x13);
+        }
         s16 before = *leftRef;
         int mask = 1 << (rightValue - 1);
         InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef & ~mask);

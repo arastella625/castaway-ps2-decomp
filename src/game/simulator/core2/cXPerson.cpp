@@ -27,9 +27,6 @@ u32 cXPerson::ReconType()
     return 0x50455253;
 }
 
-#ifdef NON_MATCHING
-// 150 of the 151 words line up. The game has one more: a nop aligning the error block that the
-// last two checks share. The two checks merge here too, but the label isn't aligned.
 // The route's state lives in the frame, so a node comes back here each tick until it ends.
 long cXPerson::TryGotoRoutingSlot(StackElem *elem, XPrimParam *primParam)
 {
@@ -45,16 +42,24 @@ long cXPerson::TryGotoRoutingSlot(StackElem *elem, XPrimParam *primParam)
         if (param->mType == 0) {
             TREE_CHECK(this, param->mData >= 0 || param->mData < elem->mNumParams, 8, return -1);
             index = elem->GetParams()[param->mData];
-            TREE_CHECK(this, index >= 0 && index < object->GetNumRoutingSlots(), 0x25, return -1);
+            if (!(index >= 0 && index < object->GetNumRoutingSlots())) {
+                TREE_CHECK(this, false, 0x25, return -1);
+            }
             slot = object->GetRoutingSlot(index);
         } else if (param->mType == 1) {
             index = param->mData;
-            TREE_CHECK(this, index >= 0 && index < object->GetNumRoutingSlots(), 0x25, return -1);
+            if (!(index >= 0 && index < object->GetNumRoutingSlots())) {
+                TREE_CHECK(this, false, 0x25, return -1);
+            }
             slot = object->GetRoutingSlot(index);
         } else {
-            TREE_CHECK(this, param->mType == 2, 0x25, return -1);
+            if (param->mType != 2) {
+                TREE_CHECK(this, false, 0x25, return -1);
+            }
             index = param->mData;
-            TREE_CHECK(this, index >= 0 && index < mModule->GetNumGlobalRoutingSlots(), 0x25, return -1);
+            if (!(index >= 0 && index < mModule->GetNumGlobalRoutingSlots())) {
+                TREE_CHECK(this, false, 0x25, return -1);
+            }
             slot = mModule->GetGlobalRoutingSlot(index);
         }
         slot->SetAllowFailureTrees(param->GetAllowFailureTrees());
@@ -62,4 +67,3 @@ long cXPerson::TryGotoRoutingSlot(StackElem *elem, XPrimParam *primParam)
     }
     return GotoRoutingSlot(object, 0, (int &)elem->mWaiting);
 }
-#endif
