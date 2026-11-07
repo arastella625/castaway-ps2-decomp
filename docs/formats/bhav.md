@@ -890,6 +890,43 @@ PS2 does the same thing as Wii, with these inlined or different:
 
 Afterwards variable 0x34 says how it went: 0 by default, 1 if a Sim was asked to move, 2 if the place was out of bounds. Variable 0x36 is the ID of the object in the way, or 0. It returns whether the placement worked.
 
+## Update (opcode 0x07)
+
+**Proven: matched byte for byte** (`0x230CC0`). `+0` picks the object: 0 is me, 1 the stack object (missing is error 0x15), and anything else is error 3. It returns true.
+
+| `+2` | What it does |
+|---|---|
+| 0 | Nothing |
+| 1 | `GlobalDispatch(0x8D, object ID)`, to every `Commander` |
+| 2 | If the object's room isn't 0xFFFB: `RoomManager::RoomScoreChanged` for that room |
+| 3 | Refreshes the object's sim instance, if it has one |
+| 4 | `House::ComputeAndStoreLotData`, if there's a house |
+| Others | Error 3 |
+
+## CompleteGoal (opcode 0x38)
+
+**Proven for the logic, read from PS2 (`0x232018`) and checked on Wii. Not matched:** 2 words of 216 differ, and it's parked under `NON_MATCHING`.
+
+If `+6` has bit 0 or 1 set it's the old primitive, which does nothing and returns true. `+7` is the type: 0, 1 and 2 are goals and 4 is an unlock, and anything else is error 0x6E. The goal's number comes from scope `+5` and data `+2`. `+0` is the operation, and status comes from `GoalAndUnlockData`: -1 returns false.
+
+| Operation | Type | Needs status | Does |
+|---|---|---|---|
+| 1 | 0, 1 | 0 | Sets status 1 |
+| 2 | 2 | 1 or less | Sets status 2 |
+| 2 | 4 | | Unlocks |
+| 3 | 2 | 1 or 2 | Sets status 3 |
+| 3 | 0, 1 | 1 | Sets status 3 |
+| 3 | Others | | Unlocks |
+
+Then bit 2 of `+6` puts the status in temp 0. The result is true if any of these holds:
+
+| `+6` bit | True when |
+|---|---|
+| 3 | Status 0 (locked) |
+| 4 | Status 1, or 0 for type 4 (open) |
+| 5 | Type 2 with status 2 (satisfied) |
+| 6 | Status 3, or 1 for type 4 (completed) |
+
 ## AddAction
 
 **Proven: matched byte for byte** (`cXPerson::AddAction`, `0x1AE2E0`). The queue is a ring of 12 actions at Sim `+0x21C`, each 0x40 bytes, with head `+0x300` and tail `+0x304`. Sim `+0x538` says the first entry is running.

@@ -44,6 +44,13 @@ public:
     virtual void Slot2();
     virtual void Slot3();
     virtual int Get(int kind, int index);
+    virtual void Slot5();
+    virtual void Slot6();
+    virtual void Slot7();
+    virtual void Slot8();
+    virtual void Unlock(int kind, int index);
+    virtual s16 GetStatus(int kind, int index);
+    virtual void SetStatus(int kind, int index, int status);
 };
 
 // Wii: Neighborhood. Its vptr comes after the fields, at 0x21ec.
@@ -61,6 +68,7 @@ public:
     virtual s16 GetStackObjectValue(int id, s16 data, const s16 **ref);
 
 
+    GoalAndUnlockData *GetGoalAndUnlockData() { return &mGoals; }
     Neighbor *FindNeighborByID(int id);
     int GetNumFamilies();
     Family *GetFamilyByIndex(int index);
@@ -100,6 +108,12 @@ class Globs {
 public:
     enum TransitionType { };
     static Neighborhood *pNeighborhood;
+    static class House *pHouse;
+};
+
+class House {
+public:
+    void ComputeAndStoreLotData();
 };
 
 inline Neighborhood *GetNeighborhood()

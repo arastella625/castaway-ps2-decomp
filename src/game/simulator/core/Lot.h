@@ -22,6 +22,7 @@ public:
     static RoomManager *sRoomMgr;
 
     Room *GetRoom(u16 id);
+    void RoomScoreChanged(int id);
 
     f32 GetRoomEnvironmentScore(u16 id)
     {

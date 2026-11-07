@@ -1185,3 +1185,10 @@
 0x00492344 sImmediateAction
 0x00492348 sImmediatePerson
 0x0024D270 __as__11InteractionRC11Interaction
+
+# game/simulator/core/cXObjectPrims.cpp: Update
+0x004924A8 _9Commander$sList
+0x0050A6B4 _5Globs$pHouse
+0x004923D4 _11RoomManager$sRoomMgr
+0x001DFCA8 RoomScoreChanged__11RoomManageri
+0x001F5058 ComputeAndStoreLotData__5House

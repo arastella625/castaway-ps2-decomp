@@ -1623,3 +1623,190 @@ long cXObject::TryElement(StackElem *elem, s16 opcode, XPrimParam *param)
 finished:
     return result;
 }
+
+// Wii: Commander, a list of things that hear about global events.
+class Commander {
+public:
+    Commander *mNext; // 0x00
+    u32 field_0x4;    // 0x04
+    u32 field_0x8;    // 0x08
+
+    virtual void Slot0();
+    virtual int Dispatch(s16 message, int value);
+
+    static Commander *sList;
+};
+
+inline int GlobalDispatch(s16 message, int value)
+{
+    int handled = 0;
+    Commander *commander = Commander::sList;
+    while (commander) {
+        Commander *next = commander->mNext;
+        if (commander->Dispatch(message, value))
+            handled = 1;
+        commander = next;
+    }
+    return handled;
+}
+
+// The part of an ISimInstance at 0x380 that redraws it.
+class SimInstancePart {
+public:
+    virtual void Slot0();
+    virtual void Refresh();
+};
+
+class UpdateParam {
+public:
+    s16 mWho;  // 0x00  0 me, 1 the stack object
+    s16 mWhat; // 0x02  below
+};
+
+long cXObject::TryUpdate(StackElem *elem, XPrimParam *primParam)
+{
+    UpdateParam *param = (UpdateParam *)primParam;
+    cXObject *object;
+    switch (param->mWho) {
+    case 0:
+        object = this;
+        break;
+    case 1:
+        object = GetObjectFromID(elem->mStackObject);
+        if (!object) {
+            OBJECT_ERROR_CHECK(false, 0x15);
+        }
+        break;
+    default:
+        OBJECT_ERROR_CHECK(false, 3);
+    }
+    OBJECT_ERROR_CHECK(object, 3);
+
+    switch (param->mWhat) {
+    case 0:
+        break;
+    case 1:
+        GlobalDispatch(0x8D, object->mID);
+        break;
+    case 2:
+        if (object->GetRoom() != 0xFFFB) {
+            RoomManager *rooms = RoomManager::sRoomMgr;
+            rooms->RoomScoreChanged(object->GetRoom());
+        }
+        break;
+    case 3: {
+        IBaseSimInstance *instance = object->GetISimInstance();
+        if (instance)
+            ((SimInstancePart *)((char *)instance + 0x380))->Refresh();
+        break;
+    }
+    case 4:
+        if (Globs::pHouse)
+            Globs::pHouse->ComputeAndStoreLotData();
+        break;
+    default:
+        OBJECT_ERROR_CHECK(false, 3);
+    }
+    return 1;
+}
+
+// Not matched: 2 words of 216 differ. The game ends the "completed" arms with result = 1 and a
+// shared movn, and every form tried here gives sltiu, a store-flag instead.
+#ifdef NON_MATCHING
+class CompleteGoalParam {
+public:
+    s16 mOperation; // 0x00  1 open, 2 satisfy, 3 complete
+    s16 mData;      // 0x02
+    u8 pad_0x4;     // 0x04
+    u8 mOwner;      // 0x05
+    u8 mFlags;      // 0x06  bits 0 and 1 are the old primitive's
+    u8 mType;       // 0x07  0, 1 and 2 goals, 4 unlocks
+
+    bool IsOldPrim() const { return mFlags & 3; }
+    bool GetPutStatusInTemp0() const { return (mFlags >> 2) & 1; }
+    bool GetReturnTrueIfLocked() const { return (mFlags >> 3) & 1; }
+    bool GetReturnTrueIfOpen() const { return (mFlags >> 4) & 1; }
+    bool GetReturnTrueIfSatisfied() const { return (mFlags >> 5) & 1; }
+    bool GetReturnTrueIfCompleted() const { return (mFlags >> 6) & 1; }
+};
+
+long cXObject::TryCompleteGoal(StackElem *elem, CompleteGoalParam &param)
+{
+    if (param.IsOldPrim())
+        return 1;
+    GoalAndUnlockData *goals = GetNeighborhood()->GetGoalAndUnlockData();
+    u8 type = param.mType;
+    OBJECT_ERROR_CHECK(type == 4 || type == 0 || type == 1 || type == 2, 0x6E);
+    if (!goals)
+        return 0;
+
+    s16 value;
+    if (InterpValue(param.mOwner, param.mData, 0, 0, &value, 0) == -1)
+        return -1;
+    s16 operation = param.mOperation;
+    s16 status = goals->GetStatus(type, value);
+    if (status == -1)
+        return 0;
+
+    if (operation == 1) {
+        if (type == 2) {
+        } else if (type <= 1 && status == 0) {
+            goals->SetStatus(type, value, 1);
+            status = goals->GetStatus(type, value);
+        }
+    } else if (operation == 2) {
+        if (status <= 1 && type == 2) {
+            goals->SetStatus(type, value, 2);
+            status = goals->GetStatus(type, value);
+        } else if (type == 4) {
+            goals->Unlock(type, value);
+            status = goals->GetStatus(type, value);
+        }
+    } else if (operation == 3) {
+        if (type == 2) {
+            if ((u16)(status - 1) <= 1) {
+                goals->SetStatus(type, value, 3);
+                status = goals->GetStatus(type, value);
+            }
+        } else if (type <= 1) {
+            if (status == 1) {
+                goals->SetStatus(type, value, 3);
+                status = goals->GetStatus(type, value);
+            }
+        } else {
+            goals->Unlock(type, value);
+            status = goals->GetStatus(type, value);
+        }
+    }
+
+    int result = 0;
+    if (param.GetPutStatusInTemp0())
+        mTemps[0] = status;
+    if (param.GetReturnTrueIfCompleted()) {
+        if (type == 4) {
+            if (status == 1)
+                result = 1;
+        } else if (type == 2) {
+            if (status == 3)
+                result = 1;
+        } else {
+            if (status == 3)
+                result = 1;
+        }
+    }
+    if (param.GetReturnTrueIfLocked() && status == 0)
+        result = 1;
+    if (param.GetReturnTrueIfOpen()) {
+        if (type == 4) {
+            if (status == 0)
+                result = 1;
+        } else {
+            if (status == 1)
+                result = 1;
+        }
+    }
+    if (param.GetReturnTrueIfSatisfied() && type == 2 && status == 2)
+        result = 1;
+    return result;
+}
+#endif
