@@ -42,6 +42,11 @@ STRING_SET_SIZE = 12
 ATTRIBUTE_SCOPE, SEMI_ATTRIBUTE_SCOPE = 0, 2
 DEF_ATTRIBUTES, DEF_ATTRIBUTES_CONTROL = 0x74, 0x72
 DEF_GUID = 0x1C
+DEF_SLOT_SET = 0x28  # the STR#-like ID of the object's slot set, 0 for none
+RESFILE_SLOTS = 0x28  # 8-byte entries: pointer to a VECTOR of slots, set ID
+SLOT_SET_SIZE = 8
+SLOT_SIZE = 0x48
+SEMI_SLOT_SETS = 1000  # set IDs from here live in the semi-global file
 DEF_LEAD = 0x10   # the control for +0x16: it marks the interaction leader, not the master
 DEF_GROUP = 0x14  # the multi-tile object this is part of, 0 for a single tile
 DEF_TILE = 0x16   # the part's place, y << 8 | x, and -1 on the master
@@ -292,6 +297,67 @@ def check_masters(disc):
     return set(counts) == {1}, set(control) != {1}
 
 
+def read_slots(disc):
+    """{ResFile row name: {slot set ID: [slot dictionaries]}}, as QuickDataSlotDescList reads them."""
+    quickdata = gamedata.load_quickdata(disc)
+    data, table = gamedata.find_table(quickdata, 'ResFile')
+    half = lambda position: struct.unpack_from('<h', data.image, position)[0]
+    word = lambda position: struct.unpack_from('<i', data.image, position)[0]
+    real = lambda position: struct.unpack_from('<f', data.image, position)[0]
+    files = {}
+    for row in range(table.count):
+        start, count = data.vector(table.rows + row * table.stride + RESFILE_SLOTS)
+        sets = files.setdefault(data.row_name(table, row), {})
+        for entry in range(start, start + count * SLOT_SET_SIZE, SLOT_SET_SIZE):
+            first, slots = data.vector(entry)
+            sets[word(entry + 4)] = [{
+                'type': half(p), 'offset': (real(p + 4), real(p + 8), real(p + 12)),
+                'multipliers': (word(p + 0x1C), word(p + 0x20), word(p + 0x24)),
+                'flags': word(p + 0x28), 'snap_target': word(p + 0x2C),
+                'min': word(p + 0x30), 'max': word(p + 0x34), 'optimal': word(p + 0x38),
+                'gradient': real(p + 0x3C), 'facing': word(p + 0x40), 'resolution': word(p + 0x44),
+            } for p in range(first, first + slots * SLOT_SIZE, SLOT_SIZE)]
+    return files
+
+
+def check_slots(disc):
+    """Definitions' +0x28 should name slot sets, in their own file or, from 1000, the semi-global one.
+
+    59 definitions name a set that isn't there, mostly test objects: SlotLoader then loads nothing.
+    The control, +0x2A, finds none at all.
+    """
+    files = read_slots(disc)
+    semis = {name: semi for name, (semi, _) in read_resfiles(disc).items()}
+    quickdata = gamedata.load_quickdata(disc)
+    data, table = gamedata.find_table(quickdata, 'ResFile')
+
+    def found(offset):
+        hits = misses = 0
+        for row in range(table.count):
+            name = data.row_name(table, row)
+            start, count = data.vector(table.rows + row * table.stride)
+            for position in (data.word(start + 4 * i) for i in range(count)):
+                wanted = struct.unpack_from('<h', data.image, position + offset)[0]
+                if wanted:
+                    owner = semis.get(name) if wanted >= SEMI_SLOT_SETS else name
+                    if wanted in files.get(owner, {}):
+                        hits += 1
+                    else:
+                        misses += 1
+        return hits, misses
+
+    types = {}
+    for sets in files.values():
+        for slots in sets.values():
+            for slot in slots:
+                types[slot['type']] = types.get(slot['type'], 0) + 1
+    hits, misses = found(DEF_SLOT_SET)
+    control = found(DEF_SLOT_SET + 2)
+    print('slot types: %s; definitions with a set found: %d, not found: %d (control +0x2A: %d, %d)'
+          % (sorted(types.items()), hits, misses, control[0], control[1]))
+    return hits > misses * 10 and set(types) <= {0, 1, 3}, control[0] == 0
+
+
 def main(argv):
     if len(argv) != 2:
         print(__doc__)
@@ -341,9 +407,10 @@ def main(argv):
     links_hold, link_control_fails = check_links(disc, sets)
     counts_hold, count_control_fails = check_counts(disc, sets)
     masters_hold, master_control_fails = check_masters(disc)
+    slots_hold, slot_control_fails = check_slots(disc)
 
-    rules_hold = bad_targets == 0 and bad_expressions == 0 and None not in classes and links_hold and counts_hold and masters_hold
-    controls_fail = bad_control > 0 and bad_expr_control > 0 and link_control_fails and count_control_fails and master_control_fails
+    rules_hold = bad_targets == 0 and bad_expressions == 0 and None not in classes and links_hold and counts_hold and masters_hold and slots_hold
+    controls_fail = bad_control > 0 and bad_expr_control > 0 and link_control_fails and count_control_fails and master_control_fails and slot_control_fails
     print('rules hold' if rules_hold else 'a rule failed', '/',
           'controls fail as they should' if controls_fail else 'a control passed: the test proves nothing')
     return 0 if rules_hold and controls_fail else 1

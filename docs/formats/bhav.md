@@ -706,6 +706,105 @@ The change is the value times 1/1800, so it's per tick.
 
 **On a Sim**, an influence bit means the non-Sim path. Without one, it's the Sim's own list at `+0x200`, 12 bytes an entry: motive, change, limit. Clear all empties it. It holds 16, and a full list quietly drops the new one. All paths without an error are **true**.
 
+## Routing
+
+What's here comes from the PS2 code where it gives an address, and the names come from the Wii build. **Proven** means read on PS2 or tested on the disc. **Likely** means read on Wii only, with PS2's function found by its calls but not compared line by line. Nothing below `TryGotoRoutingSlot` and `TryGotoRelative` is matched.
+
+| Function | PS2 | Wii |
+|---|---|---|
+| `cXPerson::GotoRoutingSlot` | `0x1AA008` | `800C57xx` |
+| `Routing_Initial` | `0x1AA6D0` | `800C5D08` |
+| `Routing_WaitingForPortal` | `0x1AA980` | `800C5F78` |
+| `Routing_Walking` | `0x1AAAC8` | `800C60DC` |
+| `Routing_Trapped` | `0x1AAC70` | `800C6320` |
+| `Routing_Failed` | `0x1DC708` | `800C64F4` |
+| `Routing_Succeeded` | `0x1AAE78` | `800C657C` |
+| `Routing_Waiting` | `0x1AB150` | `800C6900` |
+| `Routing_WaitingForPersonToMove` | `0x1AB278` | `800C6A38` |
+| `Routing_NeedFailureFeedback` | `0x1AB450` | `800C6CB0` |
+| `Routing_FoundGoals` | `0x1AB5B0` | `800C6E68` |
+| `CleanUpAfterFinishingRoute` | `0x1AB758` | `800C7000` |
+| `AskOthersToMove` | `0x1AB988` | `800C71C0` |
+| `MoveOutOfWay` | `0x1AC038`, `0x1AC2A0` | `800C78EC` |
+| `GetCurrentRoute` | `0x1DCA20` | `800C7E5C` |
+| `InitRoute` | `0x1ACA30` | `800C7EA4` |
+| `TILEROUTABLE` | `0x1CA948` | `800EB4A0` |
+| `BuildRoomPartition` | `0x1CB3B4` | `800EC1CC` |
+| `XRoute::BuildGoalList` | `0x1CC218` | `800EC920` |
+| `XRoute::FindPath` | `0x1CC350` | `800ECA04` |
+| `XRoute::ChooseStartingPoint` | `0x1CD978` | `800ED7C8` |
+| `XRoute::ConstructGoals` | `0x1CDBE0` | `800ED934` |
+| `XRoute::EvalTileForGoal` | `0x1CAF08` | `800EBA30` |
+
+### What a route reads
+
+| Data | From | Used for |
+|---|---|---|
+| Routing slots | `ResFile +0x28`, below | Where to stand. Global ones are set 100 in the `global` row |
+| Tile flags | `Arry`, bit 0x10 | `TILEROUTABLE`: set means no. **Proven on PS2** |
+| Room ID per tile | `cFixedWorld::GetRoom`, worked out by `ComputeRooms` from walls | A tile in another room isn't routable, unless its ID is 0xFFFB, or a portal on it leads to this room |
+| Walls | `Arry`: `HasWall`, `HasDiagonal`, style | `BuildRoomPartition` makes rectangles of them. Door-like styles let a Sim through. On the disc, lots have one wall edge at most |
+| Portals | Objects of type 8 on the tile | Entry point 15 and its other side join rooms in `TILEROUTABLE` |
+| Objects | The object list: `GetRect` and footprint, variable 0xA, `GetWallBlockFlags` (variable 0x35 turned by variable 1) | Penalty rectangles for the path, and obstacles for the goals |
+| Other Sims | The object list, by `ShouldIgnore` | Blocking, unless ignored |
+| Sim's width | `GetPersonWidth` | How far rectangles grow |
+
+Heights and the terrain mesh aren't read here. Levels only matter through the tile's level.
+
+**Routing slots. Proven on the disc.** `ResFile +0x28` is a VECTOR of 8-byte entries: a pointer to a VECTOR of 0x48-byte slot descriptors, then the set's ID. An object's set is definition `+0x28` as s16 (`cXObject::Initialize`, `0x20F258`): 0 is none, below 1000 is in its own row, and 1000 or more in its semi-global row. 1,011 definitions find their set this way, and the control word finds none. 59 name a set that isn't there, mostly test objects, and `SlotLoader` then loads nothing. `tools/bhav.py` reruns this, and `read_slots` returns them.
+
+The first s16 of a descriptor is its type. Type 0 becomes an `ObjectSlot`, 1 a `SpriteSlot` and 3 a `RoutingSlot`. The disc has 178, 9 and 1,413. Fields, from `RoutingSlot::WriteSlot` (`0x1E1658`):
+
+| Descriptor | `RoutingSlot` | Meaning |
+|---|---|---|
+| `+0x04`, `+0x08`, `+0x0C` f32 | `+0x04` | Offset from the object: x, y, z |
+| `+0x1C`, `+0x20`, `+0x24` s32 | `+0x10` | Multipliers, one for each vertical position |
+| `+0x28` s32 | `+0x1C` | Flags, below |
+| `+0x2C` s32 | `+0x20` | Object slot to snap to, -1 none |
+| `+0x30` s32 | `+0x24` | Minimum distance, in 1/16 tile |
+| `+0x34` s32 | `+0x28` | Maximum distance |
+| `+0x38` s32 | `+0x2C` | Optimal distance |
+| `+0x3C` f32 | `+0x30` | Gradient, how fast the score falls away from optimal. 0.1875 by default |
+| `+0x40` s32 | `+0x34` | Facing: 0 to 7, -2 towards the object, -3 any |
+| `+0x44` s32 | `+0x38` | Resolution, in 1/16 tile. 16 by default |
+
+Flags: the low byte is the allowed directions, one bit each, and none means on top of the object. Bit 11 ignores rooms (a ghost's route sets it). Bit 14 allows failure trees, bit 15 a different level, and bit 17 marks a TS2 slot.
+
+### The route
+
+`XRoute`, 0xA8 bytes on PS2, lives in a vector at Sim `+0x5D0`, and the last one is current. The path is a vector of 8-byte tile points at Sim `+0x59C`.
+
+| Offset | Meaning |
+|---|---|
+| `+0x00` | Goals, a vector of 16-byte `RouteGoal`s: `+0x0C` s16 object ID, `+0x0E` s16 direction, which goes to person data 0x12 |
+| `+0x10` | A copy of the routing slot, 0x3C bytes |
+| `+0x4C` | Start object, me |
+| `+0x50` | Destination object |
+| `+0x6C` | Current portal |
+| `+0x7C` | Valid. Clear means the route was invalidated: walking restarts through state 0xF |
+
+**`GotoRoutingSlot`, proven on PS2.** With state 0 or 0x15:
+
+1. A TS2 slot on a multi-tile object looks for a part with definition `+0x3A` above 0, and uses that part as the target.
+2. No target, or one out of the world: 0 at once, the false branch.
+3. It builds the `XRoute`. A ghost gets bit 11 on its slot.
+4. If other routes are queued, the new one takes on a cleared failure-tree bit from the first.
+5. With no routes queued and variable 0x11 clear, a start equal to the destination with a slot facing the object returns 1 at once.
+6. It pushes the route, and the state becomes 1.
+
+Then each tick, with any state: no current route is 0, and a route with no destination pops itself and returns 2. A target gone from the world moves to state 0x13, or 0x14 from Walking. An invalid route goes to state 0xF if it was walking, after which it's valid again. Then the state loop runs as in GotoRoutingSlot's section.
+
+**Finding a path. Likely.**
+
+1. `BuildGoalList`: `ChooseStartingPoint` picks the start. A Sim sitting tries the 8 tiles around the chair and takes the nearest good one. In a room above 250 tiles the route's radius becomes 8. Then `ConstructGoals`.
+2. `ConstructGoals` walks outwards from the object in steps of the slot's resolution, from minimum to maximum distance, in each allowed direction. Each spot goes through `EvalTileForGoal`, then gets a score from its distance to optimal and the gradient. With random scoring set, up to 20 is added. On-top slots have one goal, scored 100.
+3. `EvalTileForGoal` returns 0 if the spot is usable. It says why not otherwise: out of bounds, wrong room, a wall in the way, or another object or Sim.
+4. `ComputeRouteResult` turns the reasons into a result if there are no goals. It gives 8, 9, 0xB or 0xD.
+5. `FindPath` first needs a real room for the Sim. It collects penalty rectangles from each object it doesn't ignore: 1000 for most, 10,000 for walls of an object that blocks them, and clips them to the room. Then it uses the room's cached partition from `BuildRoomPartition`, which is rectangles of routable tiles and walls.
+6. `Path` is A*: `InitPath`, `AdvancePath` until `PathComplete`, then one smoothing step at a time, `GetFinalPath` and `GetChosenGoal`. The chosen goal becomes the current one. If it fails it's tried once more with other settings.
+
+**For a port:** a plain A* over tiles with bit 0x10 clear, around object footprints, gives the same answer in most cases, because the disc's lots have no real walls and rooms. The goals are what matter: try the slot's directions at its distances, and stand on the first good tile.
+
 ## GotoRelative (opcode 0x1B)
 
 **Proven** for the primitive: `cXPerson::TryGotoRelative` (`0x1AD320`) matches the game byte for byte. 157 uses. It's Sim-only. It builds a routing slot around the stack object, then runs the same route as GotoRoutingSlot, so that section's states and results apply.
