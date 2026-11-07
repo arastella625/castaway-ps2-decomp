@@ -41,6 +41,10 @@ RESFILE_STRINGS = 0x10  # 12-byte entries: pointer to a VECTOR of strings, tag, 
 STRING_SET_SIZE = 12
 ATTRIBUTE_SCOPE, SEMI_ATTRIBUTE_SCOPE = 0, 2
 DEF_ATTRIBUTES, DEF_ATTRIBUTES_CONTROL = 0x74, 0x72
+DEF_GUID = 0x1C
+DEF_LEAD = 0x10   # the control for +0x16: it marks the interaction leader, not the master
+DEF_GROUP = 0x14  # the multi-tile object this is part of, 0 for a single tile
+DEF_TILE = 0x16   # the part's place, y << 8 | x, and -1 on the master
 DEFAULT_ATTRIBUTES = 8  # what a count of 0 means
 SEMI_ATTRIBUTES, SEMI_ATTRIBUTES_CONTROL = 0x100, 0x101  # STR# IDs
 SEMI_SET_SUFFIX = '_sg'
@@ -250,6 +254,44 @@ def check_counts(disc, sets):
     return attributes[1] == 0 and semi[1] == 0, attributes_control[1] > 0 and semi_control[1] > 0
 
 
+def read_masters(disc):
+    """{definition's GUID: its master's GUID}, the way ObjectFolder::GetMasterSelector finds it.
+
+    Definitions of one file with the same non-zero +0x14 are one multi-tile object, and the master
+    is the one whose +0x16 is -1. A single-tile definition, or one with no master, is its own.
+    Also returns the groups by their number of masters, and the same count for the control word.
+    """
+    quickdata = gamedata.load_quickdata(disc)
+    data, table = gamedata.find_table(quickdata, 'ResFile')
+    half = lambda position: struct.unpack_from('<h', data.image, position)[0]
+    masters, counts, control = {}, {}, {}
+    for row in range(table.count):
+        start, count = data.vector(table.rows + row * table.stride)
+        groups = {}
+        for position in (data.word(start + 4 * i) for i in range(count)):
+            guid = data.word(position + DEF_GUID) & 0xFFFFFFFF
+            masters[guid] = guid
+            if half(position + DEF_GROUP):
+                groups.setdefault(half(position + DEF_GROUP), []).append(position)
+        for parts in groups.values():
+            found = [p for p in parts if half(p + DEF_TILE) == -1]
+            counts[len(found)] = counts.get(len(found), 0) + 1
+            wrong = sum(half(p + DEF_LEAD) == -1 for p in parts)
+            control[wrong] = control.get(wrong, 0) + 1
+            if len(found) == 1:
+                for part in parts:
+                    masters[data.word(part + DEF_GUID) & 0xFFFFFFFF] = data.word(found[0] + DEF_GUID) & 0xFFFFFFFF
+    return masters, counts, control
+
+
+def check_masters(disc):
+    """Every multi-tile object should have exactly one master, and the wrong word shouldn't."""
+    masters, counts, control = read_masters(disc)
+    print('multi-tile objects by masters: %s (control +0x10: %s), %d definitions point elsewhere'
+          % (sorted(counts.items()), sorted(control.items()), sum(k != v for k, v in masters.items())))
+    return set(counts) == {1}, set(control) != {1}
+
+
 def main(argv):
     if len(argv) != 2:
         print(__doc__)
@@ -298,9 +340,10 @@ def main(argv):
 
     links_hold, link_control_fails = check_links(disc, sets)
     counts_hold, count_control_fails = check_counts(disc, sets)
+    masters_hold, master_control_fails = check_masters(disc)
 
-    rules_hold = bad_targets == 0 and bad_expressions == 0 and None not in classes and links_hold and counts_hold
-    controls_fail = bad_control > 0 and bad_expr_control > 0 and link_control_fails and count_control_fails
+    rules_hold = bad_targets == 0 and bad_expressions == 0 and None not in classes and links_hold and counts_hold and masters_hold
+    controls_fail = bad_control > 0 and bad_expr_control > 0 and link_control_fails and count_control_fails and master_control_fails
     print('rules hold' if rules_hold else 'a rule failed', '/',
           'controls fail as they should' if controls_fail else 'a control passed: the test proves nothing')
     return 0 if rules_hold and controls_fail else 1

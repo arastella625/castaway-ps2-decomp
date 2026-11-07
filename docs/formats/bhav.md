@@ -637,6 +637,26 @@ The generator is at `0x262AF0`: `state = state * 0x41C64E6D + 0x3039`, returning
 | 4 | Always true. Temp 0 is a relationship type, 1 to 9, or error 0x14. It's replaced by how many relationships of that type the Sim has, or 0 |
 | 5 | The object is the player's Sim and it has no player interactor |
 
+## Master selectors
+
+**Proven.** A multi-tile object has a definition for each tile and one more, its master, which stands for the whole object. `ObjSelector::GetMasterSelector` (`0x1D9E48`) caches the answer at selector `+0x90`, and `ObjectFolder::GetMasterSelector` (`0x254718`) finds it:
+
+| Definition word | Meaning |
+|---|---|
+| `+0x14` s16 | Which multi-tile object in this file. 0 is a single tile |
+| `+0x16` s16 | -1 on the master. On a part, its place: y in the high byte, x in the low byte |
+| `+0x1C` u32 | GUID. The master's GUID is just the master definition's GUID |
+
+1. A definition with `+0x14` of 0 is its own master.
+2. Otherwise it walks every selector for one with the same file (selector `+4`, the namespace ID), the same `+0x14`, and `+0x16` of -1.
+3. If none is found, it's its own master.
+
+So there's no stored master GUID to decode. **On the disc:** 509 definitions are single tiles and 826 are in 131 multi-tile objects, and every one of the 131 has exactly one master. `+0x10` is the control, and gives 123 with one, 6 with none and 2 with two. `tools/bhav.py` reruns this, and `read_masters` returns the table from GUID to master GUID.
+
+`+0x10` is a different thing: `GetInteractionLeader` looks for the part whose `+0x10` is the negative of this part's, and a part with `+0x10` of 0 or less is its own leader.
+
+`TestObjectType`, with none of its flag bits set, is true if the object's GUID or its master's GUID equals the operand. The other primitives that ask for a master are SetBalloon and GenericSimCall calls 0x39 and 0x3C.
+
 ## GotoRoutingSlot (opcode 0x2D)
 
 It's Sim-only: `cXPerson::TryGotoRoutingSlot` (`0x1A8CA8`). 418 uses. **Proven** for the primitive, which matches the game byte for byte, and **likely** for the route states, read from the Wii build.
