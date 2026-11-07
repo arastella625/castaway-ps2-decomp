@@ -1036,7 +1036,10 @@ long cXObject::TryExpression(ExpressionParam *param)
             InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef - 1);
             leftValue = *leftRef;
         } else {
-            OBJECT_CHECK(leftFloat, 0x13);
+            if (!leftFloat) {
+                TREE_ERROR(0x13);
+                return -1;
+            }
             *leftFloat -= 1.0f;
             leftValue = *leftRef;
         }
@@ -1084,7 +1087,10 @@ long cXObject::TryExpression(ExpressionParam *param)
             InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef + 1);
             leftValue = *leftRef;
         } else {
-            OBJECT_CHECK(leftFloat, 0x13);
+            if (!leftFloat) {
+                TREE_ERROR(0x13);
+                return -1;
+            }
             *leftFloat += 1.0f;
             leftValue = *leftRef;
         }
@@ -1106,7 +1112,10 @@ long cXObject::TryExpression(ExpressionParam *param)
         if (leftRef) {
             InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, rightValue);
         } else {
-            OBJECT_CHECK(leftFloat, 0x13);
+            if (!leftFloat) {
+                TREE_ERROR(0x13);
+                return -1;
+            }
             *leftFloat = rightValue;
         }
         result = 1;
@@ -1116,7 +1125,10 @@ long cXObject::TryExpression(ExpressionParam *param)
         if (leftRef) {
             InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef + rightValue);
         } else {
-            OBJECT_CHECK(leftFloat, 0x13);
+            if (!leftFloat) {
+                TREE_ERROR(0x13);
+                return -1;
+            }
             *leftFloat += rightValue;
         }
         result = 1;
@@ -1126,7 +1138,10 @@ long cXObject::TryExpression(ExpressionParam *param)
         if (leftRef) {
             InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef - rightValue);
         } else {
-            OBJECT_CHECK(leftFloat, 0x13);
+            if (!leftFloat) {
+                TREE_ERROR(0x13);
+                return -1;
+            }
             *leftFloat -= rightValue;
         }
         result = 1;
@@ -1136,7 +1151,10 @@ long cXObject::TryExpression(ExpressionParam *param)
         if (leftRef) {
             InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef * rightValue);
         } else {
-            OBJECT_CHECK(leftFloat, 0x13);
+            if (!leftFloat) {
+                TREE_ERROR(0x13);
+                return -1;
+            }
             *leftFloat *= rightValue;
         }
         result = 1;
@@ -1147,7 +1165,10 @@ long cXObject::TryExpression(ExpressionParam *param)
         if (leftRef) {
             InterpWriteValue(param->mLeftScope, param->mLeft, &leftRef, *leftRef / rightValue);
         } else {
-            OBJECT_CHECK(leftFloat, 0x13);
+            if (!leftFloat) {
+                TREE_ERROR(0x13);
+                return -1;
+            }
             *leftFloat /= rightValue;
         }
         result = 1;

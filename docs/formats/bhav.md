@@ -435,7 +435,7 @@ The stack object is the frame's object ID. A call passes it on to the called tre
 | Animate (Sim) | `+3` bit 7 mirrored; `+5` bit 1 backwards, bit 2 uses stack variable, bit 5 use local for events, bit 7 preload only |
 | AnimateObject | `+0` flags: bit 0 use stack object, 1 ignore anim tags, 2 preload only, 3 sync object location, 4 object anim table, 5 run immediately; `+1` anim tag target; `+2` state owner; `+4` animation index; `+6` sync object location |
 | Budget | `+4` bit 0 just test, bit 1 clear means subtract |
-| CallNamedTree | `+2`: 1 global, 2 semi-global, 3 private |
+| CallNamedTree | See its own section |
 | CreateObject | See its own section |
 | Dialog | `+1` icon index; `+7` bits 1-3 icon type, bits 4-6 result temp, bit 7 semi-global strings |
 | DirectionTo, DistanceTo | A flag byte (`+4`, `+2`), bit 0 set: the "from" value is the scope in the next byte and the data after it. Clear: scope 3, data 0xB. DistanceTo bit 1 returns sixteenths of a tile |
@@ -444,8 +444,8 @@ The stack object is the frame's object ID. A call passes it on to the called tre
 | IdleAnimate | `+2` low byte decrement parameter, high byte sync object; `+5` flags; `+6` behaviour; `+7` literal loop count |
 | KillObject | `+2` bit 0 return immediately, bit 1 clear means clean up all |
 | PlaySound | `+4` bit 0 looped, bit 1 stack object is source, bit 7 sound in temp 0 |
-| PushAction | `+3` flags: bit 0 special icon, 1 use local, 2 continue, 3 carry name over, 4 push to head, 5 run as sub, 6 use temp |
-| Relationship, Relationship2 | Flag byte (`+4`, `+2`): bit 0 clear means create, bit 1 use neighbours; Relationship2 also bit 2 assign, bit 3 pet ownership |
+| PushAction | See its own section |
+| Relationship | Flag byte `+4`: bit 0 clear means create, bit 1 use neighbours |
 | SetBalloon | `+0` bit 0 over stack object; `+2` index, group; `+6` type, then flags |
 | SetMotiveDelta | `+3`: bit 0 clear all, bit 1 influence on me, bit 2 influence on stack object |
 | SetToNext | `+4` low 4 bits search type, bit 5 GUID from temps, bit 6 skip non-leads; bit 7 means `+5` and `+7` give target owner and data, otherwise it's the stack object |
@@ -584,7 +584,7 @@ The primitive runs again each tick until it returns something other than 2. In o
 
 1. The Sim's model isn't loaded: return 2.
 2. An animation is still loading: return 2.
-3. Preload only: load it and return.
+3. Preload only, `+5` bit 7: the animation is resolved, its events and resource are asked to load, and that's all. It returns 1 if `EResourceManager::PreloadResource` says it's there and 0 if not, and a failed lookup returns 1. Nothing plays, and it doesn't wait. **Likely**, Wii, and it's `0x120D60` on PS2.
 4. The Sim has a queued operation: return 2.
 5. An animation of 0 turns the current one off.
 6. If this animation hasn't started, resolve and start it. A sync object that isn't ready gives its own return value.
@@ -594,7 +594,7 @@ The primitive runs again each tick until it returns something other than 2. In o
 
 So a tree animates in a loop: the false branch handles an event, then comes back to the same node, and the true branch means it finished. With no events to deliver, one play is many ticks of 2 and then a 1. A port without real animation can return 1 at once, or after the animation's length, and trees that wait for events will just see none. The event target is `+2`'s local or parameter 0, and a tree with neither is error 8. End events are negative in the animator (`+0x194`), and with `+5` bit 1 set they're stored as `-1 - value`.
 
-On an object that isn't a Sim, `cXObject::TryAnimate` (`0x234558`) is all there is: behaviour 7 uses me, 8 the stack object, and anything else is error 5. It resolves a skill for passive influence and plays nothing. Its C++ is under `NON_MATCHING`, 69 of 70 words.
+On an object that isn't a Sim, `cXObject::TryAnimate` (`0x234558`) is all there is: behaviour 7 uses me, 8 the stack object, and anything else is error 5. It resolves a skill for passive influence and plays nothing. It matches the game.
 
 ## Idle (opcode 0)
 
@@ -636,6 +636,217 @@ The generator is at `0x262AF0`: `state = state * 0x41C64E6D + 0x3039`, returning
 | 3 | A Neighbor has that ID |
 | 4 | Always true. Temp 0 is a relationship type, 1 to 9, or error 0x14. It's replaced by how many relationships of that type the Sim has, or 0 |
 | 5 | The object is the player's Sim and it has no player interactor |
+
+## GotoRoutingSlot (opcode 0x2D)
+
+**Likely**, read from the Wii build, with the operands and error codes compared with the PS2 code (`0x1A8CA8`). It's Sim-only: `cXPerson::TryGotoRoutingSlot`. 418 uses.
+
+| Operand | Meaning |
+|---|---|
+| `+0` s16 | The slot's number, or the parameter holding it |
+| `+2` s16 | 0: `+0` is a parameter number, and that parameter is the slot. 1: `+0` is the slot. 2: `+0` is a global slot |
+| `+4` bit 0 | Clear means failure trees may run: `RoutingSlot` bit 14 at `+0x1C` is set |
+
+The object to go to is the stack object. Slots are 0x3C bytes, in the object's list at `+0x100` or ObjectModule's global list at `+0x206C` on Wii and `+0x2070` on PS2.
+
+The primitive keeps its state in frame `+8`, the word this page calls waiting elsewhere, so a node runs again each tick with the same state:
+
+1. The Sim's model isn't loaded: return 2.
+2. State 0: turn on smooth routing and find the slot. A missing stack object is error 0x35, a parameter past the frame's count is error 8, a bad slot number or `+2` value is error 0x25.
+3. Any other state: no slot is looked up, and the route already under way carries on.
+
+`GotoRoutingSlot` then runs. State 0 or 0x15 starts a route:
+
+- A multi-tile target with a TS2 routing slot is checked first: a part whose definition has `+0x3A` above 0 means the route can go ahead.
+- No object, or one that isn't in the world, returns 0.
+- The route (`XRoute`, 0xA4 bytes) goes on the Sim's list at Wii `+0x5C4`, unless the Sim is already facing the target and is there, which returns 1 at once.
+
+Each tick, a loop calls the handler for the state until one says it's done. Handlers return the next state, and set the tree's result. It starts as 2, wait.
+
+| State | Handler | What it does |
+|---|---|---|
+| 1 | Initial | Interrupted is route result 4, then state 7. A Sim sitting on the wrong chair runs the stand tree, state 5. Otherwise it builds the goals, then state 0x12 |
+| 2 | WaitingForPortal | Waits to pass through a portal |
+| 3 | Walking | Interrupted or nothing left to walk is state 0xB. Otherwise it asks the animator: 1 is state 9, 0 state 0xA, 2 is wait this tick |
+| 4, 5 | WaitingForSit, WaitingForStand | Wait on the animation |
+| 6 | Trapped | Asks others to move, up to a trap count, then state 7 or 0x10 |
+| 7 | Failed | Result 1 if none was set, cleans up, **returns 0**, the false branch |
+| 8 | Succeeded | Result 0, turns to face if the slot says so, cleans up, **returns 1**, the true branch |
+| 9 | WalkingSucceeded | State 8 once the animator agrees |
+| 0xA | WalkingFailed | State 6 once the animator agrees |
+| 0xB | WalkTerminated | State 7 once the animator agrees |
+| 0xC | FoundPath | Starts the walk, then state 3 |
+| 0xD | Waiting | Waits for a timer, or fails if interrupted |
+| 0xE | WaitingForPersonToMove | Waits on the Sim asked to move |
+| 0xF | RouteInvalidatedWhileWalking | Replans |
+| 0x10, 0x11 | NeedFailureFeedback, WaitingForFailureFeedback | Runs the object's failure tree, if `+4` allowed it, then state 7 |
+| 0x12 | FoundGoals | Waits for a routing turn: a queue allows so many Sims a frame. Then a path: 0 is state 6, 1 state 8, 2 state 0xC, 3 waits for a portal, others state 7 |
+| 0x13, 0x14 | ObjectDeleted, ObjectDeletedWhileWalking | The target went away: state 7 |
+
+Person data 0x1C ends up holding the route's result: 0 worked, 1 failed, 4 interrupted. If the target leaves the world part way, the state changes to 0x13 or, while walking, 0x14.
+
+**For a port:** no pathfinding is needed for trees to run. Wait a tick or more, put the Sim on the slot, and return 1. Return 0 for a slot that can't be reached.
+
+## PushAction (opcode 0x0D)
+
+**Likely**, read from the Wii build, with the operands and error codes matching the PS2 code (`0x228788`). 334 uses.
+
+It puts an interaction on a Sim's queue. The Sim is the stack object, and the interaction belongs to another object.
+
+| Operand | Meaning |
+|---|---|
+| `+0` u8 | Interaction number in the object's `TTAB`, or the temp holding it with bit 6 of `+3` |
+| `+1` u8 | The parameter holding the object's ID, or the local with bit 1 of `+3` |
+| `+2` u8 | Priority, below |
+| `+3` bit 0 | Icon: the object in local `+4` shows on the queue |
+| `+3` bit 1 | `+1` is a local |
+| `+3` bit 2 | Continuation of the current interaction |
+| `+3` bit 3 | Carry the name over from the current interaction, for a continuation |
+| `+3` bit 4 | Push to the head of the queue |
+| `+3` bit 5 | Run as a sub-action |
+| `+3` bit 6 | `+0` is a temp |
+| `+4` u8 | With bit 0, the local holding the icon object |
+
+| `+2` | Priority |
+|---|---|
+| 0 | Inherit: person data 0xE if I'm a Sim, otherwise 1 |
+| 1 | 100 |
+| 2 | 2 |
+| 3 | 50 |
+| Others | Error 0x2E |
+
+In order:
+
+1. Read the object's ID. A local past the count is error 0x34, a parameter past it error 8. Each test allows one past the end.
+2. A missing object is error 0x17. A multi-tile object means its lead tile.
+3. A temp number of 8 or more is error 2.
+4. The object has to have a `TTAB`, or it's error 0x1F, and the interaction has to be in it, or error 0x16.
+5. A missing stack object is error 0x15, and one that isn't a Sim is error 0x1C.
+6. A bad icon local is error 0x34. A continuation on an idle Sim is error 0x4B.
+7. `AddAction` decides. It returns 1 if the action went on, the true branch, and 0 if not.
+
+`AddAction` returns 0 if the interaction has no `TTAB` entry, or if the last thing on the queue is the same interaction on the same icon object, unless the entry allows repeats. A queue holds 8 visible actions: once full, a new one replaces the lowest priority action below its own, unless that one must run. An entry can run at once instead, through `RunImmediateAction`.
+
+**For a port:** returning 1 and keeping a list per Sim is enough until Sims run their queues.
+
+## Relationship2 (opcode 0x1A)
+
+**Likely**, read from the Wii build, with its error codes in the PS2 code (`0x228ED0`). 358 uses.
+
+It reads or writes one field of one relationship between two things.
+
+| Operand | Meaning |
+|---|---|
+| `+0` u8 | The field |
+| `+1` u8 | Who to whom, below |
+| `+2` bit 0 | Clear: create the relationship if it's missing |
+| `+2` bit 1 | The IDs are neighbour IDs, not object IDs |
+| `+2` bit 2 | Set: write the field from the value. Clear: read the field into the value |
+| `+2` bit 3 | Pet ownership: use an object's own relationship list |
+| `+3` u8 | The local, for `+1` 2 and 3 |
+| `+4` u8 | The value's scope |
+| `+6` s16 | The value's data |
+
+| `+1` | From | To |
+|---|---|---|
+| 0 | Me | Stack object |
+| 1 | Stack object | Me |
+| 2 | Stack object | Object in local `+3` |
+| 3 | Object in local `+3` | Stack object |
+| Others | Nothing, so error 0x15 | |
+
+A local past the frame's count is error 0x34.
+
+- **With neighbour IDs**, `+1` 0 and 1 need me to be a Sim, or it's error 0x1C, and I'm my neighbour. A missing neighbour is error 0x15, and field 2 is error 0x56. The list used is the first neighbour's, keyed by the second's ID.
+- **With object IDs**, a missing object is error 0x15. The list is the first object's `RelMatrix` at `+0xBC`, keyed by the second object's ID.
+- **Pet ownership** has the object first and a person second. `+1` 1 with neighbour IDs is error 0x5B, and a second party that's missing or not a Sim is error 0x5C.
+
+Then, with the list and the key:
+
+1. If the relationship is shorter than `field + 1`, then with create off it's **false**. With it on, it grows, and it's **true** if it's still too short.
+2. Read the value through `+4` and `+6`.
+3. With assign, write the field. If I'm the player's neighbour, the change also goes to the goals system.
+4. Otherwise the value needs an address, or it's error 0x13, and the field is written to it.
+5. **True.**
+
+## CallNamedTree (opcode 0x1C)
+
+**Likely**, read from the Wii build, and the PS2 function (`0x226948`) has the same opening. 356 uses.
+
+It finds a tree by name and runs it on the stack object.
+
+| Operand | Meaning |
+|---|---|
+| `+0` s16 | `STR#` set holding the name |
+| `+2` s16 | Where to look: 1 global, 2 semi-global, 3 private, others by the running tree's class |
+| `+4` u8 | The string's number |
+| `+5` u8 | How to run it, below |
+
+If `+2` isn't 1 to 3, a private tree looks in its private namespace and then the semi-global one, and a semi-global tree the other way round. A global tree has nowhere to look: error 0x2D. An empty or missing name is **false**.
+
+The stack object has to exist, or it's error 0x15.
+
+| `+5` | Runs on | How | Result |
+|---|---|---|---|
+| 0 | Me | `RunCheckTree` to the end, stack object as its object | Its result |
+| 1 | Stack object | `RunCheckTree` to the end, itself as its object | Its result |
+| 2 | Me | A subroutine: the tree is pushed and runs normally | Below |
+| Others | | Error 0x2D | |
+
+The tree comes from the stack object's `Behavior`. A name it doesn't have is **false**.
+
+For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node runs again when the called tree returns. Then frame `+8` is 1, and the result is `GetLastResult`: the true or false that the tree returned with. If I'm not the object doing the running, it's false.
+
+## GenericSimCall (opcode 1)
+
+**Likely**, read from the Wii build. The PS2 function (`0x22D518`) has the same 67-entry switch on `+0`, but it hasn't been compared call by call. 290 uses. Past 0x42 is error 0x2A.
+
+`+0` s16 is the call. Everything else comes from temps, written t0 to t7 here. Unless it says otherwise, a call returns 1. Calls not listed aren't used by any tree on the disc.
+
+| Call | Uses | What it does |
+|---|---|---|
+| 2 | 2 | Stack object is the icon of my current action. Missing is error 0xA, not a Sim error 0x1C |
+| 3 | 1 | If the stack object is the selected Sim, asks the game flow for 0x20, otherwise error 0x14. Not a Sim is error 0x1C |
+| 4 | 8 | Moves the neighbour in the stack object into family t1, or the selected family if t1 is 0 or less. Makes the family if needed. Copies the last name |
+| 5 | 1 | Merges family t0 into the selected family: funds and inventories |
+| 6 | 6 | Removes the neighbour in the stack object from its family. False if that fails |
+| 7 | 1 | Goal and unlock data call |
+| 8 | 11 | Loading screen. t0 non-zero starts one and returns 1. Otherwise it returns 4 until the iris transition is in, then 1 |
+| 9 | 24 | Finishes loading |
+| 0xA, 0xB | 4, 5 | Turns buy and build off, on |
+| 0xC | 1 | Tribe gets all tools |
+| 0xD | 2 | `CleanupPeople` on the stack object. Missing is error 0xA |
+| 0xE | 3 | Global 0x1F = t0 |
+| 0xF | 52 | Needs me to be a Sim, or error 0x1C. Person data 0x20 = t0, 0x21 = 0. With t0 of 0, also a virtual call with my location |
+| 0x10 | 6 | Game sequences, by t0: 0 starts sequence 2, 1 sequence 3, -1 and -2 wait for them, 2 is game over. Waiting returns 4 |
+| 0x11 | 8 | Sets the harvest count to t0 |
+| 0x12 | 12 | True if in build or buy mode |
+| 0x13, 0x14 | 1, 1 | Tribe gets all food, all resources, amount t0 |
+| 0x16, 0x31 | 7, 10 | Nothing: returns 1 |
+| 0x17 | 2 | Unlocks everything |
+| 0x18 | 2 | Global 0x29 = 1 if t0 is 0, else 0 |
+| 0x1A | 1 | Changes the selected Sim |
+| 0x1F | 6 | Selects Sim t0. True if it's now selected. Not a Sim, or missing, is false |
+| 0x21 | 1 | Shows all object dialogs |
+| 0x22 | 5 | Starts a lot change to lot t2 |
+| 0x24 | 1 | Replenishes the tribe, t0 |
+| 0x25 | 5 | `_globals` byte `+0x3FB` = t0 != 0 |
+| 0x26 | 2 | t1 = 1 if object t0 is in the world, else 0. False if there's no object |
+| 0x27 | 1 | `AutonomousFoodSelection` on t1, t2, t3. Its result |
+| 0x29 | 4 | t0 must be 0 or 1, or it's -1 |
+| 0x2C | 17 | Closes modeless dialogs |
+| 0x2D | 30 | Controller rumble, for the player's Sim only |
+| 0x34 | 1 | t2 = 0 |
+| 0x36 | 4 | Reads t7, returns 0 |
+| 0x37 | 1 | Moves neighbour t0 into the first free family, and t1 = its number. Missing is -1 |
+| 0x38 | 1 | Returns 0 |
+| 0x39 | 9 | Clears cached catalog resources of the stack object |
+| 0x3A | 4 | Adds or removes the wall between objects t0 and t1. t2 of 1 adds |
+| 0x3B, 0x3E, 0x3F | 1 each | Plans: toggles all in the UI, ignores requirements, forces unlock |
+| 0x3C | 12 | Is the stack object's plan unlocked? Missing is error 0x17 |
+| 0x40 | 2 | Neighbour t0's lot, t1 = 0 if it's here |
+| 0x41 | 3 | True if the tribe has token t0 |
+| 0x42 | 7 | t1 = a goal value for t0. False if there's none |
 
 ## What a placed object starts with
 
