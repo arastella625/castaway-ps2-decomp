@@ -1231,7 +1231,7 @@ Each of these is labelled. Offsets are PS2 unless they say Wii.
 
 `EGlobal::IsTransitionLoad` is true for 3 and 4. In `LoadHouse`, 0, 1, 2 and 5 keep the game's start time, 4 uses the last transition's time, and 3 and 6 use the globals.
 
-**Sims during `PostLoad`. Proven for the disc.** `ObjectModule::PostLoad` only walks the object list, and `ObjM` builds that list. No `ObjM` on the disc holds a Sim: the 2,611 placed objects are types 1, 4, 7, 9 and 11. So a lot straight off the disc has no Sims while its objects load. **Likely:** a saved lot with Sims in its stream has them in the list, and they run `cXPerson::PostLoad` in list order. In author mode, `LoadHouse` calls `CreateFamilyInLot` after `PostLoad`. **Open:** where the family's Sims come from in a normal game.
+**Sims during `PostLoad`. Proven for the disc.** `ObjectModule::PostLoad` only walks the object list, and `ObjM` builds that list. No `ObjM` on the disc holds a Sim: the 2,611 placed objects are types 1, 4, 7, 9 and 11. So a lot straight off the disc has no Sims while its objects load. **Likely:** a saved lot with Sims in its stream has them in the list, and they run `cXPerson::PostLoad` in list order. In author mode, `LoadHouse` calls `CreateFamilyInLot` after `PostLoad`. The Neighbourhood section says where a normal game's Sims come from.
 
 **Misc flag 0x40. Proven.** The word is object `+0xE4`. Only `ObjectModule::KillOutOfWorldObject` sets the flag, and `ReconStream` doesn't save it, so it's clear on every loaded object. It marks an object being killed. During a load, `Cleanup` always goes on to place the object.
 
@@ -1266,6 +1266,86 @@ So an object with no cleanup tree runs init twice when it resets on load, on a s
 `GetTransitionCost` gives time, hygiene and energy for a transition, and the energy drops by the discount if person data 0x10 is at least the body value. `GetTransitionEnd` gives the destination lot. Whether one's open comes from `IsTransitionOpen` and `HasTransitionBeenUsed`, which aren't read here.
 
 So a port can build this table from the `portal_sg` constants, with no stand-in.
+
+## Neighbourhood
+
+**Proven for the layouts.** Kind 1 of `DEFAULT.NGH` holds `NGBH`, `NBRS` and 6 `FAMI` chunks. They're written by `DoStream` functions, version 0x82, and read here from `Neighbor::DoStream` (`0x201A90`) and `FamilyImpl::DoStream` (`0x1EEBB0`) on PS2, and the Wii code for the rest. Read this way, all 8 chunks are used up to the last byte, and forgetting the string padding breaks that. `tools/bhav.py` reruns it, and `read_neighborhood_chunks` returns the fields.
+
+Each chunk starts with u32 0, u32 version and the tag reversed. Everything is little-endian with no alignment, apart from strings:
+
+- Narrow: bytes, a zero, then padded to an even offset. The pad byte is junk (0xCD).
+- Wide: aligned to 2, the bytes FE FF, UTF-16 units, and a zero unit.
+
+**`NGBH`, the neighbourhood:**
+
+| Type | Meaning |
+|---|---|
+| 36 x s16 | Neighbourhood variables. `Load` reads 0x23 |
+| Wide string | Name |
+| 2 x s32 | `+0x150` and `+0x154` |
+| 128 bytes | Goal and unlock data, `GoalUnlock` |
+| s16 count, s16s | Unlocked plans (`PlanManager`) |
+| s16 count, then s16 and s32 each | `LotManager`, one per lot, 27 |
+| s16 | `LotManager +0xD8` |
+| s16 count, bytes | `LotManager +0xDA`, one per transition, 72 (**likely** their state) |
+| 100 x (s32, s16, s8, s8) | Weather events |
+| s32, s32, 4 x f32 | Weather state |
+| s16 count, 2 x s32 each | `LotHelper` |
+
+**`NBRS`, the neighbours:** s32 slots, 88 on the disc. Each is an s32 that's non-zero if a neighbour follows. Each neighbour:
+
+| Type | `Neighbor` | Meaning |
+|---|---|---|
+| Narrow string | `+0x24` | Name, 64 bytes at most |
+| s32 | `+0x14` | 0 on the disc |
+| s32 | `+0x00` | Non-zero means person data follows. **Open:** what its value, 5 to 9, means |
+| 49 x s16 | `+0x6C` | Person data, only with the word above. The rest of the time it stays at its defaults |
+| 16 x f32 | `+0x114` | Motives |
+| 16 x f32 | `+0x154` | A second set of motives |
+| s16 | `+0x04` | Neighbour ID |
+| u32 | `+0x08` | GUID of the Sim's object |
+| s32 -1, s32 count | `+0x10` | Relationships: per entry, an s32 that's non-zero if one follows, s32 key, s32 count, s32 values. Empty on the disc |
+| Wide string | | Only for chimps, sim type (person data 0x2C) 1: the user's name for them |
+
+A service NPC's sim type comes from its `ObjSelector`, not from the file, so a neighbour with no person data can still be a chimp. Reading the wide marker works, because the next word is a slot's 0 or 1.
+
+The disc has 13 neighbours in the 88 slots, all NPCs, and 7 have person data. Each ID is one more than its slot. All 11 IDs in the service NPC table 0x200D are here, and 40 and 41 as well.
+
+**`FAMI`, the families.** The chunk's ID is the family's number. Bit 0x4000 makes it a `PlayerFamilyImpl` and is then cleared, so 0x4001 is family 1.
+
+| Type | `FamilyImpl` | Meaning |
+|---|---|---|
+| s32 | `+0x0C` | House number |
+| s32 | `+0x10` | Creation order. `Load` sorts by it |
+| s32 | `+0x14` | Funds |
+| s32 | `+0x18` | Pet points |
+| s32 | `+0x1C` | House value |
+| s32 | `+0x20` | Friends |
+| s32 | `+0x38` | Flags: 1 phone, 2 baby, 4 just moved in, 8 free play, 0x10 finished Create-a-Family |
+| s32 count, u32s | `+0x28` | Members, by GUID |
+| Wide string | `+0x04` | Name. Replaced when read: `GetNghFamilyName` for a free play lot, otherwise `GetNghHouseName` |
+| s16 count, s8 | `+0x3C` | Inventory, then its items. None on the disc |
+| s32 count, s32s | | Inventory's last vector |
+| 25 x s16 | `+0x5C` | Player families only: stats |
+
+Inventory items, read on Wii only and not tested, because the disc has none, start with a type byte. 0 is an object: s32 GUID, s8, s16 count of s16s, then 3 x s16. 1 is the same, then s16 count of s16 pairs for owners. 2 is a token: 2 x s16. 3 is clothing: s16, then 5 x s8.
+
+### Where the family's Sims come from
+
+**Proven: not from the disc.** The player's family, 0x4001, has no members in `DEFAULT.NGH`. The disc's three families with members hold NPCs only, 7 of them. No Sim the player controls is stored there, and none in `ObjM`, as Load details says.
+
+**Likely, from Wii only.** PS2's functions for this aren't named yet. In a normal game, `UrbzModeNewGameState::Update` does this:
+
+1. `BGCall_LoadDefaultNeighborhood` loads the file above.
+2. It takes the family at the start lot, or makes one with `MakeNewFreePlayFamily`, and moves it in with `HoodManager::MoveInFamily`.
+3. `Neighborhood::AddNewCharacter` makes the Sim: `ObjectFolder::CreateNewUserSelector` gives a new object definition, `AddNewNeighbor` a new `Neighbor`, and `InitDefaultValues` fills it.
+4. `AddToFamily` adds the GUID to the family, and it sets person data 0x25 to 0x1B and sets 0x2B.
+5. `SaveCASDataToNeighborhood` stores what Create-a-Sim made. `Neighborhood::Save` then writes the save.
+6. `PlayerEnterHouse` and `GotoLiveMode` start play.
+
+Then each load is the path in Load details: `FamilyImpl::CreateFamilyInLot` calls `ObjectModule::CreateNeighbor` for each member, found by `FindNeighborByGUID`. `Load` drops members with no neighbour, and neighbours with no selector. It also adds a neighbour for any person definition without one.
+
+So a port with no Create-a-Sim needs a stand-in Sim: one new definition and `Neighbor`, added to family 1 and marked with data 0x25 and 0x2B. That's the code's own new-game path, without the appearance.
 
 ## What a RAM snapshot would settle
 

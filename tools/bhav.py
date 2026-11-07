@@ -47,6 +47,16 @@ RESFILE_SLOTS = 0x28  # 8-byte entries: pointer to a VECTOR of slots, set ID
 SLOT_SET_SIZE = 8
 SLOT_SIZE = 0x48
 SEMI_SLOT_SETS = 1000  # set IDs from here live in the semi-global file
+RECON_HEADER = 12
+WIDE_MARK = bytes((0xFE, 0xFF))
+NGH_KIND_NEIGHBORHOOD = 1
+PERSON_DATA_WORDS = 0x31
+MOTIVE_WORDS = 16
+NEIGHBORHOOD_VARS = 0x24
+GOAL_BYTES = 0x80
+WEATHER_EVENTS = 100
+PLAYER_FAMILY = 0x4000
+PLAYER_STATS = 25
 DEF_LEAD = 0x10   # the control for +0x16: it marks the interaction leader, not the master
 DEF_GROUP = 0x14  # the multi-tile object this is part of, 0 for a single tile
 DEF_TILE = 0x16   # the part's place, y << 8 | x, and -1 on the master
@@ -358,6 +368,144 @@ def check_slots(disc):
     return hits > misses * 10 and set(types) <= {0, 1, 3}, control[0] == 0
 
 
+class ReconReader:
+    """ReconBuffer reading a chunk: u32 0, u32 version, a reversed tag, then the stream."""
+
+    def __init__(self, data, pad_strings=True):
+        self.data, self.position, self.pad_strings = data, RECON_HEADER, pad_strings
+
+    def read(self, code):
+        value = struct.unpack_from('<' + code, self.data, self.position)[0]
+        self.position += struct.calcsize(code)
+        return value
+
+    def many(self, code, count):
+        return [self.read(code) for _ in range(count)]
+
+    def narrow(self):
+        end = self.data.index(b'\0', self.position)
+        text = self.data[self.position:end].decode('latin-1')
+        self.position = end + 1
+        if self.pad_strings:
+            self.position += self.position & 1
+        return text
+
+    def at_wide(self):
+        return self.data[self.position:self.position + 2] == WIDE_MARK
+
+    def wide(self):
+        self.position += self.position & 1
+        if not self.at_wide():
+            raise ValueError('no wide string at %#x' % self.position)
+        self.position += 2
+        text = []
+        while True:
+            unit = self.read('H')
+            if not unit:
+                return ''.join(map(chr, text))
+            text.append(unit)
+
+    def finished(self):
+        return self.position == len(self.data)
+
+
+def read_relations(reader):
+    """RelMatrixImpl::DoStream: -1, then a pointer vector of RelArrays. Empty on the disc."""
+    if reader.read('i') != -1:
+        raise ValueError('relations without the -1')
+    arrays = {}
+    for _ in range(reader.read('i')):
+        if reader.read('i'):
+            key = reader.read('i')
+            arrays[key] = reader.many('i', reader.read('i'))
+    return arrays
+
+
+def read_neighbor(reader):
+    """Neighbor::DoStream at version 0x82. Only chimps have the name at the end."""
+    neighbor = {'name': reader.narrow(), 'word_14': reader.read('i'), 'word_0': reader.read('i')}
+    neighbor['person_data'] = reader.many('h', PERSON_DATA_WORDS) if neighbor['word_0'] else None
+    neighbor['motives'] = reader.many('f', MOTIVE_WORDS)
+    neighbor['motives_2'] = reader.many('f', MOTIVE_WORDS)
+    neighbor['id'] = reader.read('h')
+    neighbor['guid'] = reader.read('I')
+    neighbor['relations'] = read_relations(reader)
+    neighbor['user_name'] = reader.wide() if reader.at_wide() else None
+    return neighbor
+
+
+def read_neighbors(reader):
+    """NBRS: slots, each a word saying whether a Neighbor follows."""
+    return [read_neighbor(reader) if reader.read('i') else None for _ in range(reader.read('i'))]
+
+
+def read_neighborhood(reader):
+    """NGBH: Neighborhood::DoStream, with its managers' streams in order."""
+    hood = {'vars': reader.many('h', NEIGHBORHOOD_VARS), 'name': reader.wide(),
+            'word_150': reader.read('i'), 'word_154': reader.read('i'),
+            'goals': reader.many('b', GOAL_BYTES)}
+    hood['plans'] = reader.many('h', reader.read('h'))
+    hood['lots'] = [(reader.read('h'), reader.read('i')) for _ in range(reader.read('h'))]
+    hood['lot_word'] = reader.read('h')
+    hood['transitions'] = reader.many('b', reader.read('h'))
+    hood['weather'] = [(reader.read('i'), reader.read('h'), reader.read('b'), reader.read('b'))
+                       for _ in range(WEATHER_EVENTS)]
+    hood['weather_state'] = (reader.read('i'), reader.read('i'), reader.many('f', 4))
+    hood['res_files'] = [(reader.read('i'), reader.read('i')) for _ in range(reader.read('h'))]
+    return hood
+
+
+def read_family(reader, chunk_id):
+    """FAMI: FamilyImpl::DoStream, and PlayerFamilyImpl's stats if the ID has bit 0x4000."""
+    family = {'number': chunk_id & ~PLAYER_FAMILY, 'player': bool(chunk_id & PLAYER_FAMILY)}
+    for field in ('house', 'creation_order', 'funds', 'pet_points', 'house_value', 'friends', 'flags'):
+        family[field] = reader.read('i')
+    family['members'] = reader.many('I', reader.read('i'))
+    family['name'] = reader.wide()
+    items = reader.read('h')
+    reader.read('b')
+    if items:
+        raise ValueError('inventory items: the disc has none, so they are not read here')
+    family['inventory_words'] = reader.many('i', reader.read('i'))
+    family['stats'] = reader.many('h', PLAYER_STATS) if family['player'] else None
+    return family
+
+
+def read_neighborhood_chunks(disc, pad_strings=True):
+    """The kind 1 section of DEFAULT.NGH: (hood, neighbours, families, chunks used to the last byte)."""
+    disc_file = disc.find(gamedata.NGH_FILE)
+    hood = neighbors = None
+    families = []
+    exact = 0
+    for section in gamedata.read_ngh_sections(disc.read(disc_file.lba, 0, disc_file.size)):
+        if section.kind != NGH_KIND_NEIGHBORHOOD:
+            continue
+        for kind, chunk_id, data in gamedata.house_chunks(section):
+            reader = ReconReader(data, pad_strings)
+            try:
+                if kind == 'NGBH':
+                    hood = read_neighborhood(reader)
+                elif kind == 'NBRS':
+                    neighbors = read_neighbors(reader)
+                else:
+                    families.append(read_family(reader, chunk_id))
+            except (ValueError, struct.error):
+                continue
+            exact += reader.finished()
+    return hood, neighbors, families, exact
+
+
+def check_neighborhood(disc):
+    """Each of the 8 chunks should be used up exactly. The control forgets the strings' padding."""
+    hood, neighbors, families, exact = read_neighborhood_chunks(disc)
+    control = read_neighborhood_chunks(disc, pad_strings=False)[3]
+    real = [n for n in neighbors or [] if n]
+    print('neighbourhood chunks used exactly: %d of 8 (control, no padding: %d); %d neighbours in %d slots, '
+          '%d families, %d members' % (exact, control, len(real), len(neighbors or []), len(families),
+                                       sum(len(f['members']) for f in families)))
+    return exact == 8 and hood is not None, control < 8
+
+
 def main(argv):
     if len(argv) != 2:
         print(__doc__)
@@ -408,9 +556,10 @@ def main(argv):
     counts_hold, count_control_fails = check_counts(disc, sets)
     masters_hold, master_control_fails = check_masters(disc)
     slots_hold, slot_control_fails = check_slots(disc)
+    hood_holds, hood_control_fails = check_neighborhood(disc)
 
-    rules_hold = bad_targets == 0 and bad_expressions == 0 and None not in classes and links_hold and counts_hold and masters_hold and slots_hold
-    controls_fail = bad_control > 0 and bad_expr_control > 0 and link_control_fails and count_control_fails and master_control_fails and slot_control_fails
+    rules_hold = bad_targets == 0 and bad_expressions == 0 and None not in classes and links_hold and counts_hold and masters_hold and slots_hold and hood_holds
+    controls_fail = bad_control > 0 and bad_expr_control > 0 and link_control_fails and count_control_fails and master_control_fails and slot_control_fails and hood_control_fails
     print('rules hold' if rules_hold else 'a rule failed', '/',
           'controls fail as they should' if controls_fail else 'a control passed: the test proves nothing')
     return 0 if rules_hold and controls_fail else 1

@@ -704,5 +704,5 @@ Open:
 - Scale for rigged mid-lot objects.
 - ObjDefinition, ResFile and most `world` columns. `ERLevel`'s submodel list groups.
 - The bodies of most BHAV primitives and some expression scopes; see [bhav.md](bhav.md).
-- Kinds 0 and 1 of `DEFAULT.NGH`: kind 0 holds `TATT`, `SIMI` and `HOUS` chunks and kind 1 `NGBH`, `NBRS` and `FAMI`. Those are likely the neighbourhood, neighbours and families.
+- Kind 0 of `DEFAULT.NGH` holds `TATT`, `SIMI` and `HOUS` chunks. Kind 1 holds `NGBH`, `NBRS` and `FAMI`: `bhav.md`'s Neighbourhood section has them.
 - Which of languages 0 and 1 is the US text. Sample word bit 31.
