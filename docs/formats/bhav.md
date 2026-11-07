@@ -813,13 +813,15 @@ The stack object has to exist, or it's error 0x15.
 | 2 | Me | A subroutine: the tree is pushed and runs normally | Below |
 | Others | | Error 0x2D | |
 
-The tree comes from the stack object's `Behavior`. A name it doesn't have is **false**.
+The tree comes from the stack object's `Behavior`, and `EREdithTreeSet::GetTreeIDByName` compares names with `strcmpi`, ignoring case. A name it doesn't have is **false**.
+
+`+4` counts from 1. The port's control proved it: only that reading finds a string for all 356 uses. Of those, 234 names match a tree exactly, 15 more match ignoring case, and 107 name no tree on the disc.
 
 For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node runs again when the called tree returns. Then frame `+8` is 1, and the result is `GetLastResult`: the true or false that the tree returned with. If I'm not the object doing the running, it's false.
 
 ## GenericSimCall (opcode 1)
 
-**Likely**, read from the Wii build. The PS2 function (`0x22D518`) has the same 67-entry switch on `+0`, but it hasn't been compared call by call. 290 uses. Past 0x42 is error 0x2A.
+**Proven for the numbering**: every call was compared with the PS2 function (`0x22D518`), and all 67 entries of its switch on `+0` do the same job as on Wii. No number differs. Calls 9 to 0x12, 0x16, 0x18, 0x1F, 0x25, 0x29, 0x2C, 0x2D, 0x31, 0x34, 0x36 and 0x38 were read line by line on PS2. The rest are compared by what they call, so their details are **likely**. 290 uses. Past 0x42, and at 0x1B to 0x1E, 0x20 and 0x23, is error 0x2A.
 
 `+0` s16 is the call. Everything else comes from temps, written t0 to t7 here. Unless it says otherwise, a call returns 1. Calls not listed aren't used by any tree on the disc.
 
@@ -832,12 +834,12 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 6 | 6 | Removes the neighbour in the stack object from its family. False if that fails |
 | 7 | 1 | Goal and unlock data call |
 | 8 | 11 | Loading screen. t0 non-zero starts one and returns 1. Otherwise it returns 4 until the iris transition is in, then 1 |
-| 9 | 24 | Finishes loading |
-| 0xA, 0xB | 4, 5 | Turns buy and build off, on |
+| 9 | 24 | Finishes loading: clears `_gd +0x9C`'s word `+0x10`, then `LoadFinishing` |
+| 0xA, 0xB | 4, 5 | Adds me to, or removes me from, ObjectModule's list at `+0x2030`. Buy and build are off while anything is on it |
 | 0xC | 1 | Tribe gets all tools |
 | 0xD | 2 | `CleanupPeople` on the stack object. Missing is error 0xA |
-| 0xE | 3 | Global 0x1F = t0 |
-| 0xF | 52 | Needs me to be a Sim, or error 0x1C. Person data 0x20 = t0, 0x21 = 0. With t0 of 0, also a virtual call with my location |
+| 0xE | 3 | Global 0x1F = t0. Globals are s16s from simulator `+0x38` |
+| 0xF | 52 | Needs me to be a Sim, or error 0x1C. Person data 0x20 = t0, 0x21 = 0. With t0 of 0, also `ComputeRect` from my location |
 | 0x10 | 6 | Game sequences, by t0: 0 starts sequence 2, 1 sequence 3, -1 and -2 wait for them, 2 is game over. Waiting returns 4 |
 | 0x11 | 8 | Sets the harvest count to t0 |
 | 0x12 | 12 | True if in build or buy mode |
@@ -850,14 +852,14 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 0x21 | 1 | Shows all object dialogs |
 | 0x22 | 5 | Starts a lot change to lot t2 |
 | 0x24 | 1 | Replenishes the tribe, t0 |
-| 0x25 | 5 | `_globals` byte `+0x3FB` = t0 != 0 |
+| 0x25 | 5 | A flag = t0 != 0: `_globals +0x4C4` on PS2, a byte at `+0x3FB` on Wii |
 | 0x26 | 2 | t1 = 1 if object t0 is in the world, else 0. False if there's no object |
 | 0x27 | 1 | `AutonomousFoodSelection` on t1, t2, t3. Its result |
-| 0x29 | 4 | t0 must be 0 or 1, or it's -1 |
+| 0x29 | 4 | Only checks: t0 above 1 is error 0x14, and not being a Sim is error 0x4C |
 | 0x2C | 17 | Closes modeless dialogs |
-| 0x2D | 30 | Controller rumble, for the player's Sim only |
+| 0x2D | 30 | Controller rumble, for the player's Sim only. `+4` u16 is the effect, 0 is none, and t0 is an object, or -1 for none |
 | 0x34 | 1 | t2 = 0 |
-| 0x36 | 4 | Reads t7, returns 0 |
+| 0x36 | 4 | Returns 0 whatever t7 holds |
 | 0x37 | 1 | Moves neighbour t0 into the first free family, and t1 = its number. Missing is -1 |
 | 0x38 | 1 | Returns 0 |
 | 0x39 | 9 | Clears cached catalog resources of the stack object |
@@ -988,6 +990,37 @@ The tables are `ObjDefinition`, 196 bytes or 98 s16 words, which is why scope 0x
 The game saves memory by keeping unchanged variables in a table shared by each object type, and writing a value equal to the shared one removes the object's own copy. That's invisible to a tree, so a port can give each object a plain array of 72. Reading variable 0x19 also clears the idle status, as scope 3 says.
 
 **What else `Initialize` does:** it sets the stack up with the temps as default parameters, loads the slot set, moves the object off the map to (-1, -1), and works out its room score.
+
+## Load details
+
+Each of these is labelled. Offsets are PS2 unless they say Wii.
+
+**Parameter 0 of the load tree. Proven for the route, likely for the names.** It's the transition type, and it goes `EGlobal` to `BGExec_LoadHouse`, then `Neighborhood::LoadHouse`, `ObjectModule::PostLoad` and `cXObject::PostLoad` (`0x2532B8`), which stores it as the first of four s16 parameters and leaves the rest 0. The values are named here from who sets them:
+
+| Value | Set by | Reads as |
+|---|---|---|
+| 0 | `MMUTarget`'s constructor | Start of the main menu, the default |
+| 1 | `CAFTarget::GotoGame` | Into the game from Create-a-Family |
+| 2 | `CASTargetTSC6`, `MMUTarget::LaunchSavedGame`, `LSMTarget`'s constructor | From a saved game |
+| 3 | `TryLotTransition`, and a call beside `BGExec_LoadHouse` | Lot to lot |
+| 4 | `LSMTarget::SetVariable` | Keeps the time of the last transition |
+| 5 | `UrbzModeNewGameState::Reset` | New game |
+
+`EGlobal::IsTransitionLoad` is true for 3 and 4. In `LoadHouse`, 0, 1, 2 and 5 keep the game's start time, 4 uses the last transition's time, and 3 and 6 use the globals.
+
+**Sims during `PostLoad`. Proven for the disc.** `ObjectModule::PostLoad` only walks the object list, and `ObjM` builds that list. No `ObjM` on the disc holds a Sim: the 2,611 placed objects are types 1, 4, 7, 9 and 11. So a lot straight off the disc has no Sims while its objects load. **Likely:** a saved lot with Sims in its stream has them in the list, and they run `cXPerson::PostLoad` in list order. In author mode, `LoadHouse` calls `CreateFamilyInLot` after `PostLoad`. **Open:** where the family's Sims come from in a normal game.
+
+**Misc flag 0x40. Proven.** The word is object `+0xE4`. Only `ObjectModule::KillOutOfWorldObject` sets the flag, and `ReconStream` doesn't save it, so it's clear on every loaded object. It marks an object being killed. During a load, `Cleanup` always goes on to place the object.
+
+**Object IDs. Proven for the rule, open for the name.** `AddObject` (`0x222EA0`), given no ID, starts at 0x401 if the app's game state (`_pApp +0x14C`) is 2, and otherwise at 1. It takes the first free slot from there. The state starts at 0 in `EApp`'s constructor, and it's set through a virtual call that hasn't been traced, so which state 2 is remains **open**. Placed objects on the disc have IDs from 1 to 257, none above 0x400. **Likely:** 2 is normal play, so objects made during play stay clear of the IDs saved in lots. A port that keeps IDs from 0x401 for created objects won't collide with saved ones either way.
+
+**`Reset`. Proven on PS2 for the variables, likely for the order.** `cXObject::Reset` (`0x20F478`) copies the variables, clears them all, and puts back 0x1D, 1, 0x29, 0x2D, 0x2E, 0x2F, 0x18, 0x15 and 0x43. It sets 0xB to my ID and 0x3A to definition `+0x62`, and later 2 and 3 from my container. On a single tile only, it then runs init, and if its argument is true, it isn't author mode and I have a main tree, one `Simulate`. A multi-tile object doesn't run init here.
+
+So an object with no cleanup tree runs init twice when it resets on load, on a single tile: once in `Reset`, and once in `PostLoad`.
+
+**`Cleanup(0)`. Proven on PS2 for the entry points.** With a cleanup tree (entry point 3), it runs that on me, or on each part of a multi-tile object, then clears variable 0x3E and bit 5 of variable 8, and puts main back on the stack. Without one, it saves my place, calls `Pickup`, then `Reset(true)` unless flag 0x40 is set, then `Place` if I was placed. `Pickup` runs entry point 10 and `Place` entry point 9, so those run during such a cleanup too.
+
+**Type attributes. Proven on the disc.** `GetTypeAttributes` asks `ObjectFolder` for a block by definition `+0xB8`, or by GUID if that's 0. `+0xB8` is 0 on all 1,335 definitions, so blocks are per GUID. They're shared by all objects of that type, and they aren't in `ObjM`.
 
 ## What a RAM snapshot would settle
 
