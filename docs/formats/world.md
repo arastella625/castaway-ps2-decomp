@@ -617,7 +617,7 @@ at `0x188134` on PS2, walks list 3 after the instance list. For each submodel it
 second while the player's position is inside its bounds on the map, or the line from the camera to the
 player crosses them, and otherwise raises it by 3 a second. Alpha stops at 0 and 1. The point is set in
 `SetupInterestFade` from the player's interactor. `FindOuterLotInteresection` walks the instance list
-and not list 3, so a Sim never stands on these sheets. All 8,030 walkable tiles of the 9 list 3 lots with a
+and not list 3, so a Sim never stands on these sheets. All 9,030 walkable tiles of the 9 list 3 lots with a
 grid are inside its bounds, so while a Sim is on a lot, its list 3 is gone.
 
 What that does to seams, where a seam is two sheets lying within 25 cm of each other, using the 7 lots
