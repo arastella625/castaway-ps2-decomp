@@ -34,7 +34,7 @@ struct BehaviorHeader {
 class IConsoleUnknown {
 public:
     virtual void QueryInterface();
-    virtual void AddRef();
+    virtual int AddRef();
     virtual int Release();
 };
 
@@ -80,12 +80,21 @@ public:
     T *mObject;
 
     ConsoleAutoRefCount(T *object = 0) : mObject(object) {}
+    ConsoleAutoRefCount(const ConsoleAutoRefCount &other);
     ~ConsoleAutoRefCount()
     {
         if (mObject)
             mObject->Release();
     }
-    T **AsPPTypeParam() { return &mObject; }
+    // For a function that fills the pointer in: what it held is released first.
+    T **AsPPTypeParam()
+    {
+        if (mObject) {
+            mObject->Release();
+            mObject = 0;
+        }
+        return &mObject;
+    }
     T *operator->() const { return mObject; }
 };
 
@@ -99,6 +108,7 @@ public:
 ISmartDataFactory *GetSmartDataFactory();
 
 class ObjSelector;
+class ObjectDataBehaviorConstants;
 
 // Finds trees for an object: its own (private), its group's (semi-global) and the global ones.
 class Behavior : public IConsoleUnknown {
@@ -116,6 +126,7 @@ public:
     int GetTree(s16 treeID, ObjectDataBehaviorTree **result, bool load);
     u32 GetNamespaceID();
     u32 GetGlobNamespaceID();
+    inline ObjectDataBehaviorConstants *GetConstants(s16 id, ObjectDataBehaviorConstants **constants);
 
     static bool IsDefaultParam(const s16 *param)
     {

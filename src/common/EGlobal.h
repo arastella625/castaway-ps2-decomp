@@ -22,7 +22,9 @@ public:
 // Wii: EGlobal and its instance _globals. Only what the decompiled code uses is declared.
 class EGlobal {
 public:
-    u8 field_0x0[0x1a8];       // 0x000
+    u8 field_0x0[0x174];       // 0x000
+    class cXPerson *mPlayerPerson; // 0x174  Wii: the Sim InventoryItems::GetTribeInventory asks
+    u8 field_0x178[0x30];      // 0x178
     ERQuickdata *casQuickdata; // 0x1a8  the Create-a-Sim quickdata once it is loaded
     u8 field_0x1ac[0x29c];     // 0x1ac
     int useGameStateTextures;  // 0x448  when set, texture ids are rehashed with "_GAME"

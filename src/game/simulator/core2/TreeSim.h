@@ -107,7 +107,7 @@ public:
     void SetError(s16 code) { mError = code; }
     s16 GetError() { return mError; }
     void ClearError() { mError = 0; }
-    // cXObject derives from TreeSim. Its generated header doesn't say so yet, so this is the cast.
+    // cXObject derives from TreeSim, and this header can't include it, so this is the cast.
     TreeSim *ObjectAsTreeSim() const { return (TreeSim *)mObject; }
     void Reset(Behavior *behavior, s16 treeID);
     int RunOneTickTree(Behavior *behavior, s16 stackObject, s16 treeID, s16 *params);

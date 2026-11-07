@@ -29,15 +29,21 @@ import model as mdl  # noqa: E402
 # Bit widths ReconCmprInt picks between, from the Scheme objects built at startup.
 SCHEMES = {8: (2, 4, 6, 8), 16: (5, 8, 13, 16), 32: (6, 11, 21, 32)}
 MARK_BASE = 12  # marks count from just after the chunk's own 12-byte header
-COUNTED_ARRAYS = 3
-FIXED_SHORTS = 8
+TEMPS = 8
 VARIABLE_KEYS = 72
 DIRECTION_KEY = 1
+OBJECT_ID_KEY = 0xB
 UNITS_PER_TILE = 16
 EIGHTH_TURN = math.pi / 4
 FIRST_LOT_OFFSET = 1  # section 0 is lot_01: HouseData's row 0 is a placeholder
 MISMATCHED_LOT = 'lot_28'  # see docs/formats/world.md
 DEF_GUID = 0x1C
+DEF_TYPE = 0x12
+DEF_TILES = 0x14  # non-zero on the tiles of a multi-tile object
+TYPE_PORTAL = 8
+TYPE_REMOVED = 9  # DoStream swaps these for a placeholder and kills it
+RELATIONS_NEW_FORM = -1  # RelMatrixImpl::DoStream: first word of the form every house uses
+MT_INTS = 6
 RES_MODELS_FROM = 7  # the first word of ResData that may hold a resource hash
 # Stand-ins, not decoded. Nothing on the disc ties a palm's leaf to its trunk, and this object's
 # table row names only a rig, so these come from model names and from looking at the models.
@@ -106,6 +112,18 @@ class BitReader:
 
 
 @dataclass
+class StackFrame:
+    """StackElem::ReconStream."""
+    stack_object: int
+    tree: int
+    node: int
+    params: list
+    locals: list
+    waiting: int
+    owner: int  # the selector's number in objt, which says whose trees these are
+
+
+@dataclass
 class PlacedObject:
     object_id: int
     guid: int
@@ -113,7 +131,15 @@ class PlacedObject:
     box: tuple  # minimum x, minimum y, maximum x, maximum y, in sixteenths of a tile
     centre: tuple
     level: int
+    attributes: list
+    semi_attributes: list
+    static_attributes: list
+    temps: list
     variables: dict
+    stack: list  # StackFrame, bottom first
+    slots: list  # object ID in each object slot
+    state: int  # ObjectModule's word for this ID: low 16 bits idle status, high 16 Sim flags
+    leader: int  # the lead tile's ID on a multi-tile object, else 0
 
     @property
     def on_lot(self):
@@ -136,24 +162,62 @@ def read_variables(reader):
     return {k: reader.integer(16) for k in range(VARIABLE_KEYS) if keys >> k & 1}
 
 
-def read_object(reader, object_id, kind):
-    """cXObject::ReconHeader and the start of ReconStream, as far as the variables."""
+def read_counted(reader):
+    return [reader.integer(16) for _ in range(reader.integer(16))]
+
+
+def read_frame(reader):
+    stack_object, tree, node = reader.integer(16), reader.integer(16), reader.integer(16)
+    local_count, param_count = reader.integer(8) & 0xFF, reader.integer(8) & 0xFF
+    params = [reader.integer(16) for _ in range(param_count)]
+    local_values = [reader.integer(16) for _ in range(local_count)]
+    return StackFrame(stack_object, tree, node, params, local_values, reader.integer(32), reader.integer(16))
+
+
+def read_relations(reader):
+    """RelMatrixImpl::DoStream, in the form used from version 0x54. No house has any entries."""
+    if reader.integer(32) != RELATIONS_NEW_FORM:
+        raise arc.FormatError('ObjM: old relationship form')
+    for _ in range(reader.integer(32)):
+        if reader.integer(32):
+            reader.integer(32)
+            for _ in range(reader.integer(32)):
+                reader.integer(32)
+
+
+def read_object(reader, object_id, kind, shape):
+    """cXObject::ReconStream as the PS2 code reads it, with cXMTObject's fields, then the state."""
     values = [reader.integer(32) for _ in range(6)]
     level = reader.integer(32)
-    reader.integer(16)
-    reader.integer(32)
-    for _ in range(COUNTED_ARRAYS):
-        for _ in range(reader.integer(16)):
-            reader.integer(16)
-    for _ in range(FIXED_SHORTS):
-        reader.integer(16)
+    reader.integer(16)  # always 1
+    attributes, semi_attributes, static_attributes = (read_counted(reader) for _ in range(3))
+    temps = [reader.integer(16) for _ in range(TEMPS)]
     variables = read_variables(reader)
-    return PlacedObject(object_id, kind[0], kind[2], tuple(values[:4]), (values[5], values[4]),
-                        level, variables)
+    frames = reader.integer(32)
+    reader.integer(32)  # memory reserved for the stack
+    stack = [read_frame(reader) for _ in range(frames)]
+    read_relations(reader)
+    slots = [(reader.integer(16), reader.integer(16))[1] for _ in range(reader.integer(16))]
+    read_counted(reader)  # scope 0x1b's array, empty in every house
+    leader = 0
+    if shape[1]:
+        if shape[0] == TYPE_PORTAL:
+            raise arc.FormatError('ObjM: a portal object, which no house has')
+        for _ in range(MT_INTS):
+            reader.integer(32)
+        leader = reader.integer(16)
+    state = reader.integer(32) & 0xFFFFFFFF
+    return PlacedObject(object_id, kind[0], kind[2], tuple(values[:4]), (values[5], values[4]), level,
+                        attributes, semi_attributes, static_attributes, temps, variables, stack, slots,
+                        state, leader)
 
 
-def read_objm(data, types):
-    """ObjectModule::DoStream: a list of ids and types, then each object between two marks."""
+def read_objm(data, types, shapes):
+    """ObjectModule::DoStream: a list of ids and types, then each object between two marks.
+
+    Every object must end exactly on its mark. The exception is type 9, which the game replaces
+    and skips to the mark. Shapes come from object_shapes, and a type it lacks is single-tile.
+    """
     if data[8:12] != b'MjbO':
         raise arc.FormatError('ObjM: bad tag')
     reader = BitReader(data, MARK_BASE)
@@ -172,9 +236,10 @@ def read_objm(data, types):
         end = next_mark + MARK_BASE
         if not reader.pos < end <= len(data) - 4:
             raise arc.FormatError('ObjM: a mark is out of order')
-        objects.append(read_object(reader, object_id, kind))
-        if reader.pos > end:
-            raise arc.FormatError('ObjM: an object runs past its mark')
+        shape = shapes.get(kind[0], (0, 0))
+        objects.append(read_object(reader, object_id, kind, shape))
+        if reader.pos > end or reader.pos < end and shape[0] != TYPE_REMOVED:
+            raise arc.FormatError('ObjM: object %d does not end on its mark' % object_id)
         reader.jump(end)
         next_mark = reader.mark()
     if next_mark != 0:
@@ -193,9 +258,17 @@ def house_streams(disc):
     return streams
 
 
+def object_shapes(disc):
+    """Return {GUID: (object type, multi-tile word)} from ObjDefinition."""
+    data, table = gd.find_table(gd.load_quickdata(disc), 'SimsObjects/ObjDefinition')
+    rows = (table.rows + i * table.stride for i in range(table.count))
+    return {data.word(p + DEF_GUID): struct.unpack_from('<2h', data.image, p + DEF_TYPE) for p in rows}
+
+
 def read_houses(disc):
     """Return {lot name: placed objects}."""
-    return {'lot_%02d' % (index + FIRST_LOT_OFFSET): read_objm(data, types)
+    shapes = object_shapes(disc)
+    return {'lot_%02d' % (index + FIRST_LOT_OFFSET): read_objm(data, types, shapes)
             for index, (types, data) in enumerate(house_streams(disc))}
 
 
@@ -255,7 +328,8 @@ def fit_at_offset(houses, levels, offset):
 
 def check(disc):
     streams = house_streams(disc)
-    houses = [read_objm(data, types) for types, data in streams]
+    shapes = object_shapes(disc)
+    houses = [read_objm(data, types, shapes) for types, data in streams]
     table = model_table(disc)
     models = {e.name for e in arc.read_toc(disc, arc.find_archive(disc, mdl.MODEL_ARCHIVE))}
     totals = collections.Counter()
@@ -266,6 +340,8 @@ def check(disc):
             totals['with a type in ResFile'] += placed.guid in table
             totals['with a model'] += object_model(placed, table, models) is not None
             totals['turned'] += placed.direction != 0
+            totals['with its ID in variable 0xB'] += placed.variables.get(OBJECT_ID_KEY) == placed.object_id
+            totals['with one stack frame at node 0'] += len(placed.stack) == 1 and placed.stack[0].node == 0
     for key, value in sorted(totals.items()):
         print('%-26s %6d' % (key, value))
     passed = gd.report('houses end on a zero mark', len(houses), len(streams))
@@ -273,9 +349,10 @@ def check(disc):
     types, data = streams[0]
     print('controls:')
     passed &= gd.expect_failure('a stream one byte out of place',
-                                lambda: read_objm(data[:MARK_BASE] + data[MARK_BASE + 1:], types))
-    passed &= gd.expect_failure('a stream cut short', lambda: read_objm(data[:-8], types))
-    passed &= gd.expect_failure('an empty type list', lambda: read_objm(data, []))
+                                lambda: read_objm(data[:MARK_BASE] + data[MARK_BASE + 1:], types, shapes))
+    passed &= gd.expect_failure('a stream cut short', lambda: read_objm(data[:-8], types, shapes))
+    passed &= gd.expect_failure('an empty type list', lambda: read_objm(data, [], shapes))
+    passed &= gd.expect_failure('every object read as single-tile', lambda: read_objm(data, types, {}))
 
     archive = arc.find_archive(disc, 'LEVELS')
     levels = {e.name: gd.read_level(disc.read(archive.lba, e.offset, e.size), e.name)

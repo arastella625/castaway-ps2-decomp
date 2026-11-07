@@ -318,9 +318,12 @@ ending in a zero word. The fifth u16 counts up. **Proven:** 1,134 of 1,135 GUIDs
 
 ### ObjM
 
-`tools/placed.py check` reads all 2,611 objects in the 28 houses. **Proven:** every object ends at
-or before its mark, and every house ends on a zero mark. A stream moved by one byte, a stream cut
-short and an empty type list are all rejected.
+`tools/placed.py check` reads all 2,611 objects in the 28 houses. **Proven:** every object ends
+exactly on its mark, except two of type 9 that the game throws away, and every house ends on a zero
+mark. A stream moved by one byte, a stream cut short, an empty type list and reading every object as
+single-tile are all rejected. An earlier version of this page read an extra i32 after the "always 1"
+field, which wasn't in the code. The value it kept finding was the attribute count plus a bit, and
+every field after it was misread, including the variables.
 
 The chunk is u32 0, a u32 version (0x78 to 0x82), `MjbO`, then a `ReconBuffer` stream from offset 12.
 Bits run most significant first within each byte. A compressed integer (`ReconCmprInt`) is:
@@ -334,8 +337,7 @@ Bits run most significant first within each byte. A compressed integer (`ReconCm
 The widths are 2, 4, 6, 8 for 8-bit integers, 5, 8, 13, 16 for 16-bit, and 6, 11, 21, 32 for 32-bit.
 
 A **mark** drops to a byte boundary and holds a u32 giving the position of the next mark, counted
-from offset 12. The reader can skip what it doesn't understand, and `placed.py` uses this to stop
-after the variables.
+from offset 12. The reader can skip what it doesn't understand.
 
 | Field | Meaning |
 |---|---|
@@ -344,25 +346,65 @@ after the variables.
 | mark | |
 | per object, then a mark | See below. The last mark is 0 |
 
-An object starts:
+An object is `cXObject::ReconStream`, read from the PS2 code, then one word from `DoStream`:
 
 | Field | Meaning |
 |---|---|
 | 4 x i32 | Footprint: minimum x, minimum y, maximum x, maximum y |
 | i32, i32 | Centre y, centre x |
 | i32 | Level. 1 on every object |
-| i16, i32 | Not used here |
-| 3 x (i16 count, i16 each) | Three lists, not named yet |
-| 8 x i16 | Not named yet |
+| i16 | Always 1 |
+| i16 count, i16 each | Attributes (scope 0) |
+| i16 count, i16 each | Semi-global attributes (scope 2) |
+| i16 count, i16 each | Static attributes (scope 0x40) |
+| 8 x i16 | Temps |
 | i32, i32, i8 | A 72-bit set of variable keys |
 | i16 per key set | The variables, lowest key first |
+| i32 | Stack frames. 1 on every object |
+| i32 | Memory reserved for the stack. 512 on every object |
+| frames | See below |
+| i32, i32 | Relationships: -1, then 0 entries on every object |
+| i16 count, (i16 0, i16 object ID) each | Object slots |
+| i16 count, i16 each | Scope 0x1B's array. Empty on every object |
+| 6 x i32, i16 | Multi-tile objects only: tile offsets, then the lead tile's ID |
+| i32 | `ObjectModule`'s word for this ID: low 16 bits idle status, high 16 Sim flags |
+
+A stack frame (`StackElem::ReconStream`):
+
+| Field | Meaning |
+|---|---|
+| i16 | Stack object |
+| i16 | Tree ID |
+| i16 | Node |
+| i8, i8 | Local count, parameter count |
+| i16 each | Parameters, then locals |
+| i32 | Waiting flag |
+| i16 | Whose trees: the owner's saved number from `objt` |
+
+Multi-tile means `ObjDefinition +0x14` is non-zero. A multi-tile object of type 8 is a `cXPortal`, which
+has more fields, but no house has one. `objt`'s six u16 are an i32 init tree version, an i32 main tree
+version, an i16 saved number and an i16 type.
+
+**Proven, on the 2,608 objects with a definition:** attribute counts all equal `ObjDefinition +0x74` (0
+means 8), and 292 fail at `+0x72`. The semi-global and static lists fit the rules in
+`docs/formats/bhav.md` except on 319 objects, where they're one shorter (one type's static list is 0
+against 1). So the definitions gained an entry after these houses were saved. The game allocates by
+the definition, then overlays what's saved, so the rest stay 0.
+
+**Proven:** each object's one stack frame is at node 0 in its main tree, entry point 1 of its
+`ObjFnData` (`docs/formats/bhav.md`), on 2,607 of 2,608, and no frame is at entry point 0, 2 or 3. The
+exception is one Conch, saved on the semi-global main tree.
+
+Variable 0xB is the object's own ID on all 2,611. Non-zero attributes are on 168 objects, semi-global
+ones on 1,488 and static ones on 407. Temps are non-zero on 28. This is what's saved, not what a running
+lot ends up with: 2,027 objects reset on load, as `docs/formats/bhav.md` explains.
 
 Positions are in sixteenths of a tile, and a tile is a metre. Controllers such as `The Weather God`
 sit at -16, -16, off the lot: 365 objects do, leaving 2,246 on lots.
 
-Variable 1 is the direction, in eighths of a turn, from the code. **Only weakly tested:** it is
-non-zero on 9 objects, all coconuts, at 1. Which way that turns is not shown by anything on the disc
-so far. Variable 0x1D is the room.
+Variable 1 is the direction, in eighths of a turn, from the code. It's 0 on 1,287 objects and 2, 4 or
+6 on 1,322, so placed objects face the four compass directions. Which way that turns is not shown by
+anything on the disc so far. Variable 0x1D is the room: -5 on the 365 objects off the lot, 0 elsewhere.
 
 **House N is `lot_(N+1)`, counting the first house as 0**, and x and y are not swapped. HouseData's
 row 0 is a placeholder, which fits. Objects land on set cells of their lot's grids at a mean of
@@ -766,7 +808,7 @@ it. So `ranger` is torso, lowerBody and shoes `ranger` and the rest `none`. `def
 - Bits 24-30 of the sample word are read as a rate index by shape, not by ear.
 
 Open:
-- The rest of each `ObjM` object after its variables. In `Arry`: floor values, flags 0x02 and 0x40, the lone wall edge, the trees that change flag 0x10, and whether the mesh bit is vertex flag 0x10.
+- In `Arry`: floor values, flags 0x02 and 0x40, the lone wall edge, the trees that change flag 0x10, and whether the mesh bit is vertex flag 0x10.
 - Object height, the sense of direction, and how shared models pick a variant.
 - What the `lambert1` and `phong1` meshes are for, and whether the game draws them.
 - The light level behind a vertex's baked brightness. Pass flags 0x08, 0x10 and 0x80.
