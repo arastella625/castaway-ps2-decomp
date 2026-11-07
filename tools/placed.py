@@ -44,10 +44,15 @@ TYPE_PORTAL = 8
 TYPE_REMOVED = 9  # DoStream swaps these for a placeholder and kills it
 RELATIONS_NEW_FORM = -1  # RelMatrixImpl::DoStream: first word of the form every house uses
 MT_INTS = 6
-RES_MODELS_FROM = 7  # the first word of ResData that may hold a resource hash
+DEF_RES_DATA = 0xC0  # in ObjDefinition: a pointer to its ObjDefinition::ResData row
+ANIM_DEF_SIZE = 0x20  # ObjAnimDef
+ANIM_DEF_GRAPHIC = 0x18
+ANY_GRAPHIC = -1  # in the first ObjAnimDef: the graphic is simply an index
+GRAPHIC_KEY = 0  # the variable holding an object's graphic
+HIDDEN_KEY = 0x22  # non-zero fails ISimsObjectModel::IsVisible
+HIDES_ON_LOAD = {'zz_move_a__tron'}  # sets HIDDEN_KEY in its load tree; the only such type placed
 # Stand-ins, not decoded. Nothing on the disc ties a palm's leaf to its trunk, and this object's
 # table row names only a rig, so these come from model names and from looking at the models.
-OBJECT_MODELS = {'source_tree_coconutpalm': 'isPalmTreeTrunkEdithFruitFull'}
 PALM_TRUNK = 'isPalmTreeTrunk'
 PALM_LEAF = 'isPalmTreeLeaf'
 PALM_CROWN_HEIGHT = 4.12  # treeanimate3 in isTreeSkeleton
@@ -275,41 +280,53 @@ def read_houses(disc):
             for index, (types, data) in enumerate(house_streams(disc))}
 
 
+def read_anim_defs(data, definition, names):
+    """Return [(graphic, model name)]: an ObjDefinition's ResData row starts with VECTOR<ObjAnimDef>."""
+    if definition + DEF_RES_DATA not in data.pointers:
+        return []
+    start, count = data.vector(data.word(definition + DEF_RES_DATA))
+    anims = []
+    for index in range(count):
+        pos = start + index * ANIM_DEF_SIZE
+        graphic = struct.unpack('<i', struct.pack('<I', data.word(pos + ANIM_DEF_GRAPHIC)))[0]
+        anims.append((graphic, names.get(data.word(pos))))
+    return anims
+
+
 def model_table(disc):
-    """Return {GUID: (resource file name, [resource names])}, through the three tables."""
+    """Return {GUID: (resource file name, [(graphic, model name)])}."""
     quickdata = gd.load_quickdata(disc)
     names = gd.resource_names(disc)
     data, definitions = gd.find_table(quickdata, 'SimsObjects/ObjDefinition')
     _, files = gd.find_table(quickdata, 'SimsObjects/ResFile')
-    _, resources = gd.find_table(quickdata, 'SimsObjects/ObjDefinition::ResData')
-    guids = {}
-    for index in range(definitions.count):
-        pos = definitions.rows + index * definitions.stride
-        guids[pos] = data.word(pos + DEF_GUID)
-    rows = {}
-    for index in range(resources.count):
-        pos = resources.rows + index * resources.stride
-        words = [data.word(pos + o) for o in range(RES_MODELS_FROM * 4, resources.stride, 4)]
-        rows[data.row_name(resources, index)] = [names[w] for w in words if w in names]
+    rows = {definitions.rows + index * definitions.stride for index in range(definitions.count)}
     table = {}
     for index in range(files.count):
-        pos = files.rows + index * files.stride
         name = data.row_name(files, index)
-        start, count = data.vector(pos)
+        start, count = data.vector(files.rows + index * files.stride)
         for item in range(count):
-            guid = guids.get(data.word(start + 4 * item))
-            if guid is not None:
-                table[guid] = (name, rows.get(name, []))
+            definition = data.word(start + 4 * item)
+            if definition in rows:
+                table[data.word(definition + DEF_GUID)] = (
+                    name, read_anim_defs(data, definition, names))
     return table
 
 
+def anim_def(anims, graphic):
+    """ISimsObjectModel::GetAnimDef: pick by graphic, falling back on the first."""
+    index = graphic
+    if anims[0][0] != ANY_GRAPHIC:
+        index = next((i for i, anim in enumerate(anims) if anim[0] == graphic), 0)
+    return anims[index if 0 <= index < len(anims) else 0]
+
+
 def object_model(placed, table, available):
+    """The model an object shows for its saved graphic, if any. Trees may change both later."""
     entry = table.get(placed.guid)
-    if entry is None:
+    if entry is None or not entry[1] or placed.variables.get(HIDDEN_KEY)             or entry[0] in HIDES_ON_LOAD:
         return None
-    if OBJECT_MODELS.get(entry[0]) in available:
-        return OBJECT_MODELS[entry[0]]
-    return next((name for name in entry[1] if name in available), None)
+    name = anim_def(entry[1], placed.variables.get(GRAPHIC_KEY, 0))[1]
+    return name if name in available else None
 
 
 def lot_fit(objects, level):
