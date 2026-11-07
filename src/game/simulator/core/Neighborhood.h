@@ -66,6 +66,7 @@ public:
     Family *GetFamilyByIndex(int index);
 
     int *GetFamily(s16 id);
+    void SavePersistentData(class cXPerson *person);
     int GetNumNeighborHouses() { return mHouses.size(); }
     int GetNeighborHouseByIndex(int index)
     {

@@ -24,6 +24,16 @@ public:
     }
 };
 
+// Wii: MotiveInc, one change to a motive over time. It has a destructor that does nothing.
+class MotiveInc {
+public:
+    int mMotive; // 0x00
+    f32 mDelta;  // 0x04
+    f32 mLimit;  // 0x08
+
+    ~MotiveInc() {}
+};
+
 // The Sim's animator, SAnimator2 in game/animation: only the slot ParticleEffect calls.
 class PersonAnimator {
 public:
@@ -67,7 +77,9 @@ class cXPerson : public cXObject {
 public:
     u32 pad_0x13c[0x11];      // 0x13c
     f32 mMotives[16];         // 0x180  scope 0xe, read through GetMotive
-    u32 pad_0x1c0[0x17];      // 0x1c0
+    u32 pad_0x1c0[0x10];      // 0x1c0
+    eastl::vector<MotiveInc, eastl::allocator> mMotiveIncs; // 0x200
+    u32 pad_0x210[3];         // 0x210
     ActionQueue mActionQueue; // 0x21c
     u32 pad_0x524[5];         // 0x524
     u32 field_0x538;          // 0x538  IsIdle clears bit 0 of it
@@ -76,10 +88,12 @@ public:
     Neighbor *mNeighbor;      // 0x590
     u32 pad_0x594[0x17];      // 0x594
     PersonAnimator *mAnimator; // 0x5f0
+    s16 mIdleLoopCount;       // 0x5f4
 
     static int sbAllowingCheckTreeAds;
 
     long TryGotoRoutingSlot(StackElem *elem, XPrimParam *primParam);
+    long TrySetMotiveDelta(StackElem *elem, XPrimParam *primParam);
     long GotoRoutingSlot(cXObject *object, const RoutingSlot *slot, int &state);
     int IsModelLoaded();
     int IsIdle();

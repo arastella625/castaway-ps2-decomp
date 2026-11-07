@@ -138,6 +138,15 @@ public:
 
     int GetNode(s16 treeID, s16 node, BehaviorNode *result);
     int GetNodeRef(s16 treeID, s16 node, BehaviorNode **result);
+    // The game has GetNode as a function and also inlines it.
+    int GetNodeInline(s16 treeID, s16 node, BehaviorNode *result)
+    {
+        BehaviorNode *ref = 0;
+        int found = GetNodeRef(treeID, node, &ref);
+        if (found)
+            *result = *ref;
+        return found;
+    }
     int GetTree(s16 treeID, ObjectDataBehaviorTree **result, bool load);
     u32 GetNamespaceID();
     u32 GetGlobNamespaceID();

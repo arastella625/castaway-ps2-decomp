@@ -657,6 +657,55 @@ So there's no stored master GUID to decode. **On the disc:** 509 definitions are
 
 `TestObjectType`, with none of its flag bits set, is true if the object's GUID or its master's GUID equals the operand. The other primitives that ask for a master are SetBalloon and GenericSimCall calls 0x39 and 0x3C.
 
+## NotifyStackObject (opcode 0x31)
+
+**Proven**: `TryNotifyStackObject` matches the game byte for byte. 236 uses. No operands.
+
+It wakes the stack object if its main tree is waiting. A missing stack object is error 0x15. It takes the stack object's main frame and reads the node that frame is on. No frame, or no such node, is just true. Otherwise, by the node's primitive:
+
+| Primitive | What it does |
+|---|---|
+| 0, Idle | Sets the parameter that node counts down in to 0, and clears the object's idle status. A parameter number past the frame's count is error 8 |
+| 0x11, IdleForInput | Sets that parameter to 0 |
+| 0x40 | Sets the Sim's idle loop count, `+0x5F4`, to 0. Not a Sim is error 0x1C |
+| Others | Nothing |
+
+It always returns 1, the true branch, unless there's an error.
+
+## KillObject (opcode 0x12)
+
+**Proven**: `TryKillObject` matches the game byte for byte. 328 uses.
+
+| Operand | Meaning |
+|---|---|
+| `+0` s16 | 0 me, 1 the stack object, 2 nobody. Anything else is error 9 |
+| `+2` bit 0 | Return at once, even if I'm killing myself |
+| `+2` bit 1 | Clear means clean up everything |
+
+1. If frame `+8` is 1, this node already ran: return 1.
+2. Find the object. No object is **false**, and so is `+0` of 2, since ID 0 isn't an object.
+3. `AddToKillQueue` queues it. A Sim's data is saved first through `SavePersistentData`.
+4. If I killed myself in the main simulation, and bit 0 is clear, frame `+8` becomes 1 and it returns 2, so the tree stops here. Otherwise **true**.
+
+## SetMotiveDelta (opcode 0x1D)
+
+**Proven**: `cXObject::TrySetMotiveDelta` and `cXPerson::TrySetMotiveDelta` match the game byte for byte. 401 uses.
+
+| Operand | Meaning |
+|---|---|
+| `+0` u8, `+4` s16 | Scope and data of the change |
+| `+1` u8, `+6` s16 | Scope and data of the limit |
+| `+2` u8 | The motive: 5 to 10, 12, 14 or 15. Anything else is error 0x1A |
+| `+3` bit 0 | Clear all |
+| `+3` bits 1, 2 | Influence on me, on the stack object. See below |
+| `+3` bits 3 to 6 | Type, with 0 meaning 1 |
+
+The change is the value times 1/1800, so it's per tick.
+
+**On a non-Sim**, neither influence bit is -1 at once. With one set, it goes to `PassiveInfluenceSystem`: clear all calls `ClearInfluenceMotiveDeltas`, and otherwise `SetInfluenceMotiveDelta` records motive, change, limit and type for that object.
+
+**On a Sim**, an influence bit means the non-Sim path. Without one, it's the Sim's own list at `+0x200`, 12 bytes an entry: motive, change, limit. Clear all empties it. It holds 16, and a full list quietly drops the new one. All paths without an error are **true**.
+
 ## GotoRoutingSlot (opcode 0x2D)
 
 It's Sim-only: `cXPerson::TryGotoRoutingSlot` (`0x1A8CA8`). 418 uses. **Proven** for the primitive, which matches the game byte for byte, and **likely** for the route states, read from the Wii build.
@@ -1002,7 +1051,7 @@ Each of these is labelled. Offsets are PS2 unless they say Wii.
 | 0 | `MMUTarget`'s constructor | Start of the main menu, the default |
 | 1 | `CAFTarget::GotoGame` | Into the game from Create-a-Family |
 | 2 | `CASTargetTSC6`, `MMUTarget::LaunchSavedGame`, `LSMTarget`'s constructor | From a saved game |
-| 3 | `TryLotTransition`, and a call beside `BGExec_LoadHouse` | Lot to lot |
+| 3 | `TryLotTransition`, `BGExec_SetCurHouse` | Lot to lot |
 | 4 | `LSMTarget::SetVariable` | Keeps the time of the last transition |
 | 5 | `UrbzModeNewGameState::Reset` | New game |
 

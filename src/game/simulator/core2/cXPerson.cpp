@@ -80,3 +80,44 @@ int cXPerson::IsModelLoaded()
         return 1;
     return 0;
 }
+
+// Primitive 0x1d on a Sim: influence goes to cXObject's version, and the rest is the Sim's own list.
+long cXPerson::TrySetMotiveDelta(StackElem *elem, XPrimParam *primParam)
+{
+    SetMotiveDeltaParam *param = (SetMotiveDeltaParam *)primParam;
+    if (param->IsInfluence())
+        return cXObject::TrySetMotiveDelta(elem, primParam);
+    if (param->GetClearAll()) {
+        mMotiveIncs.clear();
+        return 1;
+    }
+    switch (param->mMotive) {
+    case 5:
+    case 6:
+    case 7:
+    case 8:
+    case 9:
+    case 10:
+    case 12:
+    case 14:
+    case 15:
+        break;
+    default:
+        TREE_ERROR(0x1a);
+        return -1;
+    }
+    s16 delta;
+    s16 limit;
+    if (InterpValue(param->mDeltaScope, param->mDeltaData, 0, 0, &delta, 0) == -1)
+        return -1;
+    if (InterpValue(param->mLimitScope, param->mLimitData, 0, 0, &limit, 0) == -1)
+        return -1;
+    if (mMotiveIncs.size() < 0x10) {
+        MotiveInc inc;
+        inc.mMotive = param->mMotive;
+        inc.mDelta = delta * 0.00055555562f;
+        inc.mLimit = limit;
+        mMotiveIncs.push_back(inc);
+    }
+    return 1;
+}

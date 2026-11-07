@@ -54,6 +54,23 @@ struct TutorialParam {
     u8 mMode; // 0x00  0 claim, 1 release
 };
 
+// Primitive 0x1d: a change to a motive over time.
+class SetMotiveDeltaParam {
+public:
+    u8 mDeltaScope; // 0x00
+    u8 mLimitScope; // 0x01
+    u8 mMotive;     // 0x02
+    u8 mFlags;      // 0x03  bit 0 clear all, 1 influence me, 2 influence the stack object, 3 to 6 type
+    s16 mDeltaData; // 0x04
+    s16 mLimitData; // 0x06
+
+    bool IsInfluence() const { return (mFlags & 6) != 0; }
+    bool GetClearAll() const { return mFlags & 1; }
+    bool IsInfluenceOnMe() const { return (mFlags >> 1) & 1; }
+    bool IsInfluenceOnStackObject() const { return (mFlags >> 2) & 1; }
+    s8 GetFlagsInTypedMotiveIncFormat() const { return (mFlags & 0x78) >> 3; }
+};
+
 // The operands of primitive 0x3d, ParticleEffect, passed along whole.
 struct ParticleEffectParam {
     u32 field_0x0;

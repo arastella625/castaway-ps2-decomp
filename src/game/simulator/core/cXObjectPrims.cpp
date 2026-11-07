@@ -25,6 +25,14 @@ public:
 };
 }
 
+class AnimRef;
+class PassiveInfluenceSystem {
+public:
+    void SetSkillNameID(cXObject *object, const AnimRef *anim);
+    void ClearInfluenceMotiveDeltas(cXObject *object);
+    void SetInfluenceMotiveDelta(cXObject *object, u8 motive, f32 delta, s16 limit, s8 type);
+};
+
 // Primitive 0xf, TreeBreak.
 struct TreeBreakParam {
     s16 mData;  // 0x00
@@ -593,6 +601,127 @@ long cXObject::TryRelationship2(StackElem *elem, XPrimParam *primParam)
 
 #endif
 
+// Primitive 0x12: kill me, the stack object, or nothing.
+class KillObjectParam {
+public:
+    s16 mWho;  // 0x00  0 me, 1 the stack object, 2 the ID the caller left in killed
+    u8 mFlags; // 0x02  bit 0 return immediately, 1 don't clean up everything
+
+    bool GetReturnImmediately() const { return mFlags & 1; }
+    bool GetCleanupAll() const { return ((mFlags >> 1) ^ 1) & 1; }
+};
+
+long cXObject::TryKillObject(StackElem *elem, XPrimParam *primParam, s16 *killed)
+{
+    KillObjectParam *param = (KillObjectParam *)primParam;
+    if (elem->mWaiting == 1)
+        return 1;
+    OBJECT_ERROR_CHECK(param->mWho >= 0 && param->mWho <= 2, 9);
+    switch (param->mWho) {
+    case 0:
+        *killed = mID;
+        break;
+    case 1:
+        *killed = elem->mStackObject;
+        break;
+    case 2:
+        *killed = 0;
+        break;
+    }
+    cXObject *object = GetObjectFromID(*killed);
+    if (object) {
+        mModule->AddToKillQueue(*killed, param->GetCleanupAll());
+        cXPerson *person = object->GetPerson();
+        if (person)
+            GetNeighborhood()->SavePersistentData(person);
+        bool self = false;
+        if (*killed == mID && TreeSim::sInMainSim)
+            self = true;
+        if (self && !param->GetReturnImmediately()) {
+            elem->mWaiting = 1;
+            return 2;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+// Primitive 0x31: wake the stack object if its main tree is waiting.
+long cXObject::TryNotifyStackObject(StackElem *elem, XPrimParam *primParam)
+{
+    cXObject *stack = GetObjectFromID(elem->mStackObject);
+    OBJECT_ERROR_CHECK(stack, 0x15);
+    StackElem *frame = stack->GetMainSimElem();
+    if (frame) {
+        BehaviorNode node;
+        if (frame->mBehavior->GetNodeInline(frame->GetTreeID(), frame->mNodeIndex, &node)) {
+            s16 prim = node.GetPrimCode();
+            IdleParam *idle = (IdleParam *)node.mParams;
+            if (prim == 0) {
+                OBJECT_ERROR_CHECK(idle->mParam >= 0 && idle->mParam < frame->mNumParams, 8);
+                frame->GetParams()[idle->mParam] = 0;
+                stack->SetIdleStatus(0);
+            } else if (prim == 0x11) {
+                OBJECT_ERROR_CHECK(idle->mParam >= 0 && idle->mParam < frame->mNumParams, 8);
+                frame->GetParams()[idle->mParam] = 0;
+            } else if (prim == 0x40) {
+                cXPerson *person = stack->GetPerson();
+                OBJECT_ERROR_CHECK(person, 0x1c);
+                person->mIdleLoopCount = 0;
+            }
+        }
+    }
+    return 1;
+}
+
+long cXObject::TrySetMotiveDelta(StackElem *elem, XPrimParam *primParam)
+{
+    SetMotiveDeltaParam *param = (SetMotiveDeltaParam *)primParam;
+    if (!param->IsInfluence())
+        return -1;
+    if (param->GetClearAll()) {
+        cXObject *object = 0;
+        if (param->IsInfluenceOnMe())
+            object = this;
+        else if (param->IsInfluenceOnStackObject())
+            object = GetObjectModule()->GetObjectFromIDInline(elem->mStackObject);
+        GetSimulator()->mPassiveInfluence->ClearInfluenceMotiveDeltas(object);
+        return 1;
+    }
+    switch (param->mMotive) {
+    case 5:
+    case 6:
+    case 7:
+    case 8:
+    case 9:
+    case 10:
+    case 12:
+    case 14:
+    case 15:
+        break;
+    default:
+        TREE_ERROR(0x1a);
+        return -1;
+    }
+    s16 delta;
+    s16 limit;
+    if (InterpValue(param->mDeltaScope, param->mDeltaData, 0, 0, &delta, 0) == -1)
+        return -1;
+    if (InterpValue(param->mLimitScope, param->mLimitData, 0, 0, &limit, 0) == -1)
+        return -1;
+    f32 perTick = delta * 0.00055555562f;
+    cXObject *object = 0;
+    if (param->IsInfluenceOnMe())
+        object = this;
+    else if (param->IsInfluenceOnStackObject())
+        object = GetObjectModule()->GetObjectFromIDInline(elem->mStackObject);
+    s8 type = param->GetFlagsInTypedMotiveIncFormat();
+    if (!type)
+        type = 1;
+    GetSimulator()->mPassiveInfluence->SetInfluenceMotiveDelta(object, param->mMotive, perTick, limit, type);
+    return 1;
+}
+
 // A whole tile: x, y, level. Built from numbers, it turns anything that doesn't fit in a byte to 0.
 class CTilePt {
 public:
@@ -1148,12 +1277,6 @@ long cXObject::TryTestObjectType(StackElem *elem, XPrimParam *primParam)
     }
     return 0;
 }
-
-class AnimRef;
-class PassiveInfluenceSystem {
-public:
-    void SetSkillNameID(cXObject *object, const AnimRef *anim);
-};
 
 // Wii: resolveSkillForPassiveInfluence.
 long resolveSkillForPassiveInfluence(cXObject *object, StackElem *elem, const AnimateNewParam *param,
