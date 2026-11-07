@@ -423,6 +423,70 @@ in `### Arry`; this score picks the best-fitting grid per lot.
 The objects have no height. `placed.py lot` drops each onto the terrain's highest surface over its
 one-metre cell, which is a stand-in for what the game does and will be wrong on steep ground.
 
+### Neighbourhood: NGBH, NBRS and FAMI
+
+`tools/neighborhood.py check` reads kind 1's 8 chunks. **Proven:** each ends on its exact last byte, and
+one data word too few, a byte out of place, a chunk cut short and a byte added are all rejected. All
+13 neighbors have a definition, their IDs differ, and all 7 family members are neighbors. `export`
+writes them as JSON. Each chunk is u32 0, u32 version 0x82, the tag reversed, then a plain `ReconBuffer`
+stream from offset 12, with every field below in file order. Text is either a zero, or 0xFFFE then
+UTF-16 to a zero. Narrow text ends in a zero and is padded to even length with 0xCD.
+
+`NGBH`, id 1, from `Neighborhood::DoStream`:
+
+| Type | Meaning |
+|---|---|
+| i16 x 0x24 | Neighbourhood variables, `SetNeighborhoodVar` |
+| text | Name: `Whiskerton` |
+| i32 x 2 | At +0x150 and +0x154. Open |
+| i8 x 0x80 | `GoalUnlock` |
+| i16 count, i16 each | `PlanManager`: unlocked plans. One, plan 29 |
+| i16 count, (i16, i32) each | `LotManager`: 27 lots. Open beyond that |
+| i16, i16 count, i8 each | `LotManager`: a current lot, then 72 bytes |
+| (i32, i16, i8, i8) x 100 | `WeatherManager` events |
+| i32 x 2, f32 x 4 | Weather state, from version 0x82 |
+| i16 count, (i32, i32) each | `LotHelper`: 180 entries. Open |
+
+`NBRS`, id 1, is a u32 count, 88, then an i32 present flag before each. 13 are present. A neighbor,
+from `Neighbor::DoStream`:
+
+| Type | Meaning |
+|---|---|
+| narrow text | Name, like `maid` |
+| i32 | At +0x14. 0 on all |
+| i32 | Non-zero means data words follow. 7 have them |
+| i16 x 0x31 | Neighbor data, at +0x6C. Word 0x2C is the Sim type, and 1 is a chimp |
+| f32 x 16, twice | At +0x114 and +0x154. Open. All are 0 or 20.0 |
+| i16 | ID |
+| i32 | GUID |
+| relations | `RelMatrixImpl::DoStream`, as in `ObjM`. Empty on all |
+| text | Chimps only. It's `Chimp` on 7 |
+
+The game tests `IsChimp` for that text, which needs the Sim type set from the selector, so neighbors
+with no data words can have it. All 4 with data words and that text have Sim type 1, and the 3 without it don't. The reader looks for the 0xFFFE instead: any other neighbor's next
+word is a 0 or 1 flag.
+
+`FAMI`, 6 chunks. IDs 0, 11, 12, 13 and 18, and 0x4001 for the player's family. `FamilyImpl::DoStream`:
+
+| Type | Meaning |
+|---|---|
+| i32 | House number |
+| i32 | Creation order |
+| i32 | Funds |
+| i32 | Pet points |
+| i32 | House value |
+| i32 | Friend count |
+| i32 | Flags: 1 phone, 2 baby, 4 just moved in, 8 freeplay, 0x10 finished Create-a-Family |
+| u32 count, i32 each | Members: neighbors' GUIDs |
+| text | Name, `#house00`. Reading replaces it with the house's real name |
+| i16 count | `InventoryItems`. 0 on all, so the tribe starts with nothing |
+| i8 | Inventory's ID, 0 on all |
+| i32 count, i32 each | 10 words, all 0. **Likely** the tokens ever collected |
+| i16 x 0x19 | Player's family only |
+
+**For a port:** the tribe's stock starts empty, so token column 12 gives -1. **Likely** column 16 gives 0.
+Where column 15's harvest tool comes from is open.
+
 ### Arry
 
 **Proven** for the stream, and for bit 0x10 meaning "not routable". **Likely** for the mesh surface
@@ -476,6 +540,16 @@ and 0x20 always move together. The rest looks stale, as if the disc's flags were
 grids. **Likely**, not proven, that the grids win in play: Load skips them if the level's grids
 aren't ready, and nothing here watched a running game. That the flags were plainly made from grids
 is good evidence that they are ready.
+
+#### Routing export
+
+`lotgrid.py routing` writes everything `XRoute` reads from a lot, as JSON by lot: `columns` and `rows`,
+`flags` as loaded and `floor` as hex rows, one byte a tile, `walls` as `[x, y, the 8 bytes in hex]` for
+each tile that has any, and `wall_edges` as tile pairs. Objects and slots come from `objects.json` and
+`slots.py`. **Proven:** the flags give exactly `walkable` on all 28 lots, and bit 0x01 instead matches
+on none. Every lot has at most one wall edge, and one edge can't enclose anything, so a lot has no
+separate rooms, and no portal joins any: no placed object is type 8. **Likely** every tile is room
+0xFFFB, outside, as all have the outside flag. `ComputeRooms` itself wasn't followed.
 
 #### Where a Sim can walk
 
@@ -878,8 +952,10 @@ it. So `ranger` is torso, lowerBody and shoes `ranger` and the rest `none`. `def
 
 - **Routing slots.** `ResFile +0x28` is a vector of 8-byte entries, a pointer to a `VECTOR` of 0x48-byte
   slots and the set's ID. **Proven**, from `cXObject::Initialize`: `ObjDefinition +0x28` is the ID, 0
-  means none, and from 1000 the set is in the semi-global row. If it isn't there the object simply has
-  no slots: that's 59 definitions, 56 of them ID 1024, like `hut_placement_00`. `ObjectModule` loads
+  means none, and from 1000 the set is in the semi-global row. If it isn't there `SlotLoader` loads
+  nothing, so the object has no slots. That's 59 definitions: 54 name ID 1024, like the `hut_placement`
+  and `wall_placement` helpers, and only `controller_dance` (28) and `scenery_earthquake_rock` (14) are
+  placed. `ObjectModule` loads
   set 100 of the `global` row for global slots, 39 of them. A slot's low byte is its type: 0 object,
   1 sprite, 3 routing. A routing slot's number is its place among the routing slots of its set.
   `tools/slots.py export` writes them, 3,013 on 998 definitions, keyed by signed GUID like `objects.json`.
@@ -894,7 +970,7 @@ it. So `ranger` is torso, lowerBody and shoes `ranger` and the rest `none`. `def
   | 0x1C | i32 x 3 | Multipliers by vertical position. **Likely** standing, sitting, ground |
   | 0x28 | u32 | Flags, below |
   | 0x2C | i32 | Snap target slot, or -1 |
-  | 0x30 | i32 x 3 | Minimum, maximum and optimal distance. **Likely** 16 is a tile |
+  | 0x30 | i32 x 3 | Minimum, maximum and optimal distance, in 1/16 tile |
   | 0x3C | f32 | Gradient |
   | 0x40 | i32 | Facing: 0 to 7 a direction, -1 away from the object, -2 towards it, -3 any |
   | 0x44 | i32 | Resolution |
@@ -902,7 +978,9 @@ it. So `ranger` is torso, lowerBody and shoes `ranger` and the rest `none`. `def
   Flags: bits 0 to 7 allow each direction, and with none set the slot is on top of the object. 0x100
   any rotation, 0x200 absolute, 0x800 ignore rooms, 0x1000 snap to direction, 0x2000 random scoring,
   0x4000 failure trees allowed, 0x8000 different altitudes, 0x10000 use the average object location,
-  0x20000 a TS2 routing slot. **Open:** bit 0x400, and how the route uses gradient and resolution.
+  0x20000 a TS2 routing slot. Bit 0x400 is a leftover: `SlotDescriptor::DoStream` turns it into facing
+  -1 on slots older than version 9, as it does 0x200 into -3, and it multiplies distances before
+  version 10 by 16. No slot on the disc sets 0x400, and one sets 0x200.
 
 ## Disagreements with docs/ASSET_FORMATS.md
 
@@ -933,5 +1011,5 @@ Open:
 - Scale for rigged mid-lot objects.
 - ObjDefinition, ResFile and most `world` columns.
 - The bodies of most BHAV primitives and some expression scopes; see [bhav.md](bhav.md).
-- Kinds 0 and 1 of `DEFAULT.NGH`: kind 0 holds `TATT`, `SIMI` and `HOUS` chunks and kind 1 `NGBH`, `NBRS` and `FAMI`. Those are likely the neighbourhood, neighbours and families.
+- Kind 0 of `DEFAULT.NGH`'s `HOUS` chunks. What the neighbour floats, `lot_resources` and two NGBH words mean.
 - Which of languages 0 and 1 is the US text. Sample word bit 31.
