@@ -70,6 +70,7 @@ public:
 
     GoalAndUnlockData *GetGoalAndUnlockData() { return &mGoals; }
     Neighbor *FindNeighborByID(int id);
+    void SetNeighborhoodVar(int index, s16 value) { mVars[index] = value; }
     int GetNumFamilies();
     Family *GetFamilyByIndex(int index);
 

@@ -13,6 +13,22 @@
 
 #define OBJECT_ERROR_CHECK(condition, code) TREE_CHECK(this, condition, code, return -1)
 
+class Player {
+public:
+    Neighbor *GetPrimaryNeighbor();
+};
+
+class GameData {
+public:
+    u32 pad_0x0[0x2a];
+    int mInitialSimSelection; // 0xa8
+    u32 pad_0xac[7];
+    Player mPlayer;           // 0xc8
+
+    Player *GetPlayer() { return &mPlayer; }
+};
+extern GameData _gd;
+
 namespace InteractorModule {
 class DirectInteractor {
 public:
@@ -394,8 +410,6 @@ cXObject *cXObject::GetInteractionLeader()
 #ifdef NON_MATCHING
 // The logic is complete, from the Wii build, and 563 of the game's 732 words line up on a first
 // pass. It's 25 words short: the neighbour lookups need checking case by case against the game.
-extern int _gd;
-
 // Wii: an object's or neighbour's relationships. Only the slots Relationship2 calls.
 class RelMatrix {
 public:
@@ -2062,5 +2076,114 @@ long cXObject::TrySnap(StackElem *elem, XPrimParam *primParam)
     else
         mVars.WriteVar(0x36, 0);
     return result;
+}
+#endif
+
+// Not matched: 2 words differ. The game loads the lead into a temporary and copies it, and every
+// form tried here loads it straight into the saved register.
+#ifdef NON_MATCHING
+// Only what LotTransition reads.
+class EHouse {
+public:
+    u32 pad_0x0[0xf];
+    int mLot; // 0x3c
+};
+
+class LotTransitionParam {
+public:
+    u8 mDestination; // 0x00  an operand code, see GetShortComboValue
+    u8 mType;        // 0x01  the same
+    u8 mListOnly;    // 0x02
+};
+
+inline void GetShortComboValue(u8 code, s16 *scope, s16 *data)
+{
+    if (code == 0) {
+        *scope = 3;
+        *data = 0xB;
+    } else if (code == 1) {
+        *scope = 0xA;
+        *data = 0;
+    } else if ((u8)(code - 2) < 8) {
+        *scope = 8;
+        *data = code - 2;
+    } else if ((u8)(code - 0xA) < 8) {
+        *scope = 0x19;
+        *data = code - 0xA;
+    } else if ((u8)(code - 0x12) < 8) {
+        *scope = 9;
+        *data = code - 0x12;
+    } else {
+        *scope = 7;
+        *data = code - 0x7E;
+    }
+}
+
+long cXObject::TryLotTransition(StackElem *elem, XPrimParam *primParam)
+{
+    LotTransitionParam *param = (LotTransitionParam *)primParam;
+    if (param->mListOnly) {
+        Neighborhood *hood = GetNeighborhood();
+        s16 id = hood->GetNextNeighborID(0);
+        s16 count = 0;
+        s16 *temps = mTemps;
+        for (int i = 5; i >= 0; i--)
+            temps[i] = 0;
+        if (_globals.mTransitionType == 4) {
+            temps[0] = _globals.GetTransitioningNeighborID();
+        } else {
+            while (id && count < 6) {
+                if (hood->FindNeighborByIDInline(id)->mPersonData[0x2B])
+                    temps[count++] = id;
+                id = hood->GetNextNeighborID(id);
+            }
+        }
+        if (_globals.mPlayerPerson)
+            _gd.mInitialSimSelection = _globals.mPlayerPerson->GetNeighbor()->mID;
+        return 1;
+    }
+
+    Neighborhood *hood = GetNeighborhood();
+    s16 id = hood->GetNextNeighborID(0);
+    s16 scope;
+    s16 data;
+    s16 destination = 0;
+    s16 type = 0;
+    GetShortComboValue(param->mDestination, &scope, &data);
+    if (InterpValue(scope, data, 0, 0, &destination, 0) == -1)
+        return -1;
+
+    Neighborhood *neighbors = GetNeighborhood();
+    Neighbor *lead = neighbors->FindNeighborByIDInline(mTemps[0]);
+    if (!lead) {
+        if (_globals.mPlayerPerson) {
+            lead = _globals.mPlayerPerson->GetNeighbor();
+            _gd.mInitialSimSelection = lead->mID;
+        } else {
+            _gd.GetPlayer()->GetPrimaryNeighbor(); // the game drops the result, so lead stays null
+        }
+    }
+    while (id) {
+        Neighbor *other = hood->FindNeighborByIDInline(id);
+        if (other != lead)
+            other->mPersonData[0x2B] = 0;
+        id = hood->GetNextNeighborID(id);
+    }
+
+    s16 transition = lead->mPersonData[0x2E];
+    GetShortComboValue(param->mType, &scope, &data);
+    if (InterpValue(scope, data, 0, 0, &type, 0) != -1) {
+        cSimulator *simulator = gSimulator;
+        neighbors->SetNeighborhoodVar(0x15, simulator->GetGlobal(0));
+        neighbors->SetNeighborhoodVar(0x16, simulator->GetGlobal(1));
+        neighbors->SetNeighborhoodVar(0x17, simulator->GetGlobal(5));
+        neighbors->SetNeighborhoodVar(0x18, simulator->GetGlobal(7));
+        neighbors->SetNeighborhoodVar(0x19, simulator->GetGlobal(8));
+        _globals.mTransitionType = 3;
+        _globals.mPreviousLot = _globals.mHouse->mLot;
+        TransitionToLot(destination, type, transition);
+        return 1;
+    }
+    return -1;
 }
 #endif

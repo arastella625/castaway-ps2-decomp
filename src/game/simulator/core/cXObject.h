@@ -208,6 +208,7 @@ public:
     s16 *mIndexedData;         // 0x6c  scope 0x1b; the destructor frees it
     s16 mNumIndexedData;       // 0x70
     s16 mTemps[8];             // 0x72  scope 8
+    s16 GetTemp0() const { return mTemps[0]; }
     EdithVariableSet mVars;    // 0x84  scope 3 and 4
     ObjectModule *mModule;     // 0xb4
     cXObject *mNext;           // 0xb8  the next object in ObjectModule's list
@@ -368,6 +369,7 @@ public:
     long TryAnimate(StackElem *, const AnimateNewParam *);
     long TryCustomUI(StackElem *, XPrimParam *);
     long TryLotTransition(StackElem *, XPrimParam *);
+    void TransitionToLot(s16 destination, s16 type, s16 transition);
     long TryFamilyInventory(StackElem *, XPrimParam *);
     long TrySyncAudio(StackElem *, XPrimParam *);
     long TryNotifyPlans(StackElem *, XPrimParam *);

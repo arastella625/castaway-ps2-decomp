@@ -1561,7 +1561,7 @@ No spawn object at all returns false, and the tree stops. Before returning it cl
 | Case | Placement |
 |---|---|
 | No spawn object | FindGoodLocation mode 6, editable tiles only: a random tile |
-| Load type 1 or 2 | Not placed here: the object stays where it was made |
+| Load type 1 or 2 | Not placed here. **Open:** what puts a new game's lead in the world after this |
 | Load type 5 with global 0xA at 1 | Not placed here |
 | The spawn's category (variable 0x3B) is 0x23, `transition_portal` | PushAction on the Sim: interaction 1 on the portal, so it walks in through `Interaction - Arrive` |
 | Otherwise | FindGoodLocation mode 0, flags 3, from the spawn object: the spiral search, not preferring empty tiles |
@@ -1570,11 +1570,11 @@ If placing fails the tree ends with an error. Afterwards it sets person data 0xF
 
 **`Sub - Establish Geographic Verisimilitude` (`0x202A`)** walks every neighbour, skipping the lead. A neighbour who has an object and isn't on this lot is removed. A family member whose word 0x2F is this lot (global 0xA) and who has no object gets one. It then looks for a Harvestable Source object (category 0x44) with a room, skipping `source_marine_fish` and `source_marine_clamrock`, and tries FindGoodLocation mode 0 from it, then mode 6. If both fail, the Sim is removed.
 
-**For a port:** on arrival by lot transition, put the lead on the `transition_triggerplate` whose attribute 1 is the transition number, using the spiral search from it. On a new game use the first `portal_green_arrow`, then plates. The rest of the family use the harvestable source rule.
+**For a port:** on arrival by lot transition, put the lead on the `transition_triggerplate` whose attribute 1 is the transition number, using the spiral search from it. That's proven. For a new game the trees only choose the first `portal_green_arrow`, then plates, and don't place the lead themselves, so using that object's tile is a reasonable stand-in, not the game's proven behaviour. The rest of the family use the harvestable source rule.
 
 ## LotTransition (opcode 0x45)
 
-**Proven: read line by line on PS2** (`0x23A448`), and `LotManager` compared on both builds where marked. Not matched. 11 uses.
+**Proven: read line by line on PS2** (`0x23A448`), and `LotManager` compared on both builds where marked. Not matched: 2 words short, parked under `NON_MATCHING`. 11 uses.
 
 The primitive never reads the 72-entry table. It picks who's going and where, and the costs come later.
 
@@ -1593,14 +1593,15 @@ The primitive never reads the 72-entry table. It picks who's going and where, an
 
 **With `+2` zero it transitions:**
 
-1. `+0` gives a neighbour ID. No such neighbour falls back to the player's.
-2. Person data 0x2B is cleared on every other neighbour.
-3. `+1` gives the destination.
-4. Globals 0, 1, 5, 7 and 8 are saved in neighbourhood variables 0x15 to 0x19.
-5. The transition type becomes 3.
-6. `TransitionToLot(neighbour, destination, the neighbour's word 0x2E)`.
+1. `+0` gives the destination lot.
+2. The lead is the neighbour whose ID is in my temp 0. With none it's the player's neighbour, which also sets the initial Sim selection. With no player Sim the code calls `GetPrimaryNeighbor` and drops the result, so the lead stays null and the next read would crash: a port should use the primary neighbour there.
+3. Person data 0x2B is cleared on every neighbour but the lead.
+4. `+1` gives a type. The trees mostly pass literal 5.
+5. Globals 0, 1, 5, 7 and 8 are saved in neighbourhood variables 0x15 to 0x19.
+6. The transition type becomes 3, and the current lot is saved as the previous lot.
+7. `TransitionToLot(destination, type, the lead's word 0x2E)`.
 
-`TransitionToLot` clears 0x2B on everyone, then sets it to the current lot's number on each ID in my temps 0 to 5. So **0x2B is the lot a Sim left from**, and non-zero means it's in transit. It records the destination and word 0x2E as the transition ID, and moves the family's house number. **Word 0x2E is the transition number**, which is what picks the plate on arrival.
+`TransitionToLot` does nothing unless the type is 5. It clears 0x2B on everyone, then sets it to the current lot's number on each ID in my temps 0 to 5. So **0x2B is the lot a Sim left from**, and non-zero means it's in transit. It records the destination and word 0x2E as the transition ID, and moves the family's house number. **Word 0x2E is the transition number**, which is what picks the plate on arrival.
 
 **Costs. Likely, Wii.** `LotManager::PerformLotToLotTransition` is where the table is read. With a transition ID above 0 it calls `GetTransitionCost`, and otherwise `BuildTransitionList` finds a route through the lots. Time then passes in the game clock in steps, with `WeatherManager::AdvanceTime`, and `ApplyDamageOverTimeOnLotLoad` runs. See Lot transitions for the fields.
 
