@@ -1137,3 +1137,4 @@
 0x001DCAA8 IsIdle__8cXPerson
 0x001AE2E0 AddAction__8cXPersonP11Interaction
 0x00261698 _$_8BString2
+0x004BC2B0 _vt$11Interaction
