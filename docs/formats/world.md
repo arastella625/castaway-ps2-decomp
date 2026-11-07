@@ -545,8 +545,6 @@ These make a lot look right and are **not decoded**:
   for its name and hash finds only archive tables and one preload list, and the executable has no
   such string, so how the game attaches leaves to `isPalmTreeTrunk` is **open**. The tool repeats
   the frond nine times at `treeanimate3`, 4.12 m up, lifted 20 degrees. The count and lift are guesses.
-- **`source_tree_coconutpalm`** names only a rig and an action queue, so it uses
-  `isPalmTreeTrunkEdithFruitFull`, chosen by name.
 
 The port also blocks tiles under placed objects over 0.5 m tall. Which objects really block is
 **open**.
@@ -842,16 +840,63 @@ it. So `ranger` is torso, lowerBody and shoes `ranger` and the rest `none`. `def
   +0x0C. **Proven:** the hash equals the row name's `CalcId` on 694 of 698, and those 694 are the 694
   Edith tree sets, one to one. 597 also have a dataset of that name. `0x53545223` in its data is
   `STR#`. Vector +0 holds ObjDefinition pointers; the others are open.
-- **ObjDefinition::ResData**: interactions, with names like `Fire - Test` and action hashes.
-- **Models for objects:** no model hash appears in ObjDefinition. The chain, **proven** to connect
-  by names and hashes: the GUID at ObjDefinition +0x1C; the ResFile whose vector +0 points at that
-  ObjDefinition row (1,335 of 1,335 rows); the ObjDefinition::ResData row with the ResFile's name;
-  then resource hashes from word 7 of that row, of which word 8 is usually the model. Of 2,611
-  placed objects, 2,610 have a ResFile, 1,576 reach a model or rig, and 1,448 of those are in
-  `MODELS.ARC`. `placed.py lot` draws only those: rigged ones in `CHARACTE.ARC` are left out.
-  911 have no ResData row, mostly invisible helpers (`portal_basic`, `spawner_object`), though
-  `plumbing_hottub_hotspring` is one too. 123 have a row with no model (`source_tree_koa`).
-  **Open:** models shared by many objects (`isTreeSkeleton`) suggest variants chosen at run time.
+- **ObjDefinition::ResData**: what an object looks like, below. Rows are named after objects, like `Fire - Test`.
+- **Models for objects. Proven.** `ObjDefinition +0xC0` points to the object's
+  `ObjDefinition::ResData` row, and that row starts with a `VECTOR<ObjAnimDef>`, 0x20 bytes each:
+
+  | Offset | Meaning |
+  |---|---|
+  | 0 | Model hash |
+  | 4 | Effect attachment ID |
+  | 8 | Animation hash, like `o_isTreeBananaPose` |
+  | 0xC | Search shader hash |
+  | 0x10 | Shader hash |
+  | 0x14 | Light |
+  | 0x18 | Graphic, s32 |
+
+  `ISimsObjectModel::GetAnimDef` takes the object's variable 0 and picks the entry with that graphic,
+  or the first if none matches. If the first entry's graphic is -1, the variable is an index. So
+  `source_tree_banana` is `isBananaTreeTrunkFruitFull`, `FruitSome` and `isBananaTreeTrunk` for graphics
+  0, 1 and 2. 1,993 of 2,000 entries name a model or rig. Word 1 finds 1, word 2 finds 24, and strides
+  of 0x1C and 0x24 find 657 and 665. 719 definitions have no row. Of a multi-tile object's definitions,
+  only the lead has one, so one model is drawn for the whole object.
+
+  `ISimsObjectModel::IsVisible` fails when variable 0x22 is non-zero. All 278 `portal_basic` and 37
+  `spawner_object` have it saved as 1, which hides their `placeholder_01` cubes. `zz_move_a__tron`, the
+  28 gnomes, sets it in its `load` tree, and a cheat tree clears it. Of all 694 tree sets, 3 do that
+  in `load` or `init`, and it's the only one placed.
+
+  The row's word 7 is `*_action_queue`, a shader and texture, not a model. Word 8 is a rig when the
+  model has one. `placed.py` shows the saved state. **Open:** trees can change variables 0 and 0x22
+  once they run. Rigged models in `CHARACTE.ARC` are still left out.
+
+- **Routing slots.** `ResFile +0x28` is a vector of 8-byte entries, a pointer to a `VECTOR` of 0x48-byte
+  slots and the set's ID. **Proven**, from `cXObject::Initialize`: `ObjDefinition +0x28` is the ID, 0
+  means none, and from 1000 the set is in the semi-global row. If it isn't there the object simply has
+  no slots: that's 59 definitions, 56 of them ID 1024, like `hut_placement_00`. `ObjectModule` loads
+  set 100 of the `global` row for global slots, 39 of them. A slot's low byte is its type: 0 object,
+  1 sprite, 3 routing. A routing slot's number is its place among the routing slots of its set.
+  `tools/slots.py export` writes them, 3,013 on 998 definitions, keyed by signed GUID like `objects.json`.
+  All 113 `GotoRoutingSlot` nodes with a literal slot are in range of their own object, against 75
+  with the next object's slots. Reading the ID at +0x2A loses 174 sets instead of 59.
+
+  | Offset | Type | Meaning, from `RoutingSlot`'s accessors |
+  |---|---|---|
+  | 0 | u32 | Type, in the low byte. The rest is 0xFAFA padding |
+  | 4 | f32 x 3 | Offset |
+  | 0x10 | 12 bytes | Unused by routing slots |
+  | 0x1C | i32 x 3 | Multipliers by vertical position. **Likely** standing, sitting, ground |
+  | 0x28 | u32 | Flags, below |
+  | 0x2C | i32 | Snap target slot, or -1 |
+  | 0x30 | i32 x 3 | Minimum, maximum and optimal distance. **Likely** 16 is a tile |
+  | 0x3C | f32 | Gradient |
+  | 0x40 | i32 | Facing: 0 to 7 a direction, -1 away from the object, -2 towards it, -3 any |
+  | 0x44 | i32 | Resolution |
+
+  Flags: bits 0 to 7 allow each direction, and with none set the slot is on top of the object. 0x100
+  any rotation, 0x200 absolute, 0x800 ignore rooms, 0x1000 snap to direction, 0x2000 random scoring,
+  0x4000 failure trees allowed, 0x8000 different altitudes, 0x10000 use the average object location,
+  0x20000 a TS2 routing slot. **Open:** bit 0x400, and how the route uses gradient and resolution.
 
 ## Disagreements with docs/ASSET_FORMATS.md
 
