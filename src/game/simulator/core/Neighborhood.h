@@ -10,15 +10,20 @@ class ObjSelector;
 // Wii: Neighbor. Only what the decompiled code reads is declared so far.
 class Neighbor {
 public:
-    u8 pad_0x0[8];
+    u32 pad_0x0;            // 0x00
+    s16 mID;                // 0x04
     int field_0x8;          // 0x08  the argument of Family's membership test
     ObjSelector *mSelector; // 0x0c
-    u8 pad_0x10[0x5c];      // 0x10
+    class RelMatrix *mRelations; // 0x10
+    u32 pad_0x14[3];        // 0x14
+    int mDirty;             // 0x20
+    u8 pad_0x24[0x48];      // 0x24
     s16 mPersonData[0x31];  // 0x6c  scopes 0x34 to 0x39
 
     Family *GetFamily();
     s16 CountRelationshipsOfType(int type, bool a) const;
     s16 *GetPersonDataArray() { return mPersonData; }
+    s16 GetID() const { return mID; }
 
     // The game has this as a function (0x250DE8) and also inlines it in InterpValue. An inline
     // function's copy lands in a linkonce section, so the inline body has its own name.
@@ -39,6 +44,13 @@ public:
     virtual void Slot2();
     virtual void Slot3();
     virtual int Get(int kind, int index);
+    virtual void Slot5();
+    virtual void Slot6();
+    virtual void Slot7();
+    virtual void Slot8();
+    virtual void Unlock(int kind, int index);
+    virtual s16 GetStatus(int kind, int index);
+    virtual void SetStatus(int kind, int index, int status);
 };
 
 // Wii: Neighborhood. Its vptr comes after the fields, at 0x21ec.
@@ -46,7 +58,9 @@ class Neighborhood {
 public:
     eastl::vector<Neighbor *, eastl::allocator> mNeighbors; // 0x00
     s16 mVars[0x24];           // 0x10  scope 0x22
-    u32 pad_0x58[0x1b];        // 0x58
+    u32 pad_0x58[0x12];        // 0x58
+    eastl::vector<int, eastl::allocator> mHouses; // 0xa0  lot numbers
+    u32 pad_0xb0[5];           // 0xb0
     GoalAndUnlockData mGoals;  // 0xc4
     u32 pad_0xc8[0x849];       // 0xc8
 
@@ -54,9 +68,32 @@ public:
     virtual s16 GetStackObjectValue(int id, s16 data, const s16 **ref);
 
 
+    GoalAndUnlockData *GetGoalAndUnlockData() { return &mGoals; }
     Neighbor *FindNeighborByID(int id);
+    void SetNeighborhoodVar(int index, s16 value) { mVars[index] = value; }
     int GetNumFamilies();
     Family *GetFamilyByIndex(int index);
+
+    int *GetFamily(s16 id);
+    void SavePersistentData(class cXPerson *person);
+    int GetNumNeighborHouses() { return mHouses.size(); }
+    int GetNeighborHouseByIndex(int index)
+    {
+        if ((unsigned int)index >= mHouses.size())
+            index = mHouses.size() - 1;
+        return mHouses[index];
+    }
+
+    // The ID of the first neighbour after this one, or 0.
+    s16 GetNextNeighborID(s16 id)
+    {
+        while ((unsigned int)id < mNeighbors.size()) {
+            id++;
+            if (mNeighbors[id - 1])
+                return id;
+        }
+        return 0;
+    }
 
     // The game has this as a function and also inlines it in InterpValue.
     Neighbor *FindNeighborByIDInline(int id)
@@ -72,6 +109,12 @@ class Globs {
 public:
     enum TransitionType { };
     static Neighborhood *pNeighborhood;
+    static class House *pHouse;
+};
+
+class House {
+public:
+    void ComputeAndStoreLotData();
 };
 
 inline Neighborhood *GetNeighborhood()

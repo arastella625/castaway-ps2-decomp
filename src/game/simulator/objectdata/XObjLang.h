@@ -1,6 +1,7 @@
 #ifndef GAME_SIMULATOR_OBJECTDATA_XOBJLANG_H
 #define GAME_SIMULATOR_OBJECTDATA_XOBJLANG_H
 
+#include "common/EGlobal.h"
 #include "common/ERQuickdata.h"
 #include "common/types.h"
 #include "game/simulator/core/Behavior.h"
@@ -23,10 +24,68 @@ public:
     int CountValues() const;
 };
 
+// Wii: StringSet, an STR# resource.
+class StringSet : public IConsoleUnknown {
+public:
+    virtual void Slot3();
+    virtual void Slot4();
+    virtual void Slot5();
+    virtual void Slot6();
+    virtual void Slot7();
+    virtual void Slot8();
+    virtual void Slot9();
+    virtual void Slot10();
+    virtual void Slot11();
+    virtual void Slot12();
+    virtual int GetStringCount(int language);
+    virtual void Slot14();
+    virtual const char *GetString(int index, int language);
+    virtual ELocString GetLocString(int index);
+    virtual void Slot17();
+    virtual void Slot18();
+    virtual void Slot19();
+    virtual void Slot20();
+    virtual void Slot21();
+    virtual void Slot22();
+    virtual void Slot23();
+    virtual void Slot24();
+    virtual void Slot25();
+    virtual void Slot26();
+    virtual void Slot27();
+    virtual void Slot28();
+    virtual void Load(u32 namespaceID, s16 id);
+
+    static StringSet *CreateInstance();
+    static void DestroyInstance(StringSet *strings);
+};
+
+// Wii: AUTOPTR, owning a thing made by its class's CreateInstance.
+template <class T>
+class AUTOPTR {
+public:
+    T *mObject;
+
+    AUTOPTR() : mObject(0) {}
+    ~AUTOPTR() { Reset(); }
+    void Reset()
+    {
+        T::DestroyInstance(mObject);
+        mObject = 0;
+    }
+    void CreateInstance()
+    {
+        Reset();
+        mObject = T::CreateInstance();
+    }
+    T *operator->() const { return mObject; }
+};
+
 // Wii: NamespaceSelector. What a namespace ID resolves to.
 class NamespaceSelector {
 public:
     ObjectDataBehaviorConstants *GetBehaviorConstants(s16 id);
+    void *GetCacheItem(s16 id, void *cache, u32 type, int kind);
+    StringSet *GetStringSet(s16 id) { return (StringSet *)GetCacheItem(id, (char *)this + 8, 0x6bc37bc5, 2); }
 };
 
 // Wii: HashList<ObjSelector, int, 256>. A find moves what it finds to the front of its bucket.
@@ -36,17 +95,20 @@ public:
 
     ObjSelector *findItem(const int &key)
     {
-        ObjSelector **bucket = &mBuckets[key & 0xff];
+        unsigned int index = key & 0xff;
+        ObjSelector *selector = mBuckets[index];
         ObjSelector *previous = 0;
-        ObjSelector *selector = *bucket;
-        while (selector && key != selector->GetGUID()) {
+        while (selector) {
+            if (selector->compare(key)) {
+                if (previous) {
+                    previous->mNext = selector->mNext;
+                    selector->mNext = mBuckets[index];
+                    mBuckets[index] = selector;
+                }
+                break;
+            }
             previous = selector;
             selector = selector->mNext;
-        }
-        if (selector && previous) {
-            previous->mNext = selector->mNext;
-            selector->mNext = *bucket;
-            *bucket = selector;
         }
         return selector;
     }

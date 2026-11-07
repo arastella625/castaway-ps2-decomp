@@ -585,7 +585,8 @@ Room IDs count from 0, and 0xFFFB is a diagonal tile holding two rooms, not outs
 `lotgrid.walkable(lot)` gives the tiles with bit 0x10 clear after load. The game tests this bit in
 three places:
 
-- `TILEROUTABLE`, for room routing: bit set means no. Wii code only; not found on PS2 yet.
+- `TILEROUTABLE`, for room routing: bit set means no. On PS2 it's `0x1CA948`. `bhav.md`'s Routing
+  section says what else a route reads.
 - `CollisionMap::IsLocationGood`, for placing: bit clear means yes. If it's set, the caller can ask
   for a mesh test. The same shape is on PS2 near 0x315850.
 - `CollisionMap::IsMoveBlocked`, for each step of a move: a ghost ignores the bit. Otherwise a set
@@ -1072,4 +1073,5 @@ Open:
 - ObjDefinition, ResFile and most `world` columns.
 - The bodies of most BHAV primitives and some expression scopes; see [bhav.md](bhav.md).
 - How the 16 neighbour motives map onto a Sim's, and which set is which.
+- Kind 0 of `DEFAULT.NGH` holds `TATT`, `SIMI` and `HOUS` chunks. Kind 1 holds `NGBH`, `NBRS` and `FAMI`: `bhav.md`'s Neighbourhood section has them.
 - Which of languages 0 and 1 is the US text. Sample word bit 31.
