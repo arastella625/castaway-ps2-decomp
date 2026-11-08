@@ -1196,6 +1196,9 @@
 0x001E5018 GetCurrentGoal__6XRoute
 0x001D9A70 __6XRouteRC6XRoute
 0x001249B0 allocate__Q25eastl9allocatorUiUiUi
+0x001D16D0 DoInsertValue__Q25eastlt6vector2Z6XRouteZQ25eastl9allocatorP6XRouteRC6XRoute
+0x00245708 GetTypeOutOfLine__C8cXObject
+0x002535B0 IsInWorldOutOfLine__C8cXObject
 
 # game/simulator/core2/cXPerson.cpp: the routing handlers
 0x001DC708 Routing_Failed__8cXPersonRbRl

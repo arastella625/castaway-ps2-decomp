@@ -173,7 +173,7 @@ public:
     virtual void BeginFollow(f32 distance); // Wii SAnimator2 slot 12
     virtual int FollowOneStep(); // Wii SAnimator2 slot 13
     virtual int EndFollow(); // Wii SAnimator2 slot 14
-    virtual void Slot15();
+    virtual int IsFollowing(); // Wii SAnimator2 slot 15: GotoRoutingSlot drops the result
     virtual int IsInterruptable(); // Wii SAnimator2 slot 16
     virtual void Slot17();
     virtual void Slot18();

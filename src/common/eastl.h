@@ -90,7 +90,11 @@ public:
     void reserve(unsigned int count);
     void DoInsertValue(T *position, const T &value);
 
-    void pop_back() { --mpEnd; }
+    void pop_back()
+    {
+        --mpEnd;
+        mpEnd->~T();
+    }
 
     void push_back(const T &value)
     {

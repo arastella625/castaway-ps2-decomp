@@ -201,6 +201,7 @@ public:
 
     RoutingSlot();
     virtual ~RoutingSlot() {}
+    int GetAllowFailureTrees() const { return (mFlags >> 14) & 1; }
     void SetAllowFailureTrees(bool allow)
     {
         mFlags &= ~0x4000;
@@ -326,6 +327,18 @@ public:
     void SetIdleStatus(int status) { mModule->SetIdleStatus(mID, status); }
     inline bool AllowIdleOptimization();
     s16 GetType() const { return mDef[9]; }
+    // The game also has GetType and IsInWorld as functions (0x245708, 0x2535B0), and
+    // GotoRoutingSlot calls those. Here they need their own names.
+    s16 GetTypeOutOfLine() const;
+    int IsInWorldOutOfLine() const;
+    // Wii: IsPortal, inlined on PS2. GotoRoutingSlot drops the result.
+    bool IsPortal()
+    {
+        bool portal = false;
+        if (GetTypeOutOfLine() == 8 && GetPortal())
+            portal = true;
+        return portal;
+    }
     bool IsPerson() const { return GetType() == 2; }
     bool IsMultiTile() const { return mDef[0xa] != 0; }
     bool IsInWorld() const

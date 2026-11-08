@@ -770,6 +770,172 @@ cXPerson::RoutingState cXPerson::Routing_Initial(bool &done, TreeReturnCode &cod
     return kRoutingFoundGoals;
 }
 
+#include "game/simulator/core/cXMTObject.h"
+
+// The routing state machine. State 0 or 0x15 starts a route to the slot; then the handler for
+// each state runs until one says it is done this tick. The tree's code comes back.
+long cXPerson::GotoRoutingSlot(cXObject *object, const RoutingSlot *slot, int &state)
+{
+    if (state == 0 || state == 0x15) {
+        // A TS2 slot on a multi-tile object goes to the first part that has one.
+        if (slot && slot->IsTS2RoutingSlot() && object->IsMultiTile()) {
+            cXMTObject *part = object->GetMTObject();
+            while (part) {
+                if (part->mDef && part->mDef[0x1d] > 0) {
+                    object = part;
+                    part = 0;
+                } else {
+                    part = part->mNextPart;
+                }
+            }
+        }
+        bool gone = false;
+        if (!object || !object->IsInWorldOutOfLine())
+            gone = true;
+        if (gone) {
+            if (object)
+                object->IsPortal();
+            return 0;
+        }
+        XRoute route(this, object, slot);
+        if (IsGhost())
+            route.GetRoutingSlot()->mFlags |= 0x800;
+        if (mRoutes.size() && !mRoutes[0].GetRoutingSlot()->GetAllowFailureTrees()) {
+            route.GetRoutingSlot()->SetAllowFailureTrees(false);
+        } else if (mRoutes.size() == 0 && mVars[0x11] == 0 && route.mDest == route.mStart
+                   && route.GetRoutingSlot()->mFacing == -2) {
+            CalcShortDistance(route.mDest);
+            return 1;
+        }
+        if (mRoutes.size() == 0)
+            mAnimator->field_0x664 = 0;
+        mRoutes.push_back(route);
+        state = kRoutingInitial;
+    }
+
+    XRoute *route = GetCurrentRoute();
+    if (!route)
+        return 0;
+    if (!route->mDest) {
+        mAnimator->IsFollowing();
+        state = 0;
+        mRoutes.pop_back();
+        return 2;
+    }
+    bool gone = false;
+    if (!route->mDest || !route->mDest->IsInWorldOutOfLine())
+        gone = true;
+    if (gone) {
+        if (state == kRoutingWalking)
+            state = kRoutingObjectDeletedWhileWalking;
+        else
+            state = kRoutingObjectDeleted;
+    }
+    if (!route->mValid) {
+        // States 4 to 0x11 change nothing. They are in two runs so that GCC still builds the
+        // jump table the game has (a single run of identical cases turns it into tests).
+        switch (state) {
+        case kRoutingWaitingForSit:
+        case kRoutingWaitingForStand:
+        case kRoutingTrapped:
+        case kRoutingFailed:
+        case kRoutingSucceeded:
+        case kRoutingWalkingSucceeded:
+        case kRoutingWalkingFailed:
+            break;
+        case kRoutingWaitingForPortal:
+            route->mCurPortal = 0;
+            break;
+        case kRoutingWalking:
+            state = kRoutingRouteInvalidatedWhileWalking;
+        case kRoutingWalkTerminated:
+        case kRoutingFoundPath:
+        case kRoutingWaiting:
+        case kRoutingWaitingForPersonToMove:
+        case kRoutingRouteInvalidatedWhileWalking:
+        case kRoutingNeedFailureFeedback:
+        case kRoutingWaitingForFailureFeedback:
+            ;
+        }
+        route->mValid = 1;
+    }
+
+    bool done = false;
+    TreeReturnCode code = 2;
+    do {
+        switch (state) {
+        case 0:
+            break;
+        case kRoutingFailed:
+            state = Routing_Failed(done, code);
+            break;
+        case kRoutingSucceeded:
+            state = Routing_Succeeded(done, code);
+            break;
+        case kRoutingNeedFailureFeedback:
+            state = Routing_NeedFailureFeedback(done, code);
+            break;
+        case kRoutingWaitingForFailureFeedback:
+            state = Routing_WaitingForFailureFeedback(done, code);
+            break;
+        case kRoutingWaitingForPortal:
+            state = Routing_WaitingForPortal(done, code);
+            break;
+        case kRoutingTrapped:
+            state = Routing_Trapped(done, code);
+            break;
+        case kRoutingInitial:
+            state = Routing_Initial(done, code);
+            break;
+        case kRoutingFoundGoals:
+            state = Routing_FoundGoals(done, code);
+            break;
+        case kRoutingFoundPath:
+            state = Routing_FoundPath(done, code);
+            break;
+        case kRoutingWalking:
+            state = Routing_Walking(done, code);
+            break;
+        case kRoutingObjectDeleted:
+            state = Routing_ObjectDeleted(done, code);
+            break;
+        case kRoutingObjectDeletedWhileWalking:
+            state = Routing_ObjectDeletedWhileWalking(done, code);
+            break;
+        case kRoutingWalkingFailed:
+            state = Routing_WalkingFailed(done, code);
+            break;
+        case kRoutingRouteInvalidatedWhileWalking:
+            state = Routing_RouteInvalidatedWhileWalking(done, code);
+            break;
+        case kRoutingWalkTerminated:
+            state = Routing_WalkTerminated(done, code);
+            break;
+        case kRoutingWalkingSucceeded:
+            state = Routing_WalkingSucceeded(done, code);
+            break;
+        case kRoutingWaitingForSit:
+            state = Routing_WaitingForSit(done, code);
+            break;
+        case kRoutingWaitingForStand:
+            state = Routing_WaitingForStand(done, code);
+            break;
+        case kRoutingWaitingForPersonToMove:
+            state = Routing_WaitingForPersonToMove(done, code);
+            break;
+        case kRoutingWaiting:
+            state = Routing_Waiting(done, code);
+            break;
+        default:
+            state = kRoutingFailed;
+            break;
+        }
+    } while (!done);
+    if (code != 2)
+        field_0x5e0 = 0;
+    return code;
+}
+
 // A failed route keeps its result, or gets 1, and the tree goes on with code 0.
 cXPerson::RoutingState cXPerson::Routing_Failed(bool &done, TreeReturnCode &code)
 {
