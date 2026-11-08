@@ -25,6 +25,7 @@ ANIM_TAG = b'MINA'  # "ANIM", stored as a little-endian integer
 PREFIX_SIZE = 16
 NODE_FIELDS = 8
 ROTATION, SCALE, POSITION, VISIBILITY = 0, 1, 2, 3
+DEFAULT_RATE = 30.0  # frames a second, for an Animation built without a file
 EVENT_SIZE = 80
 MAX_NOTE = 256
 IDENTITY = (0.0, 0.0, 0.0, 1.0)
@@ -292,6 +293,12 @@ class Animation:
     nodes: list
     floats: tuple
     bits: Bits
+    rate: float = DEFAULT_RATE  # frames a second: ERAnim +0x70, the first float after the bits
+
+    @property
+    def duration(self):
+        """SAnimator2::getAnimDuration: (N - 1) / rate seconds."""
+        return (self.frames - 1) / self.rate
 
     def constant(self, index, size):
         if index + size > len(self.floats):
@@ -373,7 +380,10 @@ def parse_animation(data, name='animation'):
     bits = Bits(data[pos:pos + word_bytes])
     if skip_tail(data, pos + word_bytes, name) != len(data):
         raise arc.FormatError('%s does not end where its tables say' % name)
-    return Animation(name, frames, nodes, floats, bits)
+    rate = struct.unpack_from('<f', data, pos + word_bytes)[0]
+    if not rate > 0:
+        raise arc.FormatError('%s has a frame rate of %r' % (name, rate))
+    return Animation(name, frames, nodes, floats, bits, rate)
 
 
 def read_nodes(data, pos, name):
@@ -416,12 +426,14 @@ def check_track(track, animation, totals):
 def check(disc):
     totals = collections.Counter()
     steps = collections.Counter()
+    rates = collections.Counter()
     failures = []
     for entry, data in each_animation(disc):
         try:
             animation = parse_animation(data, entry.name)
             totals['animations'] += 1
             totals['frames'] += animation.frames
+            rates[animation.rate] += 1
             for node in range(len(animation.nodes)):
                 rotation = animation.rotation_track(node)
                 if isinstance(rotation, Track):
@@ -439,6 +451,7 @@ def check(disc):
     for key, value in sorted(totals.items()):
         print('%-16s %9d' % (key, value))
     print('largest half-frame rotation steps, sampled:', sorted(steps.items())[-6:])
+    print('frames a second (ERAnim +0x70):', ', '.join('%g: %d' % kv for kv in rates.most_common()))
     print('failures: %d' % len(failures))
     for failure in failures[:20]:
         print('   ', failure)
