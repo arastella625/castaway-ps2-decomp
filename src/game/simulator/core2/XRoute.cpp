@@ -1,5 +1,55 @@
 #include "game/simulator/core2/cXPerson.h"
 
+#include "common/EVec3.h"
+
+EMat4 ObjectRotationTf(int direction);
+EVec3 IsoFracsToWorld(const f32 &x, const f32 &y, const f32 &z);
+FTilePt WorldToIso(const EVec3 &world);
+
+// Wii: TransformToWorldCoords, file-local there. An offset (x, y) in an object's frame, in
+// sixteenths of a tile, turned by the object's direction and added to the origin. Directions 0,
+// 2, 4 and 6 turn (x, y) into (x, y), (-y, x), (-x, -y) and (y, -x); the others go through the
+// object's rotation matrix in world coordinates.
+void TransformToWorldCoords(const FTilePt *origin, f32 x, f32 y, int direction, FTilePt *out)
+{
+    switch (direction) {
+    case 0:
+        break;
+    case 2: {
+        int old = (int)x;
+        x = -y;
+        y = old;
+        break;
+    }
+    case 4:
+        x = -x;
+        y = -y;
+        break;
+    case 6: {
+        int old = (int)x;
+        x = y;
+        y = -old;
+        break;
+    }
+    default: {
+        EMat4 rotation = ObjectRotationTf(direction);
+        f32 fx = x;
+        f32 fy = y;
+        f32 z = 0;
+        EVec3 world = IsoFracsToWorld(fx, fy, z);
+        world = world * rotation;
+        FTilePt tile = WorldToIso(world);
+        x = tile.mX;
+        y = tile.mY;
+        break;
+    }
+    }
+    x += origin->mX;
+    y += origin->mY;
+    out->mX = (int)x;
+    out->mY = (int)y;
+}
+
 // The game inlines RoutingSlot's constructor here and also has it as a function (0x1E15F0, in
 // cXPerson.cpp). Declaring it inline in this file only gives the inlined copy without a second
 // definition.

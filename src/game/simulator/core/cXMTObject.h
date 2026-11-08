@@ -8,6 +8,8 @@ class cXMTObject : public cXObject {
 public:
     cXMTObject *mNextPart;  // 0x13c
     cXMTObject *mFirstPart; // 0x140
+    int mPartPos[3];        // 0x144  x, y and the third coordinate of this part
+    int mPartOffset[3];     // 0x150  AssignOffsets: from the first part, turned by its direction
 
     virtual u32 ReconType();
     virtual void AssignOffsets();
