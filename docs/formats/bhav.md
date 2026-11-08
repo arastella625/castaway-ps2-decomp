@@ -771,6 +771,45 @@ The primitive only queues. The object goes when the queue is flushed.
 
 **For a port:** queue in the primitive and pick the object up at once. Flush after the step: run Cleanup (entry point 3), kill slot contents, then remove the object and its relationships.
 
+## CallFunctionalTree (opcode 0x14)
+
+**Proven**: `TryCallFunctionalTree` (`0x22D358`) matches the game byte for byte. 79 uses. It runs one of the stack object's functional trees, an entry point, as a subroutine.
+
+| Operand | Meaning |
+|---|---|
+| `+0` s16 | Which function, below |
+| `+2` bit 0 | Change the icon: the last argument of `GosubObjectTree` |
+
+| `+0` | 0 to 9 | 0xA | 0xB | 0xC | 0xD | 0xE | 0xF | 0x10 | Others |
+|---|---|---|---|---|---|---|---|---|---|
+| Entry point | 0x12 to 0x1B | 0xE | 0x1C | 0x10 | none, false | 0x1D | 0x20 | 0x21 | none, false |
+
+1. The stack object must exist, or it's error 0x15.
+2. Its tree for that entry point comes from its selector's function table.
+3. **No tree is false**: it returns 0, and nothing runs.
+4. The tree is pushed with 8 parameters: temps 0 to 3, then four zeros. Then it **returns 3**, so the pushed tree runs now. When it returns, the node takes the true or false branch from its result, as a call does (see "Running a tree").
+5. If the push fails, it's false.
+
+So this is how entry points 14, 16, 18 to 29, 32 and 33 are reached, which "Entry points" lists as having no caller by number.
+
+## NotifyPlans (opcode 0x2F)
+
+**Proven**: `TryNotifyPlans` (`0x23CFD8`) matches the game byte for byte. 60 uses. It tells the plan system that something happened to a Sim.
+
+| Operand | Meaning |
+|---|---|
+| `+0` s8 | The notification. 0 is error 0x6A |
+| `+1` u8, `+2` s16 | An operand, scope and data: the notification's value |
+| `+4` bit 0 | The Sim is the object in temp 0, not me |
+
+1. **The Sim:**
+   - With `+4` bit 0, it's the object whose ID is in temp 0. A missing object, or one that isn't a Sim (type 2), is error 0x1C.
+   - Otherwise it's me, as a Sim.
+2. **No Sim (I'm not one) returns 1**, true, and nothing is sent.
+3. The operand is read. An error there stops the tree with error 9.
+4. A notification of 0 is error 0x6A.
+5. `PlanManager::SendNotification(notification, value, Sim)`, then **true**. What the plans do with it is in `PlanManager`, which isn't read yet.
+
 ## SetMotiveDelta (opcode 0x1D)
 
 **Proven**: `cXObject::TrySetMotiveDelta` and `cXPerson::TrySetMotiveDelta` match the game byte for byte. 401 uses.
