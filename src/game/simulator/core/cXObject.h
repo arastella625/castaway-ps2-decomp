@@ -34,6 +34,13 @@ public:
     int mY; // 0x04
 
     FTilePt() {}
+
+    int SquareDist(const FTilePt &other) const
+    {
+        int dx = other.mX - mX;
+        int dy = other.mY - mY;
+        return dx * dx + dy * dy;
+    }
 };
 
 enum TFGL_ACTIONS { };

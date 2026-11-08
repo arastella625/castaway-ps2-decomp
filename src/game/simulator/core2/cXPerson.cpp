@@ -591,6 +591,91 @@ cXPerson::RoutingState cXPerson::Routing_FoundGoals(bool &done, TreeReturnCode &
     return kRoutingFailed;
 }
 
+// Another Sim was asked to move. The Sim first plays "sg_route ask to move animation" at it, then
+// "sg_route waiting animation" for up to 300 ticks, and is trapped if the other doesn't move.
+cXPerson::RoutingState cXPerson::Routing_WaitingForPersonToMove(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    if (ShouldInterrupt() && mAnimator->IsInterruptable()) {
+        route->mResult = 4;
+        return kRoutingFailed;
+    }
+    mAnimator->field_0x664 = 0;
+    if (route->mMovingPerson == 0) {
+        route->mWaitStartTicks = 0;
+        if (route->mMoveSuccess)
+            route->mTrapCount = 0;
+        return kRoutingInitial;
+    }
+    if (route->mWaitStartTicks == 0) {
+        s16 tree = mSelector->mBehavior->GetTreeIDByNameFast("sg_route ask to move animation");
+        if (tree && GosubObjectTree(this, 0, tree, false)) {
+            GetCurElem()->mStackObject = route->mMovingPerson->mID;
+            code = 3;
+            done = true;
+            route->mWaitStartTicks = GetSimulator()->mTicks;
+            return kRoutingWaitingForPersonToMove;
+        }
+        return kRoutingTrapped;
+    }
+    if (GetSimulator()->mTicks - route->mWaitStartTicks < 300) {
+        s16 tree = mSelector->mBehavior->GetTreeIDByNameFast("sg_route waiting animation");
+        if (tree && GosubObjectTree(this, 0, tree, false)) {
+            code = 3;
+            done = true;
+            return kRoutingWaitingForPersonToMove;
+        }
+    }
+    route->mWaitStartTicks = 0;
+    return kRoutingTrapped;
+}
+
+// Trapped: on the routing turn, the trap count steps 0 to 3. A Sim that has moved more than 8
+// sixteenths of a tile since last time routes again; then it asks others to move; then it
+// routes again; then failure feedback.
+cXPerson::RoutingState cXPerson::Routing_Trapped(bool &done, TreeReturnCode &code)
+{
+    if (!CanRouteThisFrame()) {
+        if (!mInRoutingQueue) {
+            s_RoutingQueue.Enqueue(this);
+            mInRoutingQueue = 1;
+        }
+        code = 2;
+        done = true;
+        return kRoutingTrapped;
+    }
+    s_nNumRoutedThisFrame++;
+    PopFromRoutingQueue(this);
+    code = 2;
+    mAnimator->field_0x664 = 0;
+    XRoute *route = GetCurrentRoute();
+    if (route->mTrapCount == 0) {
+        FTilePt last = route->mLastLocation;
+        int dist = last.SquareDist(GetLocationRef());
+        last = GetLocationRef();
+        route->mLastLocation = last;
+        if (dist > 0x40) {
+            route->mTrapCount = 0;
+            return kRoutingInitial;
+        }
+        route->mTrapCount = 1;
+        return kRoutingTrapped;
+    }
+    if (route->mTrapCount == 1) {
+        route->mTrapCount = 2;
+        if (!route->mMovingPerson && AskOthersToMove(route))
+            return kRoutingWaitingForPersonToMove;
+        return kRoutingNeedFailureFeedback;
+    }
+    if (route->mTrapCount == 2) {
+        route->mTrapCount = 3;
+        return kRoutingInitial;
+    }
+    if (route->mTrapCount == 3)
+        return kRoutingNeedFailureFeedback;
+    return kRoutingFailed;
+}
+
 // A failed route keeps its result, or gets 1, and the tree goes on with code 0.
 cXPerson::RoutingState cXPerson::Routing_Failed(bool &done, TreeReturnCode &code)
 {

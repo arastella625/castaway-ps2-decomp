@@ -37,11 +37,14 @@ class XRoute {
 public:
     u32 pad_0x0[0x13];   // 0x00
     cXObject *mDest;     // 0x4c  Wii: GetDest
-    u32 pad_0x50[4];     // 0x50
+    u32 pad_0x50[3];     // 0x50
+    int mTrapCount;      // 0x5c  Wii: SetTrapCount
     int mWaitStartTicks; // 0x60  Wii: GetWaitStartTicks
-    u32 pad_0x64[2];     // 0x64
+    FTilePt mLastLocation; // 0x64  Wii: GetLastLocation, where the Sim was when last trapped
     cXPortal *mCurPortal; // 0x6c  Wii: GetCurPortal
-    u32 pad_0x70[7];     // 0x70
+    u32 pad_0x70[5];     // 0x70
+    cXObject *mMovingPerson; // 0x84  the Sim asked to move, Wii: GetMovingPerson
+    int mMoveSuccess;    // 0x88  Wii: GetMoveSuccess
     int mResult;         // 0x8c  Wii: GetResult and SetResult
     s16 mBlockingObjectID; // 0x90  Wii: GetBlockingObjectID
     u16 pad_0x92;
@@ -249,6 +252,9 @@ public:
     RoutingState Routing_NeedFailureFeedback(bool &done, TreeReturnCode &code);
     RoutingState Routing_Failed(bool &done, TreeReturnCode &code);
     RoutingState Routing_FoundGoals(bool &done, TreeReturnCode &code);
+    RoutingState Routing_Trapped(bool &done, TreeReturnCode &code);
+    int AskOthersToMove(XRoute *route);
+    RoutingState Routing_WaitingForPersonToMove(bool &done, TreeReturnCode &code);
     TreeReturnCode InitRoute(XRoute *route);
     static void PopFromRoutingQueue(cXPerson *person);
     static RoutingQueue s_RoutingQueue;
