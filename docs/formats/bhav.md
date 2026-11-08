@@ -748,7 +748,7 @@ The change is the value times 1/1800, so it's per tick.
 
 ## Routing
 
-What's here comes from the PS2 code where it gives an address, and the names come from the Wii build. **Proven** means read on PS2 or tested on the disc. **Likely** means read on Wii only, with PS2's function found by its calls but not compared line by line. Below `TryGotoRoutingSlot` and `TryGotoRelative`, only `RoutingSlot`'s small methods are matched: `WriteSlot`, `AllowDirection`, `SetFacingDirection`, `SetDistances`, `SetTileDistances`, `GetXOffset` and `GetYOffset`. Its constructor isn't: it writes a vtable at `0x4B7FC0`, and the name in `symbols.txt` is on `0x4B8020`, which needs sorting out with the `Slot` base class first.
+What's here comes from the PS2 code where it gives an address, and the names come from the Wii build. **Proven** means read on PS2 or tested on the disc. **Likely** means read on Wii only, with PS2's function found by its calls but not compared line by line. Below `TryGotoRoutingSlot` and `TryGotoRelative`, the handlers `Routing_WaitingForPortal`, `Routing_Walking`, `Routing_Waiting`, `Routing_NeedFailureFeedback` and `Routing_Failed` match byte for byte, and so do `RoutingSlot`'s small methods: `WriteSlot`, `AllowDirection`, `SetFacingDirection`, `SetDistances`, `SetTileDistances`, `GetXOffset` and `GetYOffset`. Its constructor isn't: it writes a vtable at `0x4B7FC0`, and the name in `symbols.txt` is on `0x4B8020`, which needs sorting out with the `Slot` base class first.
 
 | Function | PS2 | Wii |
 |---|---|---|
@@ -1132,8 +1132,8 @@ Each tick, a loop calls the handler for the state until one says it's done. Hand
 | State | Handler | What it does |
 |---|---|---|
 | 1 | Initial | Interrupted is route result 4, then state 7. A Sim sitting on the wrong chair runs the stand tree, state 5. Otherwise it builds the goals, then state 0x12 |
-| 2 | WaitingForPortal | Waits to pass through a portal |
-| 3 | Walking | Interrupted or nothing left to walk is state 0xB. Otherwise it asks the animator: 1 is state 9, 0 state 0xA, 2 is wait this tick |
+| 2 | WaitingForPortal | **Proven.** Interrupted is result 4, state 7. In the destination's room (data 0x1D): person data 0x20 = route `+0x9C`, state 1. Otherwise a current portal with no last result runs `cXPortal::FailedPortalTree`, then room routing: found is code 3, state 2 again; not found is result 2, state 0x10 |
+| 3 | Walking | **Proven.** Interrupted (result 4) or no route or path is state 0xB. Otherwise `FollowOneStep` on the animator, which is also the tree's code: 1 is state 9, 2 is done this tick and stay, anything else state 0xA |
 | 4, 5 | WaitingForSit, WaitingForStand | Wait on the animation |
 | 6 | Trapped | Asks others to move, up to a trap count, then state 7 or 0x10 |
 | 7 | Failed | Result 1 if none was set, cleans up, **returns 0**, the false branch |
@@ -1142,12 +1142,14 @@ Each tick, a loop calls the handler for the state until one says it's done. Hand
 | 0xA | WalkingFailed | State 6 once the animator agrees |
 | 0xB | WalkTerminated | State 7 once the animator agrees |
 | 0xC | FoundPath | Starts the walk, then state 3 |
-| 0xD | Waiting | Waits for a timer, or fails if interrupted |
+| 0xD | Waiting | **Proven.** Interrupted is result 4, state 7. For 30 ticks from route `+0x60` (simulator ticks, `+0x9C`) it runs the Sim's own `sg_route waiting animation` tree: code 3, stay. After that, or with no such tree, it clears the wait and goes back to state 1 |
 | 0xE | WaitingForPersonToMove | Waits on the Sim asked to move |
 | 0xF | RouteInvalidatedWhileWalking | Replans |
-| 0x10, 0x11 | NeedFailureFeedback, WaitingForFailureFeedback | Runs the object's failure tree, if `+4` allowed it, then state 7 |
+| 0x10, 0x11 | NeedFailureFeedback, WaitingForFailureFeedback | **Proven for 0x10.** Result 1 if none, copied to person data 0x1C. If the routing slot has flag bit 14, the target's `gl_route failure feedback` tree runs on the target with parameters (result, blocking object ID from route `+0x90`, 0, 0): code 3, state 0x11. Otherwise, or with no such tree, state 7 |
 | 0x12 | FoundGoals | Waits for a routing turn: a queue allows so many Sims a frame. Then a path: 0 is state 6, 1 state 8, 2 state 0xC, 3 waits for a portal, others state 7 |
 | 0x13, 0x14 | ObjectDeleted, ObjectDeletedWhileWalking | The target went away: state 7 |
+
+The tree's code, the second handler argument, is a 64-bit `long` on PS2. Handlers set it to 3 while they wait, and Failed sets 0.
 
 Person data 0x1C ends up holding the route's result: 0 worked, 1 failed, 4 interrupted. If the target leaves the world part way, the state changes to 0x13 or, while walking, 0x14.
 
