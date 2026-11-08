@@ -17,11 +17,14 @@ public:
     BString2(const BString2 &other);
     ~BString2();
     BString2 &operator=(const BString2 &other);
+    BString2 &operator=(const u16 *text);
+    BString2 &operator+=(const u16 *text);
+    int length() const;
     void assign(const u16 *text);
     const u16 *c_str() const;
 };
 
-// One row of a tree table: only the slots AddAction calls.
+// One row of a tree table: only the slots AddAction and Interaction::GetName call.
 class TreeTableEntry {
 public:
     virtual void Slot0();
@@ -37,6 +40,59 @@ public:
     virtual int GetImmediate();
     virtual void Slot11();
     virtual int GetAllowConsecutive();
+    virtual void Slot13();
+    virtual void Slot14();
+    virtual void Slot15();
+    virtual void Slot16();
+    virtual void Slot17();
+    virtual void Slot18();
+    virtual void Slot19();
+    virtual void Slot20();
+    virtual void Slot21();
+    virtual void Slot22();
+    virtual void Slot23();
+    virtual void Slot24();
+    virtual void Slot25();
+    virtual void Slot26();
+    virtual void Slot27();
+    virtual void Slot28();
+    virtual void Slot29();
+    virtual void Slot30();
+    virtual void Slot31();
+    virtual void Slot32();
+    virtual void Slot33();
+    virtual void Slot34();
+    virtual void Slot35();
+    virtual int GetDebugOnly();
+    virtual void Slot37();
+    virtual void Slot38();
+    virtual void Slot39();
+    virtual void Slot40();
+    virtual void Slot41();
+    virtual void Slot42();
+    virtual void Slot43();
+    virtual void Slot44();
+    virtual void Slot45();
+    virtual void Slot46();
+    virtual void Slot47();
+    virtual void Slot48();
+    virtual void Slot49();
+    virtual void Slot50();
+    virtual void Slot51();
+    virtual void Slot52();
+    virtual void Slot53();
+    virtual void Slot54();
+    virtual void Slot55();
+    virtual void Slot56();
+    virtual void Slot57();
+    virtual void Slot58();
+    virtual void Slot59();
+    virtual void Slot60();
+    virtual void Slot61();
+    virtual void Slot62();
+    virtual void Slot63();
+    virtual void Slot64();
+    virtual const u16 *GetName();
 };
 
 // One queued action. The layout is from the Wii constructor; PS2 offsets are the same, with

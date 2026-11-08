@@ -21,6 +21,26 @@ void Interaction::SetUniqueID()
     field_0x30 = ++sLastUniqueID;
 }
 
+// A name nobody set is built from the tree table entry, with "*" in front of a debug-only one.
+// GetEntry is written out here: the game inlines it.
+const BString2 &Interaction::GetName() const
+{
+    static const u16 debugMark[] = {'*', 0};
+    Interaction *self = (Interaction *)this;
+    if (mName.length() == 0) {
+        TreeTableEntry *entry = 0;
+        if (mStackObject)
+            entry = (TreeTableEntry *)mStackObject->mSelector->GetTreeTab()->GetEntry(mTreeTabIndex);
+        if (entry) {
+            if (entry->GetDebugOnly())
+                self->mName = debugMark;
+            self->mName += entry->GetName();
+        }
+    }
+    self->mFlags &= ~0x80;
+    return mName;
+}
+
 // Bit 7 of the flags: the name was set, not built from the tree table.
 void Interaction::SetName(const BString2 &name)
 {

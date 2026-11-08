@@ -1175,6 +1175,9 @@
 # game/simulator/core/ObjSelector.cpp and Interaction.cpp: AddAction's helpers
 0x0021F700 GetTreeTable__12ObjectFolderP11ObjSelector
 0x0025EB10 __as__8BString2RC8BString2
+0x00261738 __as__8BString2PCUs
+0x002617F8 __apl__8BString2PCUs
+0x00261F98 length__C8BString2
 0x00492578 _11Interaction$sLastUniqueID
 
 # game/simulator/core2/cXPerson.cpp: AddAction
