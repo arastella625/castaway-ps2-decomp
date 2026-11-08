@@ -24,6 +24,12 @@ class H2DTarget {
 public:
     u32 pad_0x0[0x24];
     ActionMenu *mActionMenu; // 0x90  Wii +0xAC
+    u32 pad_0x94[0x71];
+    int mGameOver;           // 0x258
+
+    // Wii: TriggerGameOver, inlined on PS2.
+    void TriggerGameOver() { mGameOver = 1; }
+    void RelationshipChangeOccured(int change);
 
     void AddAction(const Interaction *action, const BString2 &name, u32 icon, ERShader *shader,
                    u32 insertGUID) const;

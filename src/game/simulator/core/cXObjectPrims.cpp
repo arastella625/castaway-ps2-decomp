@@ -398,11 +398,6 @@ public:
     virtual void Set(s16 key, int field, s16 value);
 };
 
-class H2DTarget {
-public:
-    void RelationshipChangeOccured(int change);
-};
-
 // Primitive 0x1a: read or write one field of a relationship.
 class Relationship2Param {
 public:
@@ -2173,6 +2168,17 @@ class LoadingScreenStateMachine {
 public:
     static void LoadFinishing();
 };
+// GenericSimCall 0x10: the game's scripted sequences.
+class SequenceManager {
+public:
+    enum eSequenceType {
+    };
+    static SequenceManager *GetSingleton();
+    void StartSequence(eSequenceType type);
+    int IsSequenceStarted(eSequenceType type);
+    int IsSequenceComplete(eSequenceType type);
+};
+
 // Wii: GetEORGlobals, a pointer on PS2 at 0x50A6A8.
 extern EGlobal *gEORGlobals;
 
@@ -2275,9 +2281,51 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
     case 0x0e:
         GetSimulator()->mGlobals[0x1f] = mTemps[0];
         break;
-    case 0x0f:
-    case 0x10:
+    case 0x0f: {
+        // Person data 0x20 = t0, 0x21 = 0. With t0 of 0, the Sim's rectangle is worked out again.
+        cXPerson *person = GetPerson();
+        OBJECT_ERROR_CHECK(person, 0x1c);
+        person->SetPersonData(0x20, mTemps[0]);
+        person->SetPersonData(0x21, 0);
+        if (mTemps[0] == 0)
+            person->ComputeRect(person->GetLocationRef(), (FTileRect *)person->mRect);
         break;
+    }
+    case 0x10: {
+        // t0 0 and 1 start sequences 2 and 3, and t0 becomes -1 or -2 while it waits on them.
+        SequenceManager *sequences = SequenceManager::GetSingleton();
+        if (mTemps[0] == 0) {
+            sequences->StartSequence((SequenceManager::eSequenceType)2);
+            mTemps[0] = -1;
+            return 4;
+        }
+        if (mTemps[0] == 1) {
+            sequences->StartSequence((SequenceManager::eSequenceType)3);
+            mTemps[0] = -2;
+            return 4;
+        }
+        if (mTemps[0] == -1) {
+            if (sequences->IsSequenceComplete((SequenceManager::eSequenceType)2)) {
+                mTemps[0] = 0;
+                return 1;
+            }
+            if (sequences->IsSequenceStarted((SequenceManager::eSequenceType)2))
+                return 4;
+            return 1;
+        }
+        if (mTemps[0] == -2) {
+            if (sequences->IsSequenceComplete((SequenceManager::eSequenceType)3)) {
+                mTemps[0] = 1;
+                return 1;
+            }
+            if (sequences->IsSequenceStarted((SequenceManager::eSequenceType)3))
+                return 4;
+            return 1;
+        }
+        if (mTemps[0] == 2)
+            _gd.mHud->TriggerGameOver();
+        return 1;
+    }
     case 0x15:
         GetSimulator()->mGlobals[0x27] = mTemps[0];
         break;
