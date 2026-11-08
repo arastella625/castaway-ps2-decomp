@@ -844,6 +844,8 @@ So this is how entry points 14, 16, 18 to 29, 32 and 33 are reached, which "Entr
 
 The result is true unless an operation below says otherwise.
 
+**A family holds at most 0x20 items that aren't tokens. Proven, PS2** (`InventoryItems::AddOwnableItem`, `0x1F9CB8`, matches). The count is the byte at the inventory's `+0`. An object or ownable add when it's full adds nothing and is false. A successful add gives the item an instance ID from a global counter, if it has none, and runs the family's on-add tree with the new item's place.
+
 | Op | What it does |
 |---|---|
 | 0 | **Add**, by category. Object or ownable with bit 7: the object whose ID is `+2` (none is error 0x33), added as itself. Without bit 7: the GUID in `+4`. True if the add worked. Token: ID `+2` with bit 7, else `+4`, count `+3`. Clothing: ID `+2` with bit 7, else `+4`. Tokens and clothing are always true |
