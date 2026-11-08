@@ -439,7 +439,7 @@ The stack object is the frame's object ID. A call passes it on to the called tre
 | CreateObject | See its own section |
 | Dialog | `+1` icon index; `+7` bits 1-3 icon type, bits 4-6 result temp, bit 7 semi-global strings |
 | DirectionTo, DistanceTo | A flag byte (`+4`, `+2`), bit 0 set: the "from" value is the scope in the next byte and the data after it. Clear: scope 3, data 0xB. DistanceTo bit 1 returns sixteenths of a tile |
-| FindGoodLocation | `+2` flags: bit 0 start at relative object, 1 not prefer empty tiles, 2 editable tiles only, 3 orientation in temp 0, 4 prefer under roof |
+| FindGoodLocation | `+2` flags: bit 0 start at relative object, 1 not prefer empty tiles, 2 editable tiles only (tile flag 0x20 clear, as `MayEditTile` in world.md), 3 orientation in temp 0, 4 prefer under roof |
 | Grab | `+0` bit 0 parenting prop bone |
 | IdleAnimate | `+2` low byte decrement parameter, high byte sync object; `+5` flags; `+6` behaviour; `+7` literal loop count |
 | KillObject | `+2` bit 0 return immediately, bit 1 clear means clean up all |
