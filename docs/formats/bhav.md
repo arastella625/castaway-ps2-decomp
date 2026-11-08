@@ -748,7 +748,7 @@ The change is the value times 1/1800, so it's per tick.
 
 ## Routing
 
-What's here comes from the PS2 code where it gives an address, and the names come from the Wii build. **Proven** means read on PS2 or tested on the disc. **Likely** means read on Wii only, with PS2's function found by its calls but not compared line by line. Below `TryGotoRoutingSlot` and `TryGotoRelative`, the handlers `Routing_WaitingForPortal`, `Routing_Walking`, `Routing_Waiting`, `Routing_NeedFailureFeedback` and `Routing_Failed` match byte for byte, and so do `RoutingSlot`'s small methods: `WriteSlot`, `AllowDirection`, `SetFacingDirection`, `SetDistances`, `SetTileDistances`, `GetXOffset` and `GetYOffset`. Its constructor isn't: it writes a vtable at `0x4B7FC0`, and the name in `symbols.txt` is on `0x4B8020`, which needs sorting out with the `Slot` base class first.
+What's here comes from the PS2 code where it gives an address, and the names come from the Wii build. **Proven** means read on PS2 or tested on the disc. **Likely** means read on Wii only, with PS2's function found by its calls but not compared line by line. Below `TryGotoRoutingSlot` and `TryGotoRelative`, 14 of the 20 handlers match byte for byte: all but `Initial`, `Trapped`, `Succeeded`, `WaitingForPersonToMove`, `FoundGoals` and `WaitingForStand` (parked). PS2 emits most of the short ones together after `Routing_Failed`, in Wii's order. So do and so do `RoutingSlot`'s small methods: `WriteSlot`, `AllowDirection`, `SetFacingDirection`, `SetDistances`, `SetTileDistances`, `GetXOffset` and `GetYOffset`. Its constructor isn't: it writes a vtable at `0x4B7FC0`, and the name in `symbols.txt` is on `0x4B8020`, which needs sorting out with the `Slot` base class first.
 
 | Function | PS2 | Wii |
 |---|---|---|
@@ -756,8 +756,13 @@ What's here comes from the PS2 code where it gives an address, and the names com
 | `Routing_Initial` | `0x1AA6D0` | `800C5D08` |
 | `Routing_WaitingForPortal` | `0x1AA980` | `800C5F78` |
 | `Routing_Walking` | `0x1AAAC8` | `800C60DC` |
+| `Routing_WaitingForStand` | `0x1AABE0` | |
 | `Routing_Trapped` | `0x1AAC70` | `800C6320` |
+| `Routing_WaitingForSit` | `0x1DC6A0` | |
 | `Routing_Failed` | `0x1DC708` | `800C64F4` |
+| `Routing_WalkingSucceeded`, `WalkingFailed`, `WalkTerminated` | `0x1DC778`, `0x1DC7C8`, `0x1DC818` | |
+| `Routing_FoundPath`, `RouteInvalidatedWhileWalking` | `0x1DC868`, `0x1DC8D0` | |
+| `Routing_WaitingForFailureFeedback`, `ObjectDeleted`, `ObjectDeletedWhileWalking` | `0x1DC920`, `0x1DC960`, `0x1DC970` | |
 | `Routing_Succeeded` | `0x1AAE78` | `800C657C` |
 | `Routing_Waiting` | `0x1AB150` | `800C6900` |
 | `Routing_WaitingForPersonToMove` | `0x1AB278` | `800C6A38` |
@@ -1134,14 +1139,14 @@ Each tick, a loop calls the handler for the state until one says it's done. Hand
 | 1 | Initial | Interrupted is route result 4, then state 7. A Sim sitting on the wrong chair runs the stand tree, state 5. Otherwise it builds the goals, then state 0x12 |
 | 2 | WaitingForPortal | **Proven.** Interrupted is result 4, state 7. In the destination's room (data 0x1D): person data 0x20 = route `+0x9C`, state 1. Otherwise a current portal with no last result runs `cXPortal::FailedPortalTree`, then room routing: found is code 3, state 2 again; not found is result 2, state 0x10 |
 | 3 | Walking | **Proven.** Interrupted (result 4) or no route or path is state 0xB. Otherwise `FollowOneStep` on the animator, which is also the tree's code: 1 is state 9, 2 is done this tick and stay, anything else state 0xA |
-| 4, 5 | WaitingForSit, WaitingForStand | Wait on the animation |
+| 4, 5 | WaitingForSit, WaitingForStand | **Proven.** Sit: a last transition is state 8, else route result = person data 0x1C (5 if 0), state 0x10. Stand: person data 0x20 = route `+0x9C`, then a last transition with the Sim idling (person data 0 is 0 or 3) is state 1, else result 6, state 0x10 |
 | 6 | Trapped | Asks others to move, up to a trap count, then state 7 or 0x10 |
 | 7 | Failed | Result 1 if none was set, cleans up, **returns 0**, the false branch |
 | 8 | Succeeded | Result 0, turns to face if the slot says so, cleans up, **returns 1**, the true branch |
-| 9 | WalkingSucceeded | State 8 once the animator agrees |
+| 9 | WalkingSucceeded | **Proven.** State 8 once `EndFollow` is true, else done this tick |
 | 0xA | WalkingFailed | State 6 once the animator agrees |
 | 0xB | WalkTerminated | State 7 once the animator agrees |
-| 0xC | FoundPath | Starts the walk, then state 3 |
+| 0xC | FoundPath | **Proven.** `BeginFollow` with `CalcShortDistance` to the target, done this tick, state 3 |
 | 0xD | Waiting | **Proven.** Interrupted is result 4, state 7. For 30 ticks from route `+0x60` (simulator ticks, `+0x9C`) it runs the Sim's own `sg_route waiting animation` tree: code 3, stay. After that, or with no such tree, it clears the wait and goes back to state 1 |
 | 0xE | WaitingForPersonToMove | Waits on the Sim asked to move |
 | 0xF | RouteInvalidatedWhileWalking | Replans |
