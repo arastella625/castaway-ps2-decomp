@@ -1007,6 +1007,26 @@ inline s16 GetTileObjectID(ObjectModule *module, const CTilePt &tile)
     return module->mTileObjects[y][x];
 }
 
+// GenericSimCall 0x3A: one tile's walls, 0x40 bytes, with an out-of-line destructor. A segment
+// is one side of the tile.
+class TileWalls {
+public:
+    u32 pad_0x0[0x10];
+
+    TileWalls(const TileWalls &other);                    // 0x1E2AF0
+    ~TileWalls();                                         // 0x1E2B20
+    int HasWall(int segment) const;                       // 0x1E2B78
+    void AddWall(int segment);                            // 0x1E2EF0
+    void SetStyle(int style, int segment);                // 0x1E2EB8
+    void SetPattern(int pattern, int segment, int side);  // 0x1E2D60
+    static int GetWallSegsBetweenTiles(CTilePt *a, CTilePt *b, int &segmentA, int &segmentB); // 0x1C1F98
+};
+
+class ERoom {
+public:
+    static void DeleteWallAtTile(const CTilePt &tile, TileWalls &walls, int segment); // 0x31F8C8
+};
+
 // The tile flag grid: row pointers by x, a byte for each y.
 struct TileFlagGrid {
     u8 pad_0x0[0xc];
@@ -1019,6 +1039,9 @@ public:
     TileFlagGrid *mFlags; // 0x20
 
     int OutOfGrid(const CTilePt &tile) const;
+    TileWalls GetWall(const CTilePt &tile);              // 0x1C5470
+    void SetWall(const CTilePt &tile, TileWalls walls);  // 0x1C5910
+    void CommitWallChanges();                            // 0x1E4998
     int GetXSize() const; // 0x1E4378, +0x10
     int GetYSize() const; // 0x1E4380, +0x14
     // Wii: GetFlags and SetFlags, inlined in GenericSimCall 0x33.
@@ -2380,6 +2403,20 @@ public:
     static void DestroyInstance(CatalogResource *resource) { delete resource; }
 };
 
+// GenericSimCall 0x3A: Wii cXObject::IsDoor and IsGate, inlined on PS2. 0x2456C8 returns the
+// object's definition word 0x1C; that name is ours.
+s16 GetDefinitionKind(cXObject *object); // 0x2456C8
+inline bool IsDoorInline(cXObject *object)
+{
+    return object->GetTypeOutOfLine() == 8 && GetDefinitionKind(object) == 2
+        && (s16)object->mSelector->GetFnTable()->HasFunction(0xf);
+}
+inline bool IsGateInline(cXObject *object)
+{
+    return object->GetTypeOutOfLine() == 8 && GetDefinitionKind(object) == 1
+        && (s16)object->mSelector->GetFnTable()->HasFunction(0xf);
+}
+
 // The family with this number, or null.
 inline Family *Neighborhood::GetFamilyInline(int number)
 {
@@ -2931,8 +2968,54 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         result = 1;
         break;
     }
-    case 0x3a:
+    case 0x3a: {
+        // Adds (t2 = 1) or removes (t2 = 0) the wall between the tiles of objects t0 and t1.
+        cXObject *first = gObjectModule->GetObjectFromIDInline(mTemps[0]);
+        cXObject *second = gObjectModule->GetObjectFromIDInline(mTemps[1]);
+        OBJECT_ERROR_CHECK(first && second, 0x33);
+        CTilePt firstTile(first->mTileX >> 4, first->mTileY >> 4, first->mLevel);
+        CTilePt secondTile(second->mTileX >> 4, second->mTileY >> 4, second->mLevel);
+        int firstSegment;
+        int secondSegment;
+        OBJECT_ERROR_CHECK(TileWalls::GetWallSegsBetweenTiles(&firstTile, &secondTile, firstSegment, secondSegment),
+                           0x60);
+        if (mTemps[2] == 1) {
+            cFixedWorld *world = gFixedWorld;
+            TileWalls walls = world->GetWall(firstTile);
+            if (walls.HasWall(firstSegment)) {
+                result = 0;
+                break;
+            }
+            walls.AddWall(firstSegment);
+            if (IsDoorInline(first))
+                walls.SetStyle(3, firstSegment);
+            else if (IsGateInline(first))
+                walls.SetStyle(0x11, firstSegment);
+            else
+                walls.SetStyle(1, firstSegment);
+            walls.SetPattern(0, firstSegment, 0);
+            result = 1;
+            world->SetWall(firstTile, walls);
+            TileWalls other = world->GetWall(secondTile);
+            other.AddWall(secondSegment);
+            other.SetPattern(0, secondSegment, 0);
+            world->SetWall(secondTile, other);
+            world->CommitWallChanges();
+        } else if (mTemps[2] == 0) {
+            cFixedWorld *world = gFixedWorld;
+            TileWalls walls = world->GetWall(firstTile);
+            if (walls.HasWall(firstSegment)) {
+                result = 1;
+                ERoom::DeleteWallAtTile(firstTile, walls, firstSegment);
+                world->CommitWallChanges();
+            } else {
+                result = 0;
+            }
+        } else {
+            OBJECT_ERROR_CHECK(false, 0x61);
+        }
         break;
+    }
     case 0x12:
         return _gd.mBuildBuyMode != 0;
     case 0x3b:
