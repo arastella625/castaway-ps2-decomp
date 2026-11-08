@@ -41,6 +41,7 @@ public:
 
     static PlanManager *GetInstance();
     Plan *GetPlanByID(s16 id);
+    Plan *GetPlanByGUID(int guid); // 0x1B3FF8
     int IsPlanUnlocked(s16 id);
     void ToggleAllPlansInUI();
     Plan *GetPlanByTokenID(s16 token);

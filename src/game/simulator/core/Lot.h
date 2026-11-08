@@ -89,7 +89,8 @@ public:
     LotEntry mLots[0x1b];  // 0x00
     s16 mHomeTiki;         // 0xd8
     u8 mTransitions[0x48]; // 0xda  UnlockEverything writes all 0x48
-    u8 pad_0x122[6];
+    u8 pad_0x122[2];
+    void *mGraph;          // 0x124  the lot graph CanSimGetToLot searches
 
     LotManager();
 
@@ -139,6 +140,17 @@ public:
             return open;
         }
         return flags & 1;
+    }
+
+    // GenericSimCall 0x40. Partly inlined on PS2: the graph and the target lot having been
+    // visited are tested inline, and the search is 0x1FDD30 (its name and arguments are ours).
+    bool FindRoute(u8 from, u8 to, s16 id, s16 *steps, float *distance, s16 *a, u8 *path);
+    bool CanSimGetToLot(s16 id, s8 from, s8 to, s16 &steps, float &distance, u8 *path)
+    {
+        s16 a = 0;
+        if (mGraph && HasLotBeenVisited(to))
+            return FindRoute(from, to, id, &steps, &distance, &a, path);
+        return false;
     }
 
     bool HasTransitionBeenUsed(s16 id) const

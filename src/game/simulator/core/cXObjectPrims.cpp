@@ -2211,6 +2211,8 @@ class EHouse {
 public:
     u32 pad_0x0[0xf];
     int mLot; // 0x3c
+
+    s8 GetLotNum() const { return mLot; } // Wii: GetLotNum; GenericSimCall 0x40 reads a byte
 };
 
 class LotTransitionParam {
@@ -2762,8 +2764,37 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
     case 0x3f:
         PlanManager::GetInstance()->ForceAllPlansToUnlock();
         break;
-    case 0x3c:
+    case 0x3c: {
+        // t1 = the first word of the stack object's plan, or 0 if it has none. A multi-tile
+        // object tries its master's GUID, then its interaction leader's, then each part's.
+        cXObject *object = GetObjectFromID(elem->mStackObject);
+        OBJECT_ERROR_CHECK(object, 0x17);
+        Plan *plan;
+        if (object->IsMultiTile()) {
+            plan = PlanManager::GetInstance()->GetPlanByGUID(
+                object->mSelector->GetMasterSelector()->GetGUID());
+            if (!plan)
+                plan = PlanManager::GetInstance()->GetPlanByGUID(
+                    object->GetInteractionLeader()->mSelector->GetGUID());
+            if (!plan) {
+                cXMTObject *part = object->GetMTObject();
+                if (part) {
+                    part = part->GetFirstMultiTileObject();
+                    while (part && !plan) {
+                        plan = PlanManager::GetInstance()->GetPlanByGUID(part->mSelector->GetGUID());
+                        part = part->mNextPart;
+                    }
+                }
+            }
+        } else {
+            plan = PlanManager::GetInstance()->GetPlanByGUID(object->mSelector->GetGUID());
+        }
+        if (plan)
+            mTemps[1] = plan->field_0x0;
+        else
+            mTemps[1] = 0;
         break;
+    }
     case 0x3d: {
         // t1 = the plan made from token t0. No such plan is error 0x6B.
         Plan *plan = PlanManager::GetInstance()->GetPlanByTokenID(mTemps[0]);
@@ -2771,8 +2802,33 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         mTemps[1] = plan->field_0x0;
         break;
     }
-    case 0x40:
-        break;
+    case 0x40: {
+        // t1 = the last lot on neighbour t0's way to this lot, or 0 when they're already here
+        // or have no lot (both true). False if there's no way.
+        s16 id = mTemps[0];
+        mTemps[1] = 0;
+        Neighbor *neighbor = GetNeighborhood()->FindNeighborByIDInline(id);
+        OBJECT_ERROR_CHECK(neighbor, 0x38);
+        float distance = 0;
+        s16 steps = 0;
+        u8 path[30];
+        memset(path, 0, sizeof(path));
+        s8 from = neighbor->mPersonData[0x22];
+        s8 to = _globals.mHouse->GetLotNum();
+        if (from == to || from == -1) {
+            mTemps[1] = 0;
+            return 1;
+        }
+        if (!LotManager::Instance()->CanSimGetToLot(id, from, to, steps, distance, path))
+            return 0;
+        int length = 0;
+        while (length < 30 && path[length])
+            length++;
+        if (length == 30 || length == 0)
+            return 0;
+        mTemps[1] = path[length - 1];
+        return 1;
+    }
     case 0x41: {
         // True if there's a tribe and t0 is an InventoryTokens ID. It doesn't ask whether the
         // tribe has the token.
