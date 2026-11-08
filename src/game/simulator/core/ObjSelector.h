@@ -69,6 +69,8 @@ public:
 
     ObjectFunctionTable *GetFnTable();
     int GetGUID() const;
+    const class BString2 &GetUserLastName() const;    // 0x1DA068
+    void SetUserLastName(const class BString2 &name); // 0x1DA0C8
     bool compare(int guid) const { return guid == GetGUID(); }
     ObjSelector *GetMasterSelector();
     class TreeTab *GetTreeTab();

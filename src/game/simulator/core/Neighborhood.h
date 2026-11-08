@@ -15,7 +15,9 @@ public:
     int field_0x8;          // 0x08  the argument of Family's membership test
     ObjSelector *mSelector; // 0x0c
     class RelMatrix *mRelations; // 0x10
-    u32 pad_0x14[3];        // 0x14
+    u32 pad_0x14;           // 0x14
+    class cXPerson *mPerson; // 0x18  Wii: GetPerson
+    u32 pad_0x1c;           // 0x1c
     int mDirty;             // 0x20
     u8 pad_0x24[0x48];      // 0x24
     s16 mPersonData[0x31];  // 0x6c  scopes 0x34 to 0x39
@@ -81,10 +83,16 @@ public:
     GoalAndUnlockData *GetGoalAndUnlockData() { return &mGoals; }
     Neighbor *FindNeighborByID(int id);
     int RemoveFromFamily(Neighbor *neighbor, bool a); // GenericSimCall 6: 0 when it worked
-    void AddToFamily(Neighbor *neighbor, Family *family); // 0x2055D8
+    int AddToFamily(Neighbor *neighbor, Family *family); // 0x2055D8, 0 when it worked
     Family *MakeNewFamily(bool freePlay, int number);    // 0x205250, our name
-    // Wii: MakeNewFreePlayFamily(int); on PS2 the call takes a 1 first.
-    Family *MakeNewFreePlayFamily(int number) { return MakeNewFamily(true, number); }
+    // Wii: MakeNewFreePlayFamily(int), inlined on PS2 (GenericSimCall 4 and 0x37): nothing if
+    // the number is taken, otherwise 0x205250 with a 1 first.
+    Family *MakeNewFreePlayFamily(int number)
+    {
+        if (GetFamilyInline(number))
+            return 0;
+        return MakeNewFamily(true, number);
+    }
     void SetNeighborhoodVar(int index, s16 value) { mVars[index] = value; }
     int GetNumFamilies();
     Family *GetFamilyByIndex(int index);

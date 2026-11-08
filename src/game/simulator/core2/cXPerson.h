@@ -314,6 +314,7 @@ public:
     int RunImmediateAction(Interaction *action);
     int MoveOutOfWay(int priority);
     int GetSimType();
+    class CasSimDescription *GetNonCostumedSimDescription(); // 0x1DD8C0
     Interaction *GetCurrentAction();
     void ActionSkipped(const Interaction &action);
     u32 GetPendingAction() const { return field_0x538 ? 1 : 0; }

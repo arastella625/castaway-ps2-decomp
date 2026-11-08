@@ -2499,8 +2499,39 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
             action->SetIconObject(object);
         break;
     }
-    case 0x04:
+    case 0x04: {
+        // Moves the stack object's neighbour into family t1, or the selected family when t1 is
+        // 0 or less, making family t1 if it doesn't exist. Person data 0x2D keeps the old
+        // family (0x28). A Sim of type 0 then takes neighbour t0's last name.
+        result = 0;
+        Neighborhood *neighborhood = GetNeighborhood();
+        Neighbor *neighbor = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+        OBJECT_ERROR_CHECK(neighbor, 0x38);
+        s16 oldFamily = neighbor->mPersonData[0x28];
+        Family *family;
+        if (mTemps[1] > 0) {
+            family = neighborhood->GetFamilyInline(mTemps[1]);
+            if (!family)
+                family = neighborhood->MakeNewFreePlayFamily(mTemps[1]);
+        } else {
+            family = neighborhood->GetFamilyInline(_gd.GetSelectedFamily());
+        }
+        if (neighbor->mPersonData[0x28] != 0 && neighborhood->RemoveFromFamily(neighbor, true))
+            break;
+        if (neighborhood->AddToFamily(neighbor, family))
+            break;
+        neighbor->mPersonData[0x2d] = oldFamily;
+        Neighbor *from = neighborhood->FindNeighborByIDInline(mTemps[0]);
+        cXPerson *person = neighbor->mPerson;
+        result = 1;
+        if (from && person && !person->GetSimType()) {
+            neighbor->mSelector->SetUserLastName(from->mSelector->GetUserLastName());
+            CasSimDescription *description = person->GetNonCostumedSimDescription();
+            if (description)
+                ewcsncpy(description->lastName, from->mSelector->GetUserLastName().c_str(), 0x20);
+        }
         break;
+    }
     case 0x05: {
         // Merges family t0 into the selected family: its funds, then its inventory.
         result = 0;
