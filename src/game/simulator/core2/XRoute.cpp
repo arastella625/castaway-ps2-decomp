@@ -81,3 +81,33 @@ RouteGoal *XRoute::GetCurrentGoal()
 {
     return &mGoals[mCurrentGoal];
 }
+
+// EASTL 1.03.00's vector::DoInsertValue, written as a specialization so it's an ordinary
+// function here (an instantiation would be weak, in a linkonce section). A full vector grows to
+// twice its size, or to 1.
+template <>
+void eastl::vector<XRoute, eastl::allocator>::DoInsertValue(XRoute *position, const XRoute &value)
+{
+    if (mpEnd != mpCapacity) {
+        const XRoute *pValue = &value;
+        if (pValue >= position && pValue < mpEnd)
+            ++pValue;
+        new (mpEnd) XRoute(*(mpEnd - 1));
+        eastl::copy_backward(position, mpEnd - 1, mpEnd);
+        *position = *pValue;
+        ++mpEnd;
+    } else {
+        const unsigned int prevSize = mpEnd - mpBegin;
+        const unsigned int newSize = prevSize ? 2 * prevSize : 1;
+        XRoute *const newData = newSize ? (XRoute *)mAllocator.allocate(newSize * sizeof(XRoute)) : 0;
+        XRoute *newEnd = eastl::uninitialized_copy_ptr(mpBegin, position, newData);
+        new (newEnd) XRoute(value);
+        newEnd = eastl::uninitialized_copy_ptr(position, mpEnd, ++newEnd);
+        DoDestroyValues(mpBegin, mpEnd);
+        if (mpBegin)
+            mAllocator.deallocate(mpBegin);
+        mpBegin = newData;
+        mpEnd = newEnd;
+        mpCapacity = newData + newSize;
+    }
+}
