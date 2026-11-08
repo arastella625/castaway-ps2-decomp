@@ -47,6 +47,8 @@ public:
     class PassiveInfluenceSystem *mPassiveInfluence; // 0xa8
     u32 pad_0xac[3];   // 0xac
     int mFunds;        // 0xb8  Wii: GetFunds
+    u32 pad_0xbc[4];   // 0xbc
+    int mGameTime;     // 0xcc  Wii: GetCurrentGameTime, read as an int
 
     int GetPlayerCheatsValue();
     void SetFunds(int funds); // 0x1E0E98

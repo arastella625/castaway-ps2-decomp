@@ -37,6 +37,15 @@ public:
                    u32 insertGUID) const;
 };
 
+// Wii: HUDTarget. GetHudTransitionTarget is inlined on PS2 (GenericSimCall 0x22).
+class HUDTarget {
+public:
+    u32 pad_0x0[0x30];
+    int mHudTransitionTarget; // 0xc0
+
+    int GetHudTransitionTarget() const { return mHudTransitionTarget; }
+};
+
 struct LoadInfo {
     u32 pad_0x0[4];
     int field_0x10; // 0x10  GenericSimCall 9 clears it
@@ -46,7 +55,8 @@ struct LoadInfo {
 // game/cas/CasUtils.h has its own view of the same object.
 class GameData {
 public:
-    u32 pad_0x0[0x15];
+    u32 pad_0x0[0x14];
+    HUDTarget *mHudTarget;    // 0x50  Wii +0x44
     H2DTarget *mHud;          // 0x54
     u32 pad_0x58[0x11];
     LoadInfo *mLoadInfo;      // 0x9c
@@ -59,6 +69,7 @@ public:
 
     Player *GetPlayer() { return &mPlayer; }
     int GetSelectedFamily() const { return mSelectedFamily; }
+    void SetInitialSimSelection(int id) { mInitialSimSelection = id; }
 };
 extern GameData _gd;
 

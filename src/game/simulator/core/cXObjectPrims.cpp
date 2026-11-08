@@ -1,6 +1,7 @@
 #include "game/simulator/core/cXObject.h"
 
 #include "game/GameData.h"
+#include "game/UIDB.h"
 
 #include "common/EGlobal.h"
 #include "common/EVec3.h"
@@ -2323,6 +2324,29 @@ public:
     static LoadingScreenStateMachine *GetSingleton() { return sInstance; }
     bool IsIrisTransitionInComplete();    // 0x270428
 };
+// GenericSimCall 0x27: Wii AutoFood, made on the stack. The names below AutoFood are ours. Each
+// choice is four words its own constructor (0x2BC028) zeroes; the vtable is at 0x4BB1A0, after
+// 0x1B48 bytes of data.
+struct AutoFoodChoice {
+    u32 pad_0x0[4];
+    AutoFoodChoice();
+};
+struct AutoFoodList {
+    AutoFoodChoice mChoices[0x30];
+    int mCount;      // 0x300
+    int field_0x304; // 0x304
+    AutoFoodList() : mCount(0), field_0x304(0) {}
+};
+struct AutoFoodData {
+    AutoFoodList mLists[9];
+};
+class AutoFood : public AutoFoodData {
+public:
+    AutoFood() {}
+    virtual ~AutoFood() {}
+    int AutonomousFoodSelection(int a, int b, int c); // 0x2A3A28
+};
+
 // The family with this number, or null.
 inline Family *Neighborhood::GetFamilyInline(int number)
 {
@@ -2597,8 +2621,28 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
     }
     case 0x21:
         return ShowAllObjectDialogs(elem, primParam);
-    case 0x22:
+    case 0x22: {
+        // Opens Create-a-Sim for neighbour t2 on lot t1 (flow state 8), keeping the selected
+        // Sim to come back to. While the HUD's transition target is 3 it returns 2.
+        s16 selected = 0;
+        if (_globals.mPlayerPerson)
+            selected = _globals.mPlayerPerson->GetNeighborID();
+        HUDTarget *hud = _gd.mHudTarget;
+        if (!hud)
+            break;
+        if (hud->GetHudTransitionTarget() == 3) {
+            result = 2;
+            break;
+        }
+        UIDB::UIDBSetInt("CAS_mode", 1);
+        UIDB::UIDBSetInt("CAS_neighborID", mTemps[2]);
+        UIDB::UIDBSetInt("CAS_CurrentGameTime", GetSimulator()->mGameTime);
+        UIDB::UIDBSetInt("CAS_lotnumber", mTemps[1]);
+        UIDB::UIDBSetInt("PlayerNumber", 0);
+        StateMachineFlow::SetFlowRequest((StateMachineFlow::eGameState)8);
+        _gd.SetInitialSimSelection(selected);
         break;
+    }
     case 0x26: {
         // t1 = 1 if object t0 is in the world. False if there's no object.
         cXObject *object = GetObjectModule()->GetObjectFromIDInline(mTemps[0]);
@@ -2792,8 +2836,13 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
             tribe->Replenish(mTemps[0]);
         break;
     }
-    case 0x27:
-        break;
+    case 0x27: {
+        // AutoFood picks a food from t1, t2 and t3. True if it found one.
+        AutoFood food;
+        if (food.AutonomousFoodSelection(mTemps[1], mTemps[2], mTemps[3]))
+            return 1;
+        return 0;
+    }
     case 0x16:
     case 0x2e:
     case 0x2f:

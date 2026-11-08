@@ -6,6 +6,7 @@
 #include "common/ERQuickdata.h"
 #include "common/types.h"
 #include "game/cas/CasSimDescription.h"
+#include "game/UIDB.h"
 
 // The function at 0x3D9930. Ghidra's name list calls it EChecksum::ComputeSymbol; the
 // parameter types are read from its callers.
@@ -22,11 +23,6 @@ struct GlobalData {
 };
 extern GlobalData _gd;
 
-// Wii: UIDBGetInt__4UIDBFPCc. Reads a named integer from the UI database.
-class UIDB {
-public:
-    static int UIDBGetInt(const char *name);
-};
 
 namespace Sim {
 
