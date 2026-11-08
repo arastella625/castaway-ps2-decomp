@@ -1604,9 +1604,9 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 0x39 | 9 | Clears cached catalog resources of the stack object |
 | 0x3A | 4 | Adds or removes the wall between objects t0 and t1. t2 of 1 adds |
 | 0x3B, 0x3E, 0x3F | 1 each | Plans: toggles all in the UI, ignores requirements, forces unlock |
-| 0x3C | 12 | Is the stack object's plan unlocked? Missing is error 0x17 |
+| 0x3C | 12 | t1 = the first word of the stack object's plan (`GetPlanByGUID`; scope 0x43's field 0), or 0 with no plan. Whether that word means "unlocked" isn't shown by this code. A multi-tile object tries its master's GUID, then its interaction leader's, then each part's in order. Missing is error 0x17. **Proven, PS2** |
 | 0x3D | 0 | t1 = the first word of the plan made from token t0. No such plan is error 0x6B. **Proven, PS2.** No tree uses it |
-| 0x40 | 2 | Neighbour t0's lot, t1 = 0 if it's here |
+| 0x40 | 2 | Neighbour t0's way here (`LotManager::CanSimGetToLot`). t1 = 0 first. Already on this lot, or no lot (-1): true. Otherwise false unless the lot graph exists, this lot has been visited and a route is found. The route is up to 30 lot numbers, and t1 = the last one; a route of 0 or 30 lots is false. No neighbour is error 0x38. **Proven, PS2** |
 | 0x41 | 3 | **Proven, PS2 and Wii; corrects an earlier reading.** True if there's a player tribe inventory and t0 is an ID in the `InventoryTokens` table. It doesn't check that the tribe has the token. No player Sim is false |
 | 0x42 | 7 | t1 = a goal value for t0. False if there's none |
 
