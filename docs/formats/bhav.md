@@ -1151,7 +1151,7 @@ Each tick, a loop calls the handler for the state until one says it's done. Hand
 | 0xE | WaitingForPersonToMove | Waits on the Sim asked to move |
 | 0xF | RouteInvalidatedWhileWalking | Replans |
 | 0x10, 0x11 | NeedFailureFeedback, WaitingForFailureFeedback | **Proven for 0x10.** Result 1 if none, copied to person data 0x1C. If the routing slot has flag bit 14, the target's `gl_route failure feedback` tree runs on the target with parameters (result, blocking object ID from route `+0x90`, 0, 0): code 3, state 0x11. Otherwise, or with no such tree, state 7 |
-| 0x12 | FoundGoals | Waits for a routing turn: a queue allows so many Sims a frame. Then a path: 0 is state 6, 1 state 8, 2 state 0xC, 3 waits for a portal, others state 7 |
+| 0x12 | FoundGoals | **Proven.** One Sim routes a frame: it may when nobody has yet and the routing queue (24 Sims) is empty or has it first. Otherwise it joins the queue once (PS2 flag `+0x5E8`), code 2, stay. Then `InitRoute` gives the code: 0 is state 6, 1 state 8, 2 state 0xC, 3 is person data 0x20 = 0 and state 4, others state 7. (An earlier version of this row said 3 waits for a portal: it's state 4, WaitingForSit.) |
 | 0x13, 0x14 | ObjectDeleted, ObjectDeletedWhileWalking | The target went away: state 7 |
 
 The tree's code, the second handler argument, is a 64-bit `long` on PS2. Handlers set it to 3 while they wait, and Failed sets 0.

@@ -11,6 +11,27 @@ class Neighbor;
 // Wii: TreeReturnCode. 64 bits on PS2: it's stored with sd.
 typedef long TreeReturnCode;
 
+class cXPerson;
+
+// Wii: Queue<cXPerson *, 24>, the Sims waiting for a routing turn.
+class RoutingQueue {
+public:
+    cXPerson *mItems[24]; // 0x00
+    u32 mHead;            // 0x60
+    u32 mTail;            // 0x64
+
+    bool Enqueue(cXPerson *const &person)
+    {
+        if (mTail - mHead < 24) {
+            mItems[mTail % 24] = person;
+            mTail++;
+            return true;
+        }
+        return false;
+    }
+    cXPerson *&Peek(u32 index) { return mItems[(mHead + index) % 24]; }
+};
+
 // Wii: XRoute, 0xA8 bytes on PS2. Only what the routing handlers read.
 class XRoute {
 public:
@@ -175,7 +196,9 @@ public:
     eastl::vector<FTilePt, eastl::allocator> mPath; // 0x59c  8-byte tile points
     u32 pad_0x5ac[9];         // 0x5ac
     eastl::vector<XRoute, eastl::allocator> mRoutes; // 0x5d0  the last is current
-    u32 pad_0x5e0[4];         // 0x5e0
+    u32 pad_0x5e0[2];         // 0x5e0
+    int mInRoutingQueue;      // 0x5e8  Wii: a byte at +0x5DA
+    u32 pad_0x5ec;            // 0x5ec
     PersonAnimator *mAnimator; // 0x5f0
     s16 mIdleLoopCount;       // 0x5f4
 
@@ -225,6 +248,19 @@ public:
     RoutingState Routing_Waiting(bool &done, TreeReturnCode &code);
     RoutingState Routing_NeedFailureFeedback(bool &done, TreeReturnCode &code);
     RoutingState Routing_Failed(bool &done, TreeReturnCode &code);
+    RoutingState Routing_FoundGoals(bool &done, TreeReturnCode &code);
+    TreeReturnCode InitRoute(XRoute *route);
+    static void PopFromRoutingQueue(cXPerson *person);
+    static RoutingQueue s_RoutingQueue;
+    static int s_nNumRoutedThisFrame;
+    static bool IsRoutingQueueEmpty() { return s_RoutingQueue.mTail == s_RoutingQueue.mHead; }
+    // Wii: CanRouteThisFrame, inlined on PS2. One Sim routes a frame, in queue order.
+    bool CanRouteThisFrame()
+    {
+        if (s_nNumRoutedThisFrame < 1 && (IsRoutingQueueEmpty() || this == s_RoutingQueue.Peek(0)))
+            return true;
+        return false;
+    }
     RoutingState Routing_WaitingForStand(bool &done, TreeReturnCode &code);
     RoutingState Routing_WaitingForSit(bool &done, TreeReturnCode &code);
     RoutingState Routing_WalkingSucceeded(bool &done, TreeReturnCode &code);

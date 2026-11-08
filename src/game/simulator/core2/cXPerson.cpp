@@ -561,6 +561,36 @@ cXPerson::RoutingState cXPerson::Routing_WaitingForStand(bool &done, TreeReturnC
 }
 #endif
 
+// Waits for a routing turn, then plans the route: InitRoute's answer is the tree's code.
+cXPerson::RoutingState cXPerson::Routing_FoundGoals(bool &done, TreeReturnCode &code)
+{
+    if (!CanRouteThisFrame()) {
+        if (!mInRoutingQueue) {
+            s_RoutingQueue.Enqueue(this);
+            mInRoutingQueue = 1;
+        }
+        code = 2;
+        done = true;
+        return kRoutingFoundGoals;
+    }
+    s_nNumRoutedThisFrame++;
+    code = InitRoute(GetCurrentRoute());
+    PopFromRoutingQueue(this);
+    switch (code) {
+    case 2:
+        return kRoutingFoundPath;
+    case 3:
+        SetPersonData(0x20, 0);
+        done = true;
+        return kRoutingWaitingForSit;
+    case 0:
+        return kRoutingTrapped;
+    case 1:
+        return kRoutingSucceeded;
+    }
+    return kRoutingFailed;
+}
+
 // A failed route keeps its result, or gets 1, and the tree goes on with code 0.
 cXPerson::RoutingState cXPerson::Routing_Failed(bool &done, TreeReturnCode &code)
 {
