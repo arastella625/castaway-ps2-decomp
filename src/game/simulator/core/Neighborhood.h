@@ -69,7 +69,8 @@ public:
     s16 mVars[0x24];           // 0x10  scope 0x22
     u32 pad_0x58[0x12];        // 0x58
     eastl::vector<int, eastl::allocator> mHouses; // 0xa0  lot numbers
-    u32 pad_0xb0[5];           // 0xb0
+    eastl::vector<Family *, eastl::allocator> mFamilies; // 0xb0
+    u32 pad_0xc0;              // 0xc0
     GoalAndUnlockData mGoals;  // 0xc4
     u32 pad_0xc8[0x849];       // 0xc8
 
@@ -79,11 +80,13 @@ public:
 
     GoalAndUnlockData *GetGoalAndUnlockData() { return &mGoals; }
     Neighbor *FindNeighborByID(int id);
+    int RemoveFromFamily(Neighbor *neighbor, bool a); // GenericSimCall 6: 0 when it worked
     void SetNeighborhoodVar(int index, s16 value) { mVars[index] = value; }
     int GetNumFamilies();
     Family *GetFamilyByIndex(int index);
 
     int *GetFamily(s16 id);
+    Family *GetFamilyInline(int number); // Wii GetFamily(int), inlined in GenericSimCall 5
     void SavePersistentData(class cXPerson *person);
     int GetNumNeighborHouses() { return mHouses.size(); }
     int GetNeighborHouseByIndex(int index)

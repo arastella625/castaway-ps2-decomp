@@ -45,8 +45,12 @@ public:
     int mTicks;        // 0x9c  Wii: GetTicks
     u32 pad_0xa0[2];   // 0xa0
     class PassiveInfluenceSystem *mPassiveInfluence; // 0xa8
+    u32 pad_0xac[3];   // 0xac
+    int mFunds;        // 0xb8  Wii: GetFunds
 
     int GetPlayerCheatsValue();
+    void SetFunds(int funds); // 0x1E0E98
+    void AddFunds(int amount) { SetFunds(mFunds + amount); }
 
     bool GetGlobalRef(s16 index, const s16 **ref)
     {

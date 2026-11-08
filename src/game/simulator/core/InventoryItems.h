@@ -95,6 +95,7 @@ public:
     void AddTokenItem(s16 id, s16 count);
     void AddClothingItem(s16 id);
     void RemoveItem(int index, s16 count);
+    void MergeInventories(InventoryItems *other); // 0x1FA4D0
     static const struct ClothingItemsRow *GetClothingItemsRow(s16 id);
     void GimmeAllFood(s16 count);
     void GimmeAllResources(s16 count);

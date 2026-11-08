@@ -135,6 +135,7 @@ public:
     }
     Interaction(cXPerson *person, cXObject *object, int index, int priority);
     void SetIconObject(cXObject *object) { mIconObject = object; }
+    bool HasID() const { return field_0x30 != 0; } // Wii: HasID, inlined on PS2 (GenericSimCall 2)
     bool GetContinuation() const { return (mFlags >> 1) & 1; }
     bool GetHidden() const { return (mFlags >> 4) & 1; }
     bool GetPushToHead() const { return (mFlags >> 5) & 1; }

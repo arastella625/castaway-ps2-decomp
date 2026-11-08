@@ -2312,10 +2312,34 @@ long cXObject::TryLotTransition(StackElem *elem, XPrimParam *primParam)
 #endif
 
 #ifdef NON_MATCHING
-// GenericSimCall 9: Wii LoadingScreenStateMachine::LoadFinishing, static on PS2.
+// GenericSimCall 8 and 9. On PS2 the singleton is a static at 0x492904, which GetSingleton
+// reads inline.
 class LoadingScreenStateMachine {
 public:
+    static void StartingLoad(int mode);   // 0x2704A8, a CLoadingScreen::eLoadingScreenMode
+    static bool LoadInProgress();         // 0x2704F8
     static void LoadFinishing();
+    static LoadingScreenStateMachine *sInstance; // 0x492904, our name
+    static LoadingScreenStateMachine *GetSingleton() { return sInstance; }
+    bool IsIrisTransitionInComplete();    // 0x270428
+};
+// The family with this number, or null.
+inline Family *Neighborhood::GetFamilyInline(int number)
+{
+    for (Family **i = mFamilies.begin(); i != mFamilies.end(); ++i) {
+        if ((*i)->GetNumber() == number)
+            return *i;
+    }
+    return 0;
+}
+
+// GenericSimCall 3: Wii StateMachineFlow::SetFlowRequest, inlined on PS2 as a store to 0x492908.
+class StateMachineFlow {
+public:
+    enum eGameState {
+    };
+    static int sFlowRequest; // 0x492908, our name
+    static void SetFlowRequest(eGameState state) { sFlowRequest = state; }
 };
 // GenericSimCall 0x10: the game's scripted sequences.
 class SequenceManager {
@@ -2415,13 +2439,64 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         gWeatherManager->SetWeatherState("hurricane", 2, false);
         break;
     case 0x01:
-    case 0x03:
-    case 0x02:
-    case 0x04:
-    case 0x05:
-    case 0x06:
-    case 0x08:
         break;
+    case 0x03: {
+        // Only for the selected Sim: asks the game flow for state 0x20.
+        cXPerson *person = GetObjectFromID(elem->mStackObject)->GetPerson();
+        OBJECT_ERROR_CHECK(person, 0x1c);
+        OBJECT_ERROR_CHECK(person == _globals.GetSelectedPerson(), 0x14);
+        StateMachineFlow::SetFlowRequest((StateMachineFlow::eGameState)0x20);
+        break;
+    }
+    case 0x02: {
+        // The stack object becomes the icon of my current action, if it has an ID.
+        cXObject *object = GetObjectFromID(elem->mStackObject);
+        OBJECT_ERROR_CHECK(object, 0xa);
+        cXPerson *person = GetPerson();
+        OBJECT_ERROR_CHECK(person, 0x1c);
+        Interaction *action = person->GetCurrentAction();
+        if (action->HasID())
+            action->SetIconObject(object);
+        break;
+    }
+    case 0x04:
+        break;
+    case 0x05: {
+        // Merges family t0 into the selected family: its funds, then its inventory.
+        result = 0;
+        Neighborhood *neighborhood = GetNeighborhood();
+        Family *from = neighborhood->GetFamilyInline(mTemps[0]);
+        Family *to = neighborhood->GetFamilyInline(_gd.GetSelectedFamily());
+        if (to && from) {
+            result = 1;
+            GetSimulator()->AddFunds(from->GetFunds());
+            to->GetInventory()->MergeInventories(from->GetInventory());
+        }
+        break;
+    }
+    case 0x06: {
+        // Takes the stack object's neighbour out of its family. True only if that worked.
+        Neighborhood *neighborhood = GetNeighborhood();
+        Neighbor *neighbor = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+        OBJECT_ERROR_CHECK(neighbor, 0x38);
+        result = 0;
+        if (!neighborhood->RemoveFromFamily(neighbor, false))
+            result = 1;
+        break;
+    }
+    case 0x08:
+        // t0 non-zero starts a loading screen. Otherwise 4, run again, until the iris is in.
+        if (mTemps[0] != 0) {
+            LoadingScreenStateMachine::StartingLoad(6);
+            return 1;
+        }
+        if (!LoadingScreenStateMachine::LoadInProgress()) {
+            LoadingScreenStateMachine::StartingLoad(6);
+            return 4;
+        }
+        if (!LoadingScreenStateMachine::GetSingleton()->IsIrisTransitionInComplete())
+            return 4;
+        return 1;
     case 0x09:
         _gd.mLoadInfo->field_0x10 = 0;
         LoadingScreenStateMachine::LoadFinishing();

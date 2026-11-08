@@ -52,11 +52,13 @@ public:
     LoadInfo *mLoadInfo;      // 0x9c
     u32 pad_0xa0[2];
     int mInitialSimSelection; // 0xa8
-    u32 pad_0xac[6];
+    int mSelectedFamily;      // 0xac  Wii: GetSelectedFamily
+    u32 pad_0xb0[5];
     int mBuildBuyMode;        // 0xc4  Wii: IsBuildBuyMode
     Player mPlayer;           // 0xc8
 
     Player *GetPlayer() { return &mPlayer; }
+    int GetSelectedFamily() const { return mSelectedFamily; }
 };
 extern GameData _gd;
 

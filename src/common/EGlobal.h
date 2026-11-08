@@ -43,6 +43,7 @@ public:
     int GetTransitioningNeighborID() const { return mTransitioningNeighbor; }
     void SetSelectedPerson(class cXPerson *person);
     ELocString GetNewUIString(const char *name, const char *a);
+    class cXPerson *GetSelectedPerson() const; // 0x34ABB0, returns mPlayerPerson
 };
 extern EGlobal _globals;
 
