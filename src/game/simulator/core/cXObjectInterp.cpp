@@ -62,6 +62,23 @@ inline int fround(f32 value)
 // - Scope 0x1a: the game retests the constants pointer in the else branch; here that's folded.
 // - Scope 0x2a: the game keeps a null test on the table that does nothing, with the row loop's
 //   exit block placed inside it.
+// Parked (round 16). The 188 words still off, by pattern, with the game addresses of the dd hunks
+// (dd.py's own trailing "insert" of 25 words at 0x238860 is the next function, not a difference):
+// 1. Tail merging, about 30 words: scopes 0x34 to 0x37's person data tails. The game keeps a
+//    copy in each scope (0x2383CC, 0x23847C, 0x238538, 0x23864C, 0x238658); ours shares one,
+//    and the error blocks around them fill their delay slots differently (0x2383A4 to 0x2383BC).
+//    The v0/v1 swap noted above is what lets ours merge.
+// 2. A branch that dies late, about 10 words: scope 0x22's compare with 7 (0x235A90, 0x235AB8).
+// 3. Register allocation, 3 words: the neighbour lookups load into v0 and copy (0x23651C,
+//    0x2366F4, 0x2375A0).
+// 4. An inlined helper, about 6 words: LotManager::IsTransitionOpen's "both" test selects with
+//    movn from 0 where ours uses movz from 1, and HasTransitionBeenUsed's bool is normalised
+//    after the load (0x237DF8 to 0x237E9C). Lot.h's shapes match other functions; three other
+//    shapes tried here were equal or worse.
+// 5. A REF_VALUE tail shared where the game repeats it, about 4 words (0x236288, 0x236298).
+// 6. Alignment nops, about 15 single words: they follow from the size differences above and
+//    should go once those are fixed. 0x2371A8's lui is a relocation shown unresolved, not code.
+// The scope 0x1a and 0x2a notes above weren't seen as separate hunks this round.
 // Reads one operand. scope picks where it lives and data says which one (bhav.md has the list).
 // value gets the number. ref gets its address when it can be written through, and floatRef the
 // address of a motive, which is a float underneath.
