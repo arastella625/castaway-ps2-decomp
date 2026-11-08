@@ -20,7 +20,17 @@ public:
 
     // The game frees through one out-of-line function that takes no size.
     void deallocate(void *block) { delete[] (char *)block; }
+    // Wii: allocate_memory, which calls this with the size, the alignment and an offset.
+    void *allocate(unsigned int size, unsigned int alignment, unsigned int offset);
 };
+
+template <class T>
+inline T *uninitialized_copy_ptr(const T *first, const T *last, T *result)
+{
+    for (; first != last; ++first, ++result)
+        new (result) T(*first);
+    return result;
+}
 
 template <class InputIterator, class OutputIterator>
 inline OutputIterator copy(InputIterator first, InputIterator last, OutputIterator result)
@@ -50,6 +60,21 @@ public:
 
     vector() : mpBegin(0), mpEnd(0), mpCapacity(0) {}
     vector(const Allocator &allocator) : mpBegin(0), mpEnd(0), mpCapacity(0), mAllocator(allocator) {}
+    // Wii: VectorBase(n, allocator), then uninitialized_copy_ptr.
+    vector(const vector &other) : mAllocator(other.mAllocator)
+    {
+        const unsigned int n = other.size();
+        mpBegin = DoAllocate(n);
+        mpEnd = mpBegin;
+        mpCapacity = mpBegin + n;
+        mpEnd = uninitialized_copy_ptr(other.mpBegin, other.mpEnd, mpBegin);
+    }
+    T *DoAllocate(unsigned int n)
+    {
+        if (n)
+            return (T *)mAllocator.allocate(n * sizeof(T), 4, 0);
+        return 0;
+    }
     ~vector()
     {
         DoDestroyValues(mpBegin, mpEnd);

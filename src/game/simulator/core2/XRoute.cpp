@@ -5,13 +5,13 @@
 // definition.
 inline RoutingSlot::RoutingSlot()
 {
-    mOffset[0] = 0;
-    mOffset[1] = 0;
-    mOffset[2] = 0;
+    mOffsetX = 0;
+    mOffsetY = 0;
+    mOffsetZ = 0;
     mFlags = 0;
-    mMultiplier = 0;
-    mMultiplier2 = 0;
-    mMultiplier3 = 0;
+    mMultiplier[0] = 0;
+    mMultiplier[1] = 0;
+    mMultiplier[2] = 0;
     mSnapTarget = -1;
     mMin = 16;
     mMax = 16;
@@ -25,6 +25,20 @@ XRoute::XRoute(cXObject *start, cXObject *dest, const RoutingSlot *slot)
     : mGoals(eastl::allocator())
 {
     Construct(start, dest, slot);
+}
+
+// Wii's is the one the compiler writes: every member in order, the halfword pads skipped.
+XRoute::XRoute(const XRoute &other)
+    : mGoals(other.mGoals), mSlot(other.mSlot), mDest(other.mDest), mStart(other.mStart),
+      mCurrentGoal(other.mCurrentGoal), field_0x58(other.field_0x58), mTrapCount(other.mTrapCount),
+      mWaitStartTicks(other.mWaitStartTicks), mLastLocation(other.mLastLocation),
+      mCurPortal(other.mCurPortal), mStartPt(other.mStartPt), mExitDirFlag(other.mExitDirFlag),
+      mValid(other.mValid), field_0x80(other.field_0x80), mMovingPerson(other.mMovingPerson),
+      mMoveSuccess(other.mMoveSuccess), mResult(other.mResult),
+      mBlockingObjectID(other.mBlockingObjectID), field_0x94(other.field_0x94),
+      field_0x98(other.field_0x98), field_0x9c(other.field_0x9c), field_0xa0(other.field_0xa0),
+      field_0xa4(other.field_0xa4)
+{
 }
 
 void XRoute::Construct(cXObject *start, cXObject *dest, const RoutingSlot *slot)

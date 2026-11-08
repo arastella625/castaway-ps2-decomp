@@ -1194,6 +1194,8 @@
 0x001E4EB0 Construct__6XRouteP8cXObjectT1PC11RoutingSlot
 0x001E4FF0 HasCurrentGoal__6XRoute
 0x001E5018 GetCurrentGoal__6XRoute
+0x001D9A70 __6XRouteRC6XRoute
+0x001249B0 allocate__Q25eastl9allocatorUiUiUi
 
 # game/simulator/core2/cXPerson.cpp: the routing handlers
 0x001DC708 Routing_Failed__8cXPersonRbRl

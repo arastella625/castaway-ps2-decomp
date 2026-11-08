@@ -50,7 +50,7 @@ public:
     int mWaitStartTicks; // 0x60  Wii: GetWaitStartTicks
     FTilePt mLastLocation; // 0x64  Wii: GetLastLocation, where the Sim was when last trapped
     cXPortal *mCurPortal; // 0x6c  Wii: GetCurPortal
-    u32 pad_0x70[2];     // 0x70
+    FTilePt mStartPt;    // 0x70  Wii: GetStartPt
     int mExitDirFlag;    // 0x78  Wii: GetExitDirFlag
     int mValid;          // 0x7c  Wii: GetValid
     int field_0x80;      // 0x80
@@ -58,15 +58,14 @@ public:
     int mMoveSuccess;    // 0x88  Wii: GetMoveSuccess
     int mResult;         // 0x8c  Wii: GetResult and SetResult
     s16 mBlockingObjectID; // 0x90  Wii: GetBlockingObjectID
-    u16 pad_0x92;
     int field_0x94;      // 0x94
-    u32 pad_0x98;        // 0x98
+    int field_0x98;      // 0x98
     s16 field_0x9c;      // 0x9c  person data 0x20 takes it on arrival
-    u16 pad_0x9e;
     int field_0xa0;      // 0xa0  0x30 when made
-    u32 pad_0xa4;        // 0xa4
+    int field_0xa4;      // 0xa4
 
     XRoute(cXObject *start, cXObject *dest, const RoutingSlot *slot);
+    XRoute(const XRoute &other);
     void Construct(cXObject *start, cXObject *dest, const RoutingSlot *slot);
     RoutingSlot *GetRoutingSlot();
     bool HasCurrentGoal();

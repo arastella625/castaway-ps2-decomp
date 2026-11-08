@@ -140,7 +140,7 @@ long cXPerson::TryGotoRelative(StackElem *elem, XPrimParam *primParam)
         return GotoRoutingSlot(object, 0, (int &)elem->mWaiting);
     }
     RoutingSlot slot;
-    slot.mMultiplier = 1;
+    slot.mMultiplier[0] = 1;
     slot.SetTileDistances(1.0f, 1.0f, 1.0f);
     slot.SetAllowFailureTrees(param->GetAllowFailureTrees());
     slot.SetAllowDifferentAlts(param->GetAllowDifferentAlts());
@@ -345,9 +345,9 @@ void RoutingSlot::WriteSlot(SlotDescriptor *descriptor) const
 {
     descriptor->mType = 3;
     descriptor->mFlags = mFlags;
-    descriptor->mMultiplier[0] = mMultiplier;
-    descriptor->mMultiplier[1] = mMultiplier2;
-    descriptor->mMultiplier[2] = mMultiplier3;
+    descriptor->mMultiplier[0] = mMultiplier[0];
+    descriptor->mMultiplier[1] = mMultiplier[1];
+    descriptor->mMultiplier[2] = mMultiplier[2];
     descriptor->mSnapTarget = mSnapTarget;
     descriptor->mMin = mMin;
     descriptor->mMax = mMax;
@@ -355,9 +355,9 @@ void RoutingSlot::WriteSlot(SlotDescriptor *descriptor) const
     descriptor->mGradient = mGradient;
     descriptor->mFacing = mFacing;
     descriptor->mResolution = mResolution;
-    descriptor->mOffset[0] = mOffset[0];
-    descriptor->mOffset[1] = mOffset[1];
-    descriptor->mOffset[2] = mOffset[2];
+    descriptor->mOffset[0] = mOffsetX;
+    descriptor->mOffset[1] = mOffsetY;
+    descriptor->mOffset[2] = mOffsetZ;
 }
 
 void RoutingSlot::SetDistances(int min, int max, int optimal)
@@ -371,7 +371,7 @@ f32 RoutingSlot::GetXOffset(int simType) const
 {
     f32 extra;
     if (mFacing <= 0 || mFacing == 4)
-        return mOffset[0];
+        return mOffsetX;
     if ((mFacing & 1) == 0) {
         if (mFacing == 2)
             extra = -kStraightOffset[simType];
@@ -382,14 +382,14 @@ f32 RoutingSlot::GetXOffset(int simType) const
     } else {
         extra = kCornerOffset[simType];
     }
-    return mOffset[0] + extra;
+    return mOffsetX + extra;
 }
 
 f32 RoutingSlot::GetYOffset(int simType) const
 {
     f32 extra;
     if (mFacing < 0 || mFacing == 2 || mFacing == 6)
-        return mOffset[1];
+        return mOffsetY;
     if ((mFacing & 1) == 0) {
         if (mFacing == 4)
             extra = -kStraightOffset[simType];
@@ -400,7 +400,7 @@ f32 RoutingSlot::GetYOffset(int simType) const
     } else {
         extra = kCornerOffset[simType];
     }
-    return mOffset[1] + extra;
+    return mOffsetY + extra;
 }
 
 void RoutingSlot::AllowDirection(int direction)
@@ -424,13 +424,13 @@ void RoutingSlot::SetTileDistances(f32 min, f32 max, f32 preferred)
 
 RoutingSlot::RoutingSlot()
 {
-    mOffset[0] = 0;
-    mOffset[1] = 0;
-    mOffset[2] = 0;
+    mOffsetX = 0;
+    mOffsetY = 0;
+    mOffsetZ = 0;
     mFlags = 0;
-    mMultiplier = 0;
-    mMultiplier2 = 0;
-    mMultiplier3 = 0;
+    mMultiplier[0] = 0;
+    mMultiplier[1] = 0;
+    mMultiplier[2] = 0;
     mSnapTarget = -1;
     mMin = 16;
     mMax = 16;

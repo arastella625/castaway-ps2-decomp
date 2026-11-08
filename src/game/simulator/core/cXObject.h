@@ -181,10 +181,12 @@ public:
 
 class RoutingSlot : public Slot {
 public:
-    f32 mOffset[3];   // 0x04
-    int mMultiplier;  // 0x10  SetMultiplier
-    int mMultiplier2; // 0x14
-    int mMultiplier3; // 0x18
+    // The copy constructor copies the offset as three floats and the multipliers in a loop, so
+    // the offset is three members and the multipliers an array.
+    f32 mOffsetX;       // 0x04
+    f32 mOffsetY;       // 0x08
+    f32 mOffsetZ;       // 0x0c
+    int mMultiplier[3]; // 0x10  SetMultiplier
     int mFlags;       // 0x1c  low byte the directions, 14 failure trees, 15 different levels
     int mSnapTarget;  // 0x20
     int mMin;         // 0x24
