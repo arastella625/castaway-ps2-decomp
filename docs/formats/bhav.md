@@ -1539,11 +1539,11 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | Call | Uses | What it does |
 |---|---|---|
 | 0 | 0 | Starts the `hurricane` weather state (`SetWeatherState("hurricane", 2, false)`). **Proven, PS2.** No tree uses it |
-| 2 | 2 | Stack object is the icon of my current action. Missing is error 0xA, not a Sim error 0x1C |
-| 3 | 1 | If the stack object is the selected Sim, asks the game flow for 0x20, otherwise error 0x14. Not a Sim is error 0x1C |
+| 2 | 2 | Stack object is the icon of my current action, if the action has an ID. Missing is error 0xA, me not a Sim error 0x1C. **Proven, PS2** |
+| 3 | 1 | If the stack object is the selected Sim, asks the game flow for 0x20, otherwise error 0x14. Not a Sim is error 0x1C. **Proven, PS2** |
 | 4 | 8 | Moves the neighbour in the stack object into family t1, or the selected family if t1 is 0 or less. Makes the family if needed. Copies the last name |
-| 5 | 1 | Merges family t0 into the selected family: funds and inventories |
-| 6 | 6 | Removes the neighbour in the stack object from its family. False if that fails |
+| 5 | 1 | Merges family t0 into the selected family: t0's funds are added to the funds, then the selected family's inventory takes t0's (`MergeInventories`). False if either family is missing. **Proven, PS2** |
+| 6 | 6 | Removes the neighbour in the stack object from its family. No neighbour is error 0x38. False if that fails. **Proven, PS2** |
 | 7 | 1 | Goal and unlock data call |
 | 8 | 11 | Loading screen. t0 non-zero starts one and returns 1. Otherwise it returns 4 until the iris transition is in, then 1 |
 | 9 | 24 | Finishes loading: clears `_gd +0x9C`'s word `+0x10`, then `LoadFinishing` |
@@ -1564,11 +1564,11 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 0x1A | 1 | Changes the selected Sim |
 | 0x1F | 6 | Selects Sim t0 through `EGlobal::SetSelectedPerson`, then true if it's now `_globals +0x174`, the player's Sim. Not a Sim, or missing, is false |
 | 0x21 | 1 | Shows all object dialogs |
-| 0x22 | 5 | Starts a lot change to lot t2 |
+| 0x22 | 5 | **Opens Create-a-Sim**, not a lot change (this row used to say "starts a lot change to lot t2"). Sets the UI values `CAS_mode` 1, `CAS_neighborID` t2, `CAS_CurrentGameTime` the game time, `CAS_lotnumber` t1 and `PlayerNumber` 0, asks the game flow for state 8, and remembers the selected Sim's neighbour ID to select afterwards. Returns 2 (and does nothing) while the HUD's transition target is 3. **Proven, PS2** |
 | 0x24 | 1 | Replenishes the tribe, t0 |
 | 0x25 | 5 | A flag = t0 != 0: `_globals +0x4C4` on PS2, a byte at `+0x3FB` on Wii |
 | 0x26 | 2 | t1 = 1 if object t0 is in the world, else 0. False if there's no object **Proven, PS2.** |
-| 0x27 | 1 | `AutonomousFoodSelection` on t1, t2, t3. Its result |
+| 0x27 | 1 | `AutonomousFoodSelection` on t1, t2, t3, through a new `AutoFood`. True if it chose something. **Proven, PS2** |
 | 0x29 | 4 | Only checks: t0 above 1 is error 0x14, and not being a Sim is error 0x4C **Proven, PS2.** |
 | 0x2C | 17 | Closes modeless dialogs **Proven, PS2.** |
 | 0x2D | 30 | Controller rumble, for the player's Sim only. **Proven, PS2; corrects an earlier reading.** The source is the stack object, not an operand: none does nothing, and so does a Sim other than the player's. t0 of -1 stops the rumble; anything else starts one from the stack object, through the player interactor. (This row used to say `+4` u16 was the effect and t0 an object: `+4` is the frame's stack object.) |
