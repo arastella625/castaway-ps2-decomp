@@ -687,6 +687,46 @@ It always returns 1, the true branch, unless there's an error.
 3. `AddToKillQueue` queues it. A Sim's data is saved first through `SavePersistentData`.
 4. If I killed myself in the main simulation, and bit 0 is clear, frame `+8` becomes 1 and it returns 2, so the tree stops here. Otherwise **true**.
 
+### What happens to a killed object
+
+The primitive only queues. The object goes when the queue is flushed.
+
+**`ObjectModule::AddToKillQueue(id, cleanupAll)`**, PS2 `0x222A48`. **Proven:** read on PS2 and the same as Wii step for step.
+
+1. No such object: nothing happens.
+2. A part of a multi-tile object that isn't dynamic is swapped for the object's first part (PS2 `+0x140`), and that part's ID is queued instead.
+3. It walks up the containers (object data 0xE and 0x1A on PS2, `GetContainer` on Wii). If any container is already queued, it stops: the container takes this object with it.
+4. If the ID is already queued, it stops.
+5. `Pickup()` (PS2 vtable `+0x128`): **the object leaves the world now**, not at the flush.
+6. Misc flag 0x1000 (`+0xE4`) is set when `cleanupAll` is false and cleared when it's true.
+7. The ID is pushed onto the s16 vector at ObjectModule `+0x2040` (Wii `+0x203C`).
+
+**`KillQueueFlush`**, run by `ObjectModule::PostSim` (after each simulation step) and by `PostLoad`. **Proven on Wii, likely on PS2:** PS2's flush hasn't been located yet. It takes IDs from the front of the queue until it's empty. For each one that still exists, a dynamic multi-tile object is first removed from the dynamic list, then `ObjectModule::KillObject(id)` runs:
+
+1. The object, and every part of a multi-tile one, is marked as being killed, and Sims inside each are taken out (`ExtractContainedSims`).
+2. `Pickup()` again.
+3. With certain definition flags (`+0xB6` bits 1 to 2) and a house loaded, and not while killing everything, the house is recalculated. Types 5, 8 and 0xE also update room styles and wall posts.
+4. `KillOutOfWorldObject(id, false)`.
+5. If object data 7 was non-zero, global event 0x8E is dispatched with the object's room.
+
+**`KillOutOfWorldObject(id, partsOnly)`**, **proven on Wii, likely on PS2:**
+
+1. If the definition's `+0x9C` is set, the object's instance is removed from the tree branch manager.
+2. Every object forgets it (`ClearAwarenessOfObject`).
+3. A multi-tile part, unless called for parts: if the object has a lead (`+0x13C`), the lead is killed instead. Otherwise every part gets misc flag 0x40, and each part in the chain at `+0x138` is killed with `partsOnly` true. Then it returns.
+4. Otherwise: global event 0x83 with the ID, misc flag 0x40, and:
+   - It stops being the tutorial object if it was.
+   - If it's the selected Sim, the selection moves on to the next Sim, or to none.
+5. `CleanupPeople(object)`, so every Sim drops it, then `object->Cleanup(0)`. That runs the object's **Cleanup tree (entry point 3)** on each part, clears data 0x3E, and resets each part's stack to its main tree.
+6. **Everything in its object slots is killed too** (`KillObject` on each non-zero slot ID).
+7. It's cut from its container (`HierSever`) and removed from the object list.
+8. If the action menu had it selected, that selection is cleared.
+9. The object is deleted (destructor, vtable `+0x18` on Wii).
+10. Every remaining object's relationship matrix drops the ID.
+11. Global event 0x84 with the ID.
+
+**For a port:** queue in the primitive and pick the object up at once. Flush after the step: run Cleanup (entry point 3), kill slot contents, then remove the object and its relationships.
+
 ## SetMotiveDelta (opcode 0x1D)
 
 **Proven**: `cXObject::TrySetMotiveDelta` and `cXPerson::TrySetMotiveDelta` match the game byte for byte. 401 uses.
