@@ -18,9 +18,40 @@
 #define OBJECT_ERROR_CHECK(condition, code) TREE_CHECK(this, condition, code, return -1)
 
 namespace InteractorModule {
-class DirectInteractor {
+// The vtable pointer is at +0x68, after 0x68 bytes of data: GCC 2.95 puts it after a base
+// class's data, so that data is a base of its own.
+struct DirectInteractorData {
+    u32 pad_0x0[0x1a];
+};
+
+class DirectInteractorVirtuals : public DirectInteractorData {
 public:
-    u32 pad_0x0[0x23];
+    virtual void Slot0();
+    virtual void Slot1();
+    virtual void Slot2();
+    virtual void Slot3();
+    virtual void Slot4();
+    virtual void Slot5();
+    virtual void Slot6();
+    virtual void Slot7();
+    virtual void Slot8();
+    virtual void Slot9();
+    virtual void Slot10();
+    virtual void Slot11();
+    virtual void Slot12();
+    virtual void Slot13();
+    virtual void Slot14();
+    virtual void Slot15();
+    virtual void Slot16();
+    virtual void Slot17();
+    virtual void Slot18();
+    virtual void StartRumble(cXObject *source); // GenericSimCall 0x2D
+    virtual void StopRumble();                  // GenericSimCall 0x2D with t0 of -1
+};
+
+class DirectInteractor : public DirectInteractorVirtuals {
+public:
+    u32 pad_0x6c[8];
     int mAutonomous; // 0x8c  Wii: IsAutonomous
 };
 
@@ -2416,8 +2447,29 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         if (_gd.mHud)
             _gd.mHud->CleanupModelessDialogs();
         break;
-    case 0x2d:
+    case 0x2d: {
+        // Rumble, for the player's Sim only, from the stack object. t0 of -1 stops it.
+        u16 source = elem->mStackObject;
+        if (!source)
+            break;
+        cXPerson *player = gEORGlobals->mPlayerPerson;
+        if (!player)
+            break;
+        if (player->mESimPerson != mESimPerson)
+            break;
+        InteractorModule::DirectInteractor *interactor =
+            InteractorModule::InteractorManager::GetSingleton()->GetPlayerInteractor(0, -1);
+        if (!interactor)
+            break;
+        if (mTemps[0] == -1) {
+            interactor->StopRumble();
+            break;
+        }
+        cXObject *object = GetObjectFromID(source);
+        if (object)
+            interactor->StartRumble(object);
         break;
+    }
     case 0x30: {
         // Aspiration points: neighbourhood variables 0xC and 0xD hold them as low and high
         // halves of ten thousand. t0 is added, up to 999,999.
