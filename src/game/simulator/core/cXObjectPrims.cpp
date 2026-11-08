@@ -988,6 +988,9 @@ public:
     int GetX() const { return mX; }
     int GetY() const { return mY; }
     int GetLevel() const { return mLevel; }
+    // The same, called as functions (0x248DB8, 0x248DC0) where they aren't inlined.
+    int GetXOutOfLine() const;
+    int GetYOutOfLine() const;
 };
 
 inline CTilePt cXObject::GetCTilePt() const
@@ -1004,9 +1007,23 @@ inline s16 GetTileObjectID(ObjectModule *module, const CTilePt &tile)
     return module->mTileObjects[y][x];
 }
 
+// The tile flag grid: row pointers by x, a byte for each y.
+struct TileFlagGrid {
+    u8 pad_0x0[0xc];
+    s8 **mRows; // 0x0c
+};
+
 class cFixedWorld {
 public:
+    u8 pad_0x0[0x20];
+    TileFlagGrid *mFlags; // 0x20
+
     int OutOfGrid(const CTilePt &tile) const;
+    int GetXSize() const; // 0x1E4378, +0x10
+    int GetYSize() const; // 0x1E4380, +0x14
+    // Wii: GetFlags and SetFlags, inlined in GenericSimCall 0x33.
+    s8 GetFlags(const CTilePt &tile) const { return mFlags->mRows[tile.GetXOutOfLine()][tile.GetYOutOfLine()]; }
+    void SetFlags(const CTilePt &tile, s8 flags) { mFlags->mRows[tile.GetXOutOfLine()][tile.GetYOutOfLine()] = flags; }
 };
 extern cFixedWorld *gFixedWorld;
 
@@ -2775,8 +2792,78 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
             result = 1;
         }
         break;
-    case 0x33:
+    case 0x33: {
+        // Blocks routing (tile flag 0x10) over t1 by t2 tiles from the stack object's tile, along
+        // its direction (object variable 1), or clears the flag when t0 is 0. The bounds test
+        // swaps x and y for directions 2 and 6, as the game's does; the loop doesn't.
+        cXObject *object = gObjectModule->GetObjectFromIDInline(elem->mStackObject);
+        OBJECT_ERROR_CHECK(object, 0x33);
+        bool block = mTemps[0] != 0;
+        int width = mTemps[1];
+        int depth = mTemps[2];
+        OBJECT_ERROR_CHECK(width > 0 && depth > 0, 0x14);
+        result = 0;
+        int direction = object->mVars[1];
+        CTilePt start;
+        start.mX = object->mTileX >> 4;
+        start.mLevel = 0;
+        start.mY = object->mTileY >> 4;
+        int farX = 0;
+        int farY = 0;
+        switch (direction) {
+        case 0:
+            farX = start.mX - 1 + width;
+            farY = start.mY - 1 + depth;
+            break;
+        case 2:
+            farX = start.mY + 1 - depth;
+            farY = start.mX - 1 + width;
+            break;
+        case 4:
+            farX = start.mX + 1 - width;
+            farY = start.mY + 1 - depth;
+            break;
+        case 6:
+            farX = start.mY - 1 + depth;
+            farY = start.mX + 1 - width;
+            break;
+        }
+        OBJECT_ERROR_CHECK((object->mTileX >> 4) > 0 && (object->mTileY >> 4) > 0 && farX >= 0
+                               && farX <= gFixedWorld->GetXSize() && farY >= 0
+                               && farY <= gFixedWorld->GetYSize(),
+                           0x5e);
+        for (int i = 0; i < width; i++) {
+            for (int j = 0; j < depth; j++) {
+                int x = start.mX;
+                int y = start.mY;
+                switch (direction) {
+                case 0:
+                    x += i;
+                    y += j;
+                    break;
+                case 2:
+                    x -= j;
+                    y += i;
+                    break;
+                case 4:
+                    x -= i;
+                    y -= j;
+                    break;
+                case 6:
+                    x += j;
+                    y -= i;
+                    break;
+                }
+                CTilePt tile(x, y, 0);
+                s8 flags = gFixedWorld->GetFlags(tile) & ~0x10;
+                if (block)
+                    flags |= 0x10;
+                gFixedWorld->SetFlags(tile, flags);
+            }
+        }
+        result = 1;
         break;
+    }
     case 0x34:
         mTemps[2] = 0;
         break;
