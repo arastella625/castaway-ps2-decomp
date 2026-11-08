@@ -1551,8 +1551,8 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 0xC | 1 | Tribe gets all tools |
 | 0xD | 2 | `CleanupPeople` on the stack object, inlined: every person but the stack object gets `Cleanup(stack object)`, vtable `+0xE0`. Missing is error 0xA |
 | 0xE | 3 | Global 0x1F = t0. Globals are s16s from simulator `+0x38` |
-| 0xF | 52 | Needs me to be a Sim, or error 0x1C. Person data 0x20 = t0, 0x21 = 0. With t0 of 0, also `ComputeRect` from my location **Proven, PS2.** **Proven, PS2.** |
-| 0x10 | 6 | Game sequences, by t0: 0 starts sequence 2, 1 sequence 3, -1 and -2 wait for them, 2 is game over. Waiting returns 4 **Proven, PS2.** **Proven, PS2.** |
+| 0xF | 52 | Needs me to be a Sim, or error 0x1C. Person data 0x20 = t0, 0x21 = 0. With t0 of 0, also `ComputeRect` from my location **Proven, PS2.** |
+| 0x10 | 6 | Game sequences, by t0: 0 starts sequence 2, 1 sequence 3, -1 and -2 wait for them, 2 is game over. Waiting returns 4 **Proven, PS2.** |
 | 0x11 | 8 | Sets the harvest count to t0 |
 | 0x12 | 12 | True if in build or buy mode |
 | 0x13, 0x14 | 1, 1 | Tribe gets t0 of every food, or every resource. **Proven, PS2:** it walks the `InventoryTokens` table and adds a row whose flags word (`+4`) has bit 2 for food. For resources, bits 1 and 2 must be exactly 2, and IDs 0x32 to 0x35 are skipped. No player Sim does nothing |
@@ -1567,15 +1567,11 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 0x22 | 5 | Starts a lot change to lot t2 |
 | 0x24 | 1 | Replenishes the tribe, t0 |
 | 0x25 | 5 | A flag = t0 != 0: `_globals +0x4C4` on PS2, a byte at `+0x3FB` on Wii |
-| 0x26 | 2 | t1 = 1 if object t0 is in the world, else 0. False if there's no object **Proven, PS2.** **Proven, PS2.** |
+| 0x26 | 2 | t1 = 1 if object t0 is in the world, else 0. False if there's no object **Proven, PS2.** |
 | 0x27 | 1 | `AutonomousFoodSelection` on t1, t2, t3. Its result |
-| 0x29 | 4 | Only checks: t0 above 1 is error 0x14, and not being a Sim is error 0x4C **Proven, PS2.** **Proven, PS2.** |
-| 0x2C | 17 | Closes modeless dialogs **Proven, PS2.** **Proven, PS2.** |
+| 0x29 | 4 | Only checks: t0 above 1 is error 0x14, and not being a Sim is error 0x4C **Proven, PS2.** |
+| 0x2C | 17 | Closes modeless dialogs **Proven, PS2.** |
 | 0x2D | 30 | Controller rumble, for the player's Sim only. **Proven, PS2; corrects an earlier reading.** The source is the stack object, not an operand: none does nothing, and so does a Sim other than the player's. t0 of -1 stops the rumble; anything else starts one from the stack object, through the player interactor. (This row used to say `+4` u16 was the effect and t0 an object: `+4` is the frame's stack object.) |
-| 0x2A | 0 | t0 = 1 unless the camera director (`_globals +0x1D0`) is in control: its state at `+0x2B0` isn't 0 or 8. **Proven, PS2.** No tree uses it |
-| 0x2B | 0 | t0 = the number of modeless dialogs open. **Proven, PS2.** No tree uses it |
-| 0x30 | 0 | Adds t0 to the aspiration points, which are neighbourhood variables 0xC (below 10,000) and 0xD (tens of thousands), up to 999,999. **Proven, PS2.** No tree uses it |
-| 0x32 | 0 | t7 = 1 if music genre t7 is enabled in the options (`_globals +0x1F8`), else 0. **Proven, PS2.** No tree uses it |
 | 0x2A | 0 | t0 = 1 unless the camera director (`_globals +0x1D0`) is in control: its state at `+0x2B0` isn't 0 or 8. **Proven, PS2.** No tree uses it |
 | 0x2B | 0 | t0 = the number of modeless dialogs open. **Proven, PS2.** No tree uses it |
 | 0x30 | 0 | Adds t0 to the aspiration points, which are neighbourhood variables 0xC (below 10,000) and 0xD (tens of thousands), up to 999,999. **Proven, PS2.** No tree uses it |
