@@ -819,6 +819,50 @@ So this is how entry points 14, 16, 18 to 29, 32 and 33 are reached, which "Entr
 4. A notification of 0 is error 0x6A.
 5. `PlanManager::SendNotification(notification, value, Sim)`, then **true**. What the plans do with it is in `PlanManager`, which isn't read yet.
 
+## FamilyInventory (opcode 0x46)
+
+`TryFamilyInventory`, PS2 `0x23A9D0`, about 2,000 instructions with the inventory calls inlined. Not matched.
+
+- **Proven on PS2:** the 14 operations, where each error comes from, and the operands being read through `InterpValue`.
+- **Likely, read on Wii:** the detail of each operation (`TryFamilyInventory__8cXObject`, which names everything it calls).
+
+| Operand | Meaning |
+|---|---|
+| `+0` s8 | Operation, 0 to 0xD below. Anything else does nothing and is true |
+| `+1` bits 0 to 2 | Category: 0 object, 1 ownable, 2 token, 3 clothing |
+| `+1` bit 5 | Remove an object by an object ID in `+2` |
+| `+1` bit 6 | Whose inventory: the neighbour with the stack object's ID, not the stack object's Sim |
+| `+1` bit 7 | `+2` is an item's place in the inventory (or an object ID, for an add), not a GUID |
+| `+2`, `+3` u8 | Operands, in LotTransition's one-byte code: 0 my ID, 1 the stack object's ID, 2 to 9 temps 0 to 7, 0xA to 0x11 scope 0x19 0 to 7, 0x12 to 0x19 scope 9 0 to 7, anything else the number code − 0x7E |
+| `+4` s32 | The literal: an object's or ownable's GUID, or a token's or clothing item's ID |
+
+**Whose inventory:**
+
+- With `+1` bit 6, it's the neighbour whose ID is the stack object's. None is error 0x38.
+- Otherwise it's the stack object, which must exist (error 0x15) and be a Sim (error 0x1C), through its neighbour.
+- Either way the inventory is the neighbour's family's.
+
+The result is true unless an operation below says otherwise.
+
+| Op | What it does |
+|---|---|
+| 0 | **Add**, by category. Object or ownable with bit 7: the object whose ID is `+2` (none is error 0x33), added as itself. Without bit 7: the GUID in `+4`. True if the add worked. Token: ID `+2` with bit 7, else `+4`, count `+3`. Clothing: ID `+2` with bit 7, else `+4`. Tokens and clothing are always true |
+| 1 | **Remove**, by category. With bit 7, the item at place `+2`: one of it, or `+3` of a token. Otherwise: an object by GUID `+4`, or with bit 5 the object whose ID is `+2`, found by GUID (see below); an ownable by owner `+3` and GUID `+4`; a token by ID `+4`, count `+3`; clothing by ID `+4`. True if something was removed |
+| 2 | **Find**: the place of the object with GUID `+4`, the ownable with owner `+3` and GUID `+4`, the token with ID `+4`, or the clothing with ID `+4`. It's written to `+2`, -1 if there's none, and the result is true only if found |
+| 3 | **Count**: `+2` = the number of items |
+| 4 | Item at place `+2` gets a new attribute `+3` |
+| 5 | `+3` = attribute temp 0 of item `+2` |
+| 6 | `+3` = the number of attributes of item `+2` |
+| 7 | `+3` = the owner ID of item `+2`. No such item is error 0x6C |
+| 8 | `+3` = the category of item `+2`. Error 0x6C if there's none |
+| 9 | `+3` = the count of item `+2`. Error 0x6C if there's none |
+| 0xA | Item `+2` gets status text `+4` (a byte). Error 0x6C if there's none |
+| 0xB | `+2` = the number of items that aren't tokens |
+| 0xC | Item `+2`: attribute temp 0 = `+3` |
+| 0xD | `+2` = 0 for an object or ownable, or `+4` for a token or clothing item. Any other category is error 0x18 |
+
+**One quirk, Wii:** removing an object by object ID (op 1, category 0, bit 5) finds the object's place in the **tribe's** inventory, then removes that place from the target inventory. A port that keeps one inventory won't notice. With no tribe it's false. Operations 4, 5, 6 and 0xC don't check that the item exists.
+
 ## SetMotiveDelta (opcode 0x1D)
 
 **Proven**: `cXObject::TrySetMotiveDelta` and `cXPerson::TrySetMotiveDelta` match the game byte for byte. 401 uses.
