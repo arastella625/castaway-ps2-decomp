@@ -407,8 +407,8 @@ Positions are in sixteenths of a tile, and a tile is a metre. Controllers such a
 sit at -16, -16, off the lot: 365 objects do, leaving 2,246 on lots.
 
 Variable 1 is the direction, in eighths of a turn, from the code. It's 0 on 1,287 objects and 2, 4 or
-6 on 1,322, so placed objects face the four compass directions. Which way that turns is not shown by
-anything on the disc so far. Variable 0x1D is the room: -5 on the 365 objects off the lot, 0 elsewhere.
+6 on 1,322, so placed objects face the four compass directions. "Turning placed models" below has
+which way that turns. Variable 0x1D is the room: -5 on the 365 objects off the lot, 0 elsewhere.
 
 **House N is `lot_(N+1)`, counting the first house as 0**, and x and y are not swapped. HouseData's
 row 0 is a placeholder, which fits. Objects land on set cells of their lot's grids at a mean of
@@ -980,6 +980,35 @@ it. So `ranger` is torso, lowerBody and shoes `ranger` and the rest `none`. `def
   always: on the quicksand pillar (`lot_12`) and the steam vent (`lot_19`) another tile owns it, and
   that tile is the one drawn. `placed.py check` asserts every visible object on a lot is drawn by
   itself or by a tile of its object.
+
+- **Turning placed models. Proven**, from Wii code, with the data agreeing:
+
+  - **Model class.** `ISimsObjectModel`'s factory picks it from the first ObjAnimDef. Byte 5 set
+    makes a wall object, byte 6 a counter-top, and the model `Boxwood_Hedge` a shrub. Otherwise a
+    single-tile object gets `ISimsObjectModel` and a multi-tile one `ISimsMultiTileObjectModel`.
+    No placed object is a wall, counter-top or shrub, so those two are all the lots need.
+  - **The matrix.** Both `SetObjOrient`s call `ApplyMatrix` with an angle of direction × π/4. It
+    builds scale, then `PostRotateZ`, then `PostTranslate`, then `EMat4::SwapXY`, which swaps the
+    x and y columns. `RotateZ` turns x towards y, with row vectors.
+  - **Where the model stands.** A single-tile model stands on its tile. A multi-tile one stands on
+    the tile whose definition has a non-zero half-word at `+0x3A`: 34 definitions, one per object,
+    such as hitching posts, rope bridges and `lot26Rock`. With none, it stands in the middle of
+    the box round all the object's tiles (`EIObjTileBoundRect::GetCenter`).
+  - **What that means for the export.** `read_object` swaps positions already, as the house's x is
+    the terrain's y. The model must also be mirrored across x = y and turned the other way. In our
+    axes, that's the model's y negated, then a turn by 90° − direction × 45°. Neither the old
+    turn's direction nor a turn without the mirror covers the tiles.
+  - **Parts.** A part's definition gives its place from the lead at `+0x16`: x in the low byte, y
+    in the high. Turned clockwise by the lead's direction in our axes, as `OffsetCoordsInDirection`'s
+    steps go, this lands on 217 of 219 parts. The other way lands on 85. The diving platform on
+    `lot_24` has two parts whose offsets, 0 and 4, don't fit; it's not known why.
+  - **Checks.** With this rule, 44 of 50 multi-tile models cover all their tiles' middles, and 239 of
+    269 tiles in all. The old export's rule managed 4 and 110. The 6 left are portals whose tiles are
+    where Sims walk, not the model: the secret passage and its exit, the quicksand pillar (**likely**
+    its tiles are where it falls), the steam vent, and the beach-cliff ruins. `placed.py check`
+    runs both counts. Close-up renders agree: the rope bridge on `lot_11` spans its gorge, which it
+    didn't before.
+  - **Open:** dynamic multi-tile objects stand on their own tile (`IsDynamic`); none is placed.
 
   **Proven, an older reading missed 110 tall objects.** It found the ResData row by the `ResFile`
   name and took the first model among the row's words from 7 on. For banana, koa, okoume and date
