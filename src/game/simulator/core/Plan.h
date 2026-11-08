@@ -41,6 +41,7 @@ public:
     Plan *GetPlanByID(s16 id);
     int IsPlanUnlocked(s16 id);
     void ToggleAllPlansInUI();
+    Plan *GetPlanByTokenID(s16 token);
     void ToggleIgnoreRequirements();
     void ForceAllPlansToUnlock();
 };

@@ -2526,10 +2526,29 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         PlanManager::GetInstance()->ForceAllPlansToUnlock();
         break;
     case 0x3c:
-    case 0x3d:
-    case 0x40:
-    case 0x41:
         break;
+    case 0x3d: {
+        // t1 = the plan made from token t0. No such plan is error 0x6B.
+        Plan *plan = PlanManager::GetInstance()->GetPlanByTokenID(mTemps[0]);
+        OBJECT_ERROR_CHECK(plan, 0x6b);
+        mTemps[1] = plan->field_0x0;
+        break;
+    }
+    case 0x40:
+        break;
+    case 0x41: {
+        // True if there's a tribe and t0 is an InventoryTokens ID. It doesn't ask whether the
+        // tribe has the token.
+        InventoryItems *tribe = InventoryItems::GetTribeInventory();
+        result = 0;
+        if (tribe) {
+            if (InventoryItems::GetTokenFromID(mTemps[0]))
+                result = 1;
+            else
+                result = 0;
+        }
+        break;
+    }
     case 0x42: {
         s16 value = GetNeighborhood()->mGoals.GetGoalValue(mTemps[0]);
         if (value) {

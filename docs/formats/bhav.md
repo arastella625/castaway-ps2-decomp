@@ -1471,8 +1471,9 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 0x3A | 4 | Adds or removes the wall between objects t0 and t1. t2 of 1 adds |
 | 0x3B, 0x3E, 0x3F | 1 each | Plans: toggles all in the UI, ignores requirements, forces unlock |
 | 0x3C | 12 | Is the stack object's plan unlocked? Missing is error 0x17 |
+| 0x3D | 0 | t1 = the first word of the plan made from token t0. No such plan is error 0x6B. **Proven, PS2.** No tree uses it |
 | 0x40 | 2 | Neighbour t0's lot, t1 = 0 if it's here |
-| 0x41 | 3 | True if the tribe has token t0 |
+| 0x41 | 3 | **Proven, PS2 and Wii; corrects an earlier reading.** True if there's a player tribe inventory and t0 is an ID in the `InventoryTokens` table. It doesn't check that the tribe has the token. No player Sim is false |
 | 0x42 | 7 | t1 = a goal value for t0. False if there's none |
 
 ## What a placed object starts with
