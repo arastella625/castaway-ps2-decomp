@@ -6,6 +6,8 @@
 
 #include "game/simulator/core/Lot.h"
 #include "game/simulator/core/Neighborhood.h"
+#include "game/simulator/core/Plan.h"
+#include "game/simulator/core/Inventory.h"
 #include "game/simulator/core/cXMTObject.h"
 #include "game/simulator/core2/ObjTestSim.h"
 #include "game/simulator/core2/cXPerson.h"
@@ -20,9 +22,14 @@ public:
 
 class GameData {
 public:
-    u32 pad_0x0[0x2a];
+    u32 pad_0x0[0x15];
+    class HudTarget *mHud;    // 0x54  GenericSimCall 0x11
+    u32 pad_0x58[0x11];
+    struct LoadInfo *mLoadInfo; // 0x9c  GenericSimCall 9 clears its word +0x10
+    u32 pad_0xa0[2];
     int mInitialSimSelection; // 0xa8
-    u32 pad_0xac[7];
+    u32 pad_0xac[6];
+    int mBuildBuyMode;        // 0xc4  Wii: IsBuildBuyMode
     Player mPlayer;           // 0xc8
 
     Player *GetPlayer() { return &mPlayer; }
@@ -2202,18 +2209,89 @@ long cXObject::TryLotTransition(StackElem *elem, XPrimParam *primParam)
 #endif
 
 #ifdef NON_MATCHING
+// GenericSimCall 9: Wii LoadingScreenStateMachine::LoadFinishing, static on PS2.
+struct LoadInfo {
+    u32 pad_0x0[4];
+    int field_0x10; // 0x10
+};
+class LoadingScreenStateMachine {
+public:
+    static void LoadFinishing();
+};
+// GenericSimCall 0x11: Wii _gd +0x48 then +0xAC.
+class ActionMenu {
+public:
+    void SetupHarvestCount(int count);
+};
+class HudTarget {
+public:
+    u32 pad_0x0[0x24];
+    ActionMenu *mActionMenu; // 0x90
+};
+// Wii: GetEORGlobals, a pointer on PS2 at 0x50A6A8.
+extern EGlobal *gEORGlobals;
+
+// GenericSimCall 0: Wii GetWeatherManager, a pointer on PS2 at 0x50A6A4.
+class WeatherManager {
+public:
+    void SetWeatherState(const char *name, int a, bool b);
+};
+extern WeatherManager *gWeatherManager;
+
+// GenericSimCall 0x13 and 0x14 inline these. The flags are the word at +4 of each row.
+inline void InventoryItems::GimmeAllFood(s16 count)
+{
+    const ERQTable *table = GetObjectFolder()->mDatabase->GetTable("InventoryTokens");
+    if (!table)
+        return;
+    for (int i = 0; i < (int)table->count; i++) {
+        const InventoryTokens *token = &((const InventoryTokens *)table->rows)[i];
+        if (*(const u32 *)&token->field_0x4 & 4)
+            AddToken(token->mID, count);
+    }
+}
+
+inline void InventoryItems::GimmeAllResources(s16 count)
+{
+    const ERQTable *table = GetObjectFolder()->mDatabase->GetTable("InventoryTokens");
+    if (!table)
+        return;
+    for (int i = 0; i < (int)table->count; i++) {
+        const InventoryTokens *token = &((const InventoryTokens *)table->rows)[i];
+        if ((*(const u32 *)&token->field_0x4 & 6) == 2 && (u16)(token->mID - 0x32) >= 4)
+            AddToken(token->mID, count);
+    }
+}
+
+// ObjectModule::DisableBuyAndBuild and EnableBuyAndBuild on Wii, inlined here.
+inline void DisableBuyAndBuild(ObjectModule *module, cXObject *object)
+{
+    module->mModeBlockers.push_back(object);
+}
+inline void EnableBuyAndBuild(ObjectModule *module, cXObject *object)
+{
+    eastl::vector<cXObject *, eastl::allocator> &blockers = module->mModeBlockers;
+    for (cXObject **it = blockers.begin(); it != blockers.end(); ++it) {
+        if (*it == object) {
+            blockers.erase(it);
+            return;
+        }
+    }
+}
+
 // Primitive 1: GenericSimCall, a switch on the s16 at +0 with its operands in my temps.
-// Not matched, and only partly written: this round is a start. The cases are in the game's
-// order, which is proven: GCC lays the bodies out as the source has them, and the jump table at
-// 0x4BA900 sorted by address gives 0, 1, 3, 2, 4, 5, 6, 8, 9, 0x25, 0xA ... 0x24, 0x27. Written
-// so far: 0xA, 0xB, 0xD, 0xE, 0x15, 0x18, 0x19, 0x34, 0x35, 0x36, 0x38 and the shared exits.
-// The others fall through to "return 1" until they're written, so the size is far short of the
-// game's 2,388 words and the 0x1D40-byte frame. docs/formats/bhav.md has what each one does.
+// Not matched, and only partly written. The cases are in the game's order, which is proven:
+// GCC lays the bodies out as the source has them, and the jump table at 0x4BA900 sorted by
+// address gives that order. Calls not written yet fall through to "return 1", so the size is
+// far short of the game's 2,388 words and the 0x1D40-byte frame. docs/formats/bhav.md has what
+// each call does, and Wii's TryGenericSimCall names nearly every function they call.
 long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
 {
     long result = 1;
     switch (*(s16 *)primParam) {
     case 0x00:
+        gWeatherManager->SetWeatherState("hurricane", 2, false);
+        break;
     case 0x01:
     case 0x03:
     case 0x02:
@@ -2221,23 +2299,21 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
     case 0x05:
     case 0x06:
     case 0x08:
+        break;
     case 0x09:
+        _gd.mLoadInfo->field_0x10 = 0;
+        LoadingScreenStateMachine::LoadFinishing();
+        break;
     case 0x25:
+        _globals.field_0x4c4 = mTemps[0] != 0;
         break;
     case 0x0a:
         // Buy and build stay off while I'm on this list.
-        mModule->mModeBlockers.push_back(this);
+        DisableBuyAndBuild(mModule, this);
         break;
-    case 0x0b: {
-        eastl::vector<cXObject *, eastl::allocator> &blockers = mModule->mModeBlockers;
-        for (cXObject **it = blockers.begin(); it != blockers.end(); ++it) {
-            if (*it == this) {
-                blockers.erase(it);
-                break;
-            }
-        }
+    case 0x0b:
+        EnableBuyAndBuild(mModule, this);
         break;
-    }
     case 0x0d: {
         // ObjectModule::CleanupPeople, inlined: every other person forgets the stack object.
         cXObject *object = GetObjectFromID(elem->mStackObject);
@@ -2267,8 +2343,21 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         GetSimulator()->mGlobals[0x28] = mTemps[0];
         break;
     case 0x1a:
-    case 0x1f:
+        ChangeSelectedSimL();
+        break;
+    case 0x1f: {
+        // Select Sim t0. True if it's now the player's Sim.
+        cXObject *object = GetObjectModule()->GetObjectFromIDInline(mTemps[0]);
+        if (!object)
+            return 0;
+        cXPerson *person = object->GetPerson();
+        if (!person)
+            return 0;
+        gEORGlobals->SetSelectedPerson(person);
+        return person == gEORGlobals->mPlayerPerson;
+    }
     case 0x21:
+        return ShowAllObjectDialogs(elem, primParam);
     case 0x22:
     case 0x26:
     case 0x28:
@@ -2301,26 +2390,73 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
     case 0x37:
     case 0x39:
     case 0x3a:
+        break;
     case 0x12:
+        return _gd.mBuildBuyMode != 0;
     case 0x3b:
+        PlanManager::GetInstance()->ToggleAllPlansInUI();
+        break;
     case 0x3e:
+        PlanManager::GetInstance()->ToggleIgnoreRequirements();
+        break;
     case 0x3f:
+        PlanManager::GetInstance()->ForceAllPlansToUnlock();
+        break;
     case 0x3c:
     case 0x3d:
     case 0x40:
     case 0x41:
-    case 0x42:
         break;
+    case 0x42: {
+        s16 value = GetNeighborhood()->mGoals.GetGoalValue(mTemps[0]);
+        if (value) {
+            mTemps[1] = value;
+            break;
+        }
+    }
     case 0x38:
         result = 0;
         break;
     case 0x11:
-    case 0x07:
-    case 0x13:
-    case 0x17:
-    case 0x14:
-    case 0x0c:
-    case 0x24:
+        if (_gd.mHud && _gd.mHud->mActionMenu)
+            _gd.mHud->mActionMenu->SetupHarvestCount(mTemps[0]);
+        break;
+    case 0x07: {
+        GoalAndUnlockData *goals = &GetNeighborhood()->mGoals;
+        if (goals)
+            goals->Slot20();
+        break;
+    }
+    case 0x13: {
+        InventoryItems *tribe = InventoryItems::GetTribeInventory();
+        if (tribe)
+            tribe->GimmeAllFood(mTemps[0]);
+        break;
+    }
+    case 0x17: {
+        LotManager *lots = LotManager::Instance();
+        if (lots)
+            lots->UnlockEverything();
+        break;
+    }
+    case 0x14: {
+        InventoryItems *tribe = InventoryItems::GetTribeInventory();
+        if (tribe)
+            tribe->GimmeAllResources(mTemps[0]);
+        break;
+    }
+    case 0x0c: {
+        InventoryItems *tribe = InventoryItems::GetTribeInventory();
+        if (tribe)
+            tribe->GimmeAllTools();
+        break;
+    }
+    case 0x24: {
+        InventoryItems *tribe = InventoryItems::GetTribeInventory();
+        if (tribe)
+            tribe->Replenish(mTemps[0]);
+        break;
+    }
     case 0x27:
         break;
     case 0x16:

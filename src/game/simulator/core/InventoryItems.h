@@ -33,6 +33,11 @@ public:
 
     ClothingItem *GetClothingItem(s16 neighborID, Character::eBodyPart part);
     void AddItem(InventoryItem *item);
+    void AddToken(s16 id, s16 count);
+    void GimmeAllFood(s16 count);
+    void GimmeAllResources(s16 count);
+    void GimmeAllTools();
+    void Replenish(s16 amount);
 };
 
 #endif

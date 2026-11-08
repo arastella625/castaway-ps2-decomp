@@ -32,10 +32,12 @@ public:
     int mPreviousLot;          // 0x204
     u8 field_0x208[0x240];     // 0x208
     int useGameStateTextures;  // 0x448  when set, texture ids are rehashed with "_GAME"
-    u8 field_0x44c[0x7c];      // 0x44c
+    u8 field_0x44c[0x78];      // 0x44c
+    int field_0x4c4;           // 0x4c4  GenericSimCall 0x25 sets it to t0 != 0
     s16 mTransitioningNeighbor; // 0x4c8
 
     int GetTransitioningNeighborID() const { return mTransitioningNeighbor; }
+    void SetSelectedPerson(class cXPerson *person);
     ELocString GetNewUIString(const char *name, const char *a);
 };
 extern EGlobal _globals;

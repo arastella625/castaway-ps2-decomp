@@ -40,6 +40,9 @@ public:
     static PlanManager *GetInstance();
     Plan *GetPlanByID(s16 id);
     int IsPlanUnlocked(s16 id);
+    void ToggleAllPlansInUI();
+    void ToggleIgnoreRequirements();
+    void ForceAllPlansToUnlock();
 };
 
 #endif

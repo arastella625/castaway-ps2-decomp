@@ -80,8 +80,8 @@ class LotManager {
 public:
     LotEntry mLots[0x1b];  // 0x00
     s16 mHomeTiki;         // 0xd8
-    u8 mTransitions[0x47]; // 0xda
-    u8 pad_0x121[7];
+    u8 mTransitions[0x48]; // 0xda  UnlockEverything writes all 0x48
+    u8 pad_0x122[6];
 
     LotManager();
 
@@ -98,6 +98,16 @@ public:
     static bool TestFlag(u32 flags, u32 mask) { return (flags & mask) != 0; }
 
     s16 WhereIsHomeTiki() const { return mHomeTiki; }
+
+    // GenericSimCall 0x17, inlined there: every lot visited, and bits 0 to 2 set on every
+    // transition.
+    void UnlockEverything()
+    {
+        for (int i = 0; i < 0x1b; i++)
+            mLots[i].mFlags |= 1;
+        for (int i = 0; i < 0x48; i++)
+            mTransitions[i] |= 7;
+    }
 
     // These three return the flag, not a bool: their callers compare with zero.
     int HasLotBeenVisited(s16 lot) const

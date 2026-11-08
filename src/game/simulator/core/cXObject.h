@@ -326,6 +326,8 @@ public:
     long TryCallNamedTree(StackElem *, XPrimParam *);
     long TryMakeActionString(StackElem *, XPrimParam *);
     long TryGenericSimCall(StackElem *, XPrimParam *);
+    long ShowAllObjectDialogs(StackElem *elem, XPrimParam *param);
+    static void ChangeSelectedSimL();
     long TryDialog(StackElem *, XPrimParam *, bool);
     long TrySnap(StackElem *, XPrimParam *);
     long TrySnap(const FTilePt &tile, int level, cXObject *object, int slot, bool ignoreRooms, int direction, bool footprint);

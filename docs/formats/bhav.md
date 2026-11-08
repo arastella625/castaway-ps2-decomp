@@ -1275,6 +1275,7 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 
 | Call | Uses | What it does |
 |---|---|---|
+| 0 | 0 | Starts the `hurricane` weather state (`SetWeatherState("hurricane", 2, false)`). **Proven, PS2.** No tree uses it |
 | 2 | 2 | Stack object is the icon of my current action. Missing is error 0xA, not a Sim error 0x1C |
 | 3 | 1 | If the stack object is the selected Sim, asks the game flow for 0x20, otherwise error 0x14. Not a Sim is error 0x1C |
 | 4 | 8 | Moves the neighbour in the stack object into family t1, or the selected family if t1 is 0 or less. Makes the family if needed. Copies the last name |
@@ -1291,14 +1292,14 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 0x10 | 6 | Game sequences, by t0: 0 starts sequence 2, 1 sequence 3, -1 and -2 wait for them, 2 is game over. Waiting returns 4 |
 | 0x11 | 8 | Sets the harvest count to t0 |
 | 0x12 | 12 | True if in build or buy mode |
-| 0x13, 0x14 | 1, 1 | Tribe gets all food, all resources, amount t0 |
+| 0x13, 0x14 | 1, 1 | Tribe gets t0 of every food, or every resource. **Proven, PS2:** it walks the `InventoryTokens` table and adds a row whose flags word (`+4`) has bit 2 for food. For resources, bits 1 and 2 must be exactly 2, and IDs 0x32 to 0x35 are skipped. No player Sim does nothing |
 | 0x15 | 0 | Global 0x27 = t0. **Proven, PS2.** No tree uses it |
 | 0x16, 0x31 | 7, 10 | Nothing: returns 1 |
-| 0x17 | 2 | Unlocks everything |
+| 0x17 | 2 | Unlocks everything. **Proven, PS2:** sets bit 0 (visited) on all 0x1B lots and bits 0 to 2 on all 0x48 transitions in `LotManager` |
 | 0x18 | 2 | Global 0x29 = 1 if t0 is 0, else 0 |
 | 0x19 | 0 | Global 0x28 = t0. **Proven, PS2.** No tree uses it |
 | 0x1A | 1 | Changes the selected Sim |
-| 0x1F | 6 | Selects Sim t0. True if it's now selected. Not a Sim, or missing, is false |
+| 0x1F | 6 | Selects Sim t0 through `EGlobal::SetSelectedPerson`, then true if it's now `_globals +0x174`, the player's Sim. Not a Sim, or missing, is false |
 | 0x21 | 1 | Shows all object dialogs |
 | 0x22 | 5 | Starts a lot change to lot t2 |
 | 0x24 | 1 | Replenishes the tribe, t0 |

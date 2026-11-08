@@ -51,6 +51,15 @@ public:
     virtual void Unlock(int kind, int index);
     virtual s16 GetStatus(int kind, int index);
     virtual void SetStatus(int kind, int index, int status);
+    virtual void Slot12();
+    virtual void Slot13();
+    virtual void Slot14();
+    virtual s16 GetGoalValue(int goal); // GenericSimCall 0x42
+    virtual void Slot16();
+    virtual void Slot17();
+    virtual void Slot18();
+    virtual void Slot19();
+    virtual void Slot20(); // GenericSimCall 7
 };
 
 // Wii: Neighborhood. Its vptr comes after the fields, at 0x21ec.
