@@ -42,7 +42,9 @@ public:
     int mWaitStartTicks; // 0x60  Wii: GetWaitStartTicks
     FTilePt mLastLocation; // 0x64  Wii: GetLastLocation, where the Sim was when last trapped
     cXPortal *mCurPortal; // 0x6c  Wii: GetCurPortal
-    u32 pad_0x70[5];     // 0x70
+    u32 pad_0x70[2];     // 0x70
+    int mExitDirFlag;    // 0x78  Wii: GetExitDirFlag
+    u32 pad_0x7c[2];     // 0x7c
     cXObject *mMovingPerson; // 0x84  the Sim asked to move, Wii: GetMovingPerson
     int mMoveSuccess;    // 0x88  Wii: GetMoveSuccess
     int mResult;         // 0x8c  Wii: GetResult and SetResult
@@ -51,7 +53,10 @@ public:
     u32 pad_0x94[2];     // 0x94
 
     RoutingSlot *GetRoutingSlot();
+    void BuildGoalList();
+    int IsPersonSittingOnChairGoal(cXPerson *person);
     int GetResult() const { return mResult; }
+    int GetExitDirFlag() const { return mExitDirFlag; }
     s16 field_0x9c;      // 0x9c  person data 0x20 takes it on arrival
     u8 pad_0x9e[0xa];    // 0x9e
 };
@@ -252,6 +257,9 @@ public:
     RoutingState Routing_NeedFailureFeedback(bool &done, TreeReturnCode &code);
     RoutingState Routing_Failed(bool &done, TreeReturnCode &code);
     RoutingState Routing_FoundGoals(bool &done, TreeReturnCode &code);
+    RoutingState Routing_Initial(bool &done, TreeReturnCode &code);
+    // Wii: IsGhost, inlined on PS2: person data 0xC, and bit 2 of the neighbour's word 0x2A.
+    bool IsGhost() { return mPersonData[0xc] ? ((u16)mNeighbor->mPersonData[0x2a] >> 2) & 1 : 0; }
     RoutingState Routing_Succeeded(bool &done, TreeReturnCode &code);
     RoutingState Routing_Trapped(bool &done, TreeReturnCode &code);
     int AskOthersToMove(XRoute *route);

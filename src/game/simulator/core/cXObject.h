@@ -374,6 +374,7 @@ public:
     long TryMakeActionString(StackElem *, XPrimParam *);
     long TryGenericSimCall(StackElem *, XPrimParam *);
     f32 CalcShortDistance(cXObject *object) const;
+    cXObject *GetContainer();
     long ShowAllObjectDialogs(StackElem *elem, XPrimParam *param);
     static void ChangeSelectedSimL();
     long TryDialog(StackElem *, XPrimParam *, bool);

@@ -716,6 +716,60 @@ cXPerson::RoutingState cXPerson::Routing_Succeeded(bool &done, TreeReturnCode &c
     return kRoutingSucceeded;
 }
 
+// The start of a route. A Sim in another room waits for a portal, unless the target is a portal
+// one of its routes already uses. A seated Sim stands up first through its chair's entry point
+// 0x1B, with the route's exit direction; seated on something that isn't a chair is error 0x35.
+cXPerson::RoutingState cXPerson::Routing_Initial(bool &done, TreeReturnCode &code)
+{
+    s16 flags = mVars[8];
+    if (!(flags & 8))
+        return kRoutingFailed;
+    XRoute *route = GetCurrentRoute();
+    cXObject *dest = route->mDest;
+    if (!IsGhost()) {
+        s16 destRoom = dest->mVars[0x1d];
+        if (destRoom != mVars[0x1d]) {
+            if (dest->GetType() == 8) {
+                for (XRoute *other = mRoutes.begin(); other != mRoutes.end(); ++other) {
+                    if ((cXObject *)other->mCurPortal == dest)
+                        return kRoutingFailed;
+                }
+            }
+            return kRoutingWaitingForPortal;
+        }
+    }
+    if (ShouldInterrupt() && mAnimator->IsInterruptable()) {
+        route->mResult = 4;
+        return kRoutingFailed;
+    }
+    route->BuildGoalList();
+    if (mPersonData[0] == 1) {
+        if (route->IsPersonSittingOnChairGoal(this))
+            return kRoutingSucceeded;
+        cXObject *chair = GetContainer();
+        if (chair && chair->mSelector->GetFnTable()->HasFunction(0x1a)) {
+            s16 tree = chair->mSelector->GetFnTable()->HasFunction(0x1b);
+            if (tree) {
+                s16 params[4] = {route->GetExitDirFlag()};
+                if (GosubObjectTree(chair, params, tree, false)) {
+                    SetPersonData(0x12, route->GetExitDirFlag());
+                    SetPersonData(0x20, 0);
+                    code = 3;
+                    done = true;
+                    return kRoutingWaitingForStand;
+                }
+            }
+        } else {
+            TREE_ERROR(0x35);
+            code = -1;
+            done = true;
+        }
+        return kRoutingFailed;
+    }
+    done = true;
+    return kRoutingFoundGoals;
+}
+
 // A failed route keeps its result, or gets 1, and the tree goes on with code 0.
 cXPerson::RoutingState cXPerson::Routing_Failed(bool &done, TreeReturnCode &code)
 {
