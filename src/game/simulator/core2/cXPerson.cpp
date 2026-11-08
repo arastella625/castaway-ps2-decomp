@@ -437,3 +437,47 @@ RoutingSlot::RoutingSlot()
     mFacing = -2;
     mResolution = 16;
 }
+
+// Wii: cXPortal::FailedPortalTree, static.
+class cXPortal {
+public:
+    static void FailedPortalTree(ObjectModule *module, cXObject *object, cXPortal *portal);
+};
+
+// Through a portal: done once the Sim is in the destination's room, else route again.
+cXPerson::RoutingState cXPerson::Routing_WaitingForPortal(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    if (ShouldInterrupt() && mAnimator->IsInterruptable()) {
+        route->mResult = 4;
+        return kRoutingFailed;
+    }
+    s16 destRoom = route->mDest->mVars[0x1d];
+    if (destRoom != mVars[0x1d]) {
+        cXPortal *portal = route->mCurPortal;
+        if (portal && !GetLastResult())
+            cXPortal::FailedPortalTree(mModule, this, portal);
+        if (TryRoomRouting(route)) {
+            SetPersonData(0x20, 0);
+            code = 3;
+            done = true;
+            return kRoutingWaitingForPortal;
+        }
+        route->mResult = 2;
+        return kRoutingNeedFailureFeedback;
+    }
+    SetPersonData(0x20, route->field_0x9c);
+    return kRoutingWalking;
+}
+
+// A failed route keeps its result, or gets 1, and the tree goes on with code 0.
+cXPerson::RoutingState cXPerson::Routing_Failed(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    if (route->mResult == 0)
+        route->mResult = 1;
+    CleanUpAfterFinishingRoute(kRoutingFailed);
+    code = 0;
+    done = true;
+    return kRoutingFailed;
+}

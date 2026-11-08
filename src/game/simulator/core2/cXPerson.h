@@ -8,6 +8,22 @@
 
 class Neighbor;
 
+// Wii: TreeReturnCode. 64 bits on PS2: it's stored with sd.
+typedef long TreeReturnCode;
+
+// Wii: XRoute, 0xA8 bytes on PS2. Only what the routing handlers read.
+class XRoute {
+public:
+    u32 pad_0x0[0x13];   // 0x00
+    cXObject *mDest;     // 0x4c  Wii: GetDest
+    u32 pad_0x50[7];     // 0x50
+    cXPortal *mCurPortal; // 0x6c  Wii: GetCurPortal
+    u32 pad_0x70[7];     // 0x70
+    int mResult;         // 0x8c  Wii: GetResult and SetResult
+    u32 pad_0x90[3];     // 0x90
+    s16 field_0x9c;      // 0x9c  person data 0x20 takes it on arrival
+};
+
 // Wii: ActionQueue, a Queue<Interaction, 12>: a ring of twelve actions.
 class ActionQueue {
 public:
@@ -106,7 +122,7 @@ public:
     virtual void Slot13();
     virtual void Slot14();
     virtual void Slot15();
-    virtual void Slot16();
+    virtual int IsInterruptable(); // Wii SAnimator2 slot 16
     virtual void Slot17();
     virtual void Slot18();
     virtual void Slot19();
@@ -156,6 +172,20 @@ public:
     int IsIdle();
     void SetCurrentActionText(const BString2 &text);
     int AddAction(Interaction *action);
+
+    // The routing state machine: each handler returns the next state.
+    enum RoutingState {
+        kRoutingWalking = 1,
+        kRoutingWaitingForPortal = 2,
+        kRoutingFailed = 7,
+        kRoutingNeedFailureFeedback = 0x10
+    };
+    XRoute *GetCurrentRoute();
+    void CleanUpAfterFinishingRoute(RoutingState state);
+    int TryRoomRouting(XRoute *route);
+    void SetPersonData(int index, s16 value);
+    RoutingState Routing_WaitingForPortal(bool &done, TreeReturnCode &code);
+    RoutingState Routing_Failed(bool &done, TreeReturnCode &code);
     int RunImmediateAction(Interaction *action);
     int MoveOutOfWay(int priority);
     int GetSimType();

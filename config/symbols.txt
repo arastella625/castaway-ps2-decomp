@@ -1186,6 +1186,15 @@
 0x002BBC60 AddAction__C9H2DTargetPC11InteractionRC8BString2UiP8ERShaderUi
 0x004525B8 DelRef__9EResource
 
+# game/simulator/core2/cXPerson.cpp: the routing handlers
+0x001DC708 Routing_Failed__8cXPersonRbRl
+0x001AA980 Routing_WaitingForPortal__8cXPersonRbRl
+0x001AD640 TryRoomRouting__8cXPersonP6XRoute
+0x001DD9B8 SetPersonData__8cXPersonis
+0x001B6640 FailedPortalTree__8cXPortalP12ObjectModuleP8cXObjectP8cXPortal
+0x001DCA20 GetCurrentRoute__8cXPerson
+0x001AB758 CleanUpAfterFinishingRoute__8cXPersonQ28cXPerson12RoutingState
+
 # game/simulator/core2/cXPerson.cpp: AddAction
 0x001A6788 Insert__11ActionQueueRC11InteractionUi
 0x0024D5B8 GetEntry__C11Interaction
