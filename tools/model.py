@@ -75,6 +75,7 @@ PASS_BLEND_FLAG = 0x40
 SINGLE_SHADER_KIND = 0  # kind 1 is a multi-shader, a list of day and night shaders
 ALPHA_FIELD_SCREEN = 1  # in the GS ALPHA register, the colour already on the screen
 ALPHA_FIX_MIX = 0x64  # the GS ALPHA register: (source - destination) * FIX + destination
+ALPHA_ADD = 0x68  # the GS ALPHA register: source * FIX + destination
 UV_SCALED = 4  # the mesh's own UVs through the pass's scale; 3 is a reflection
 
 

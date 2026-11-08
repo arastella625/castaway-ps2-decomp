@@ -819,17 +819,44 @@ an ambient. Wii's `EIStaticSubModel::Draw`, `ISimsObjectModel::DoLightingCalcula
 the direction, so towards the sun. `Default` at 12:00 is sun elevation -64, yaw 34; sky
 (1.0, 1.0, 0.6) x 1.0; sky ambient (0.72, 0.72, 1.0) x 0.72.
 
-**Likely, down-facing ground gets the ambient alone.** If PS2's light upload, which wasn't traced,
-uses the same sign as Wii, the sun can't reach `lot_02`, 28 and 29's ground, and it shows at the sky
-ambient x brightness. **Not proven** on PS2: the sign in quadwords 51 to 53, which light set fills
-them, the scale in 56 and the clamp in 4.
+**Proven, PS2 hands VU1 the way towards each light.** The renderer's light upload (EE `0x41F0B0`,
+in the renderer vtable at `0x4040B4`) sends 8 quadwords: the light set's ambient, then the four
+directions, transposed into x, y and z rows with every component negated (`neg.s`), then the four
+colours. VU1's main program (overlay 3, `0x438` to `0x4B8`) copies them to quadwords 46, 51 to 53
+and 47 to 50, which is exactly where the lighting routine reads them. So, with the light set storing
+the way light travels, VU1 dots each normal with the way to the sun.
+
+**Proven, so down-facing ground gets the ambient alone.** On `lot_02`, 28 and 29 the sun's N.L is
+negative, clamped to 0, and the ground shows at ambient x brightness.
+
+**Proven, the scale.** The upload at `0x41EE38` (next in the vtable) fills quadwords 55 and 56 with
+two colours x 128.0 (`0x43000000`), w = 128. So light 1.0 at brightness 127 is 128, the GS's 1.0.
+**Likely** both colours are 1 outdoors: they look like per-object or per-room multipliers, and the
+callers go through the vtable. **Open:** the clamp in quadword 4, which no microcode writes and no
+static data holds.
 
 **What the port does.** `terrain.gdshader` is unchanged: 127 is the texture's own colour, with
 Godot's sun. `beach.gd -- --game-light` uses `terrain_game_light.gdshader` instead. That applies the
 equation above with `Default` at 9:00, from the stored normal, in display values, with 1.0 = 128 and
-a cap of 255/128. The game-light renders of `lot_02` go nearly black where the ground faces down.
-Objects and the Sim stay on Godot's lights, which work in linear values and can't follow the GS's
-sums.
+a cap of 255/128. It also lights scenery, placed objects and the skydome this way, since they carry
+the same brightness and lit flag and Wii's `ISimsObjectModel::DoLightingCalculation` reads the same
+light set. The game-light renders of `lot_02` go nearly black where the ground faces down. The Sim
+stays on Godot's lights.
+
+**Proven, the skydome is lit.** Its shader `skydome_gradient` is opaque (no blend flag) and lit, so
+VU1 lights it like ground. The default port draws it unlit; `--game-light` lights it.
+
+**Proven, the sea's second pass is its colour.** `ocean`, `outer_ocean` and `outer_ocean_light` add
+their caustics (FIX 14) and then `water_ocean` (FIX 19), both on the mesh's own UVs. `placed.py lot`
+writes an additive second pass in `emissiveTexture` (factor 0) with `extras.gs_blend2`, and the port
+draws it as a second additive pass.
+
+**Proven, `fogPlane` is drawn wrong, not fixed.** On lots 11, 12, 18 and 22, `lot_fog` and `lot_mist`
+have a first pass that writes no colour (0x4A), then Cs x Ad + Cd (0x58) with a second texture on UV
+source 5, which isn't decoded. The port draws the first pass's alpha texture as a solid cut-out,
+which shows white shapes. Adding it by its own alpha blew out to white, so that's not committed.
+`oceanSparkle` has the same two registers with one texture, so the name rule's additive drawing
+matches it (**likely**, if pass 0 writes the frame's alpha).
 
 #### What shows where list 3 was the only ground
 

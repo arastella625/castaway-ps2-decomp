@@ -71,7 +71,7 @@ BOUNDS_TOLERANCE = 0.001
 FLOOR_LIST = 2  # gamedata's third submodel list: the floor Sims stand on, never drawn
 FLOOR_SUFFIX = ' floor'
 MISSING_TEXTURE = 'missingshader'  # the purple 16x16 behind Maya's default materials
-ALPHA_ADD = 0x68  # the GS ALPHA register: source * FIX + destination
+ALPHA_ADD = mdl.ALPHA_ADD
 
 
 class BitReader:

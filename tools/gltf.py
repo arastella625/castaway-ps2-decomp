@@ -372,6 +372,25 @@ def add_detail_pass(builder, library, material, shader):
                                'detail_scale': list(layer.uv_scale)})
 
 
+def add_second_pass(builder, library, material, shader):
+    """Write an additive second pass, like the sea's water_ocean over its caustics.
+
+    Its texture rides in emissiveTexture with a zero emissiveFactor, so a reader that knows
+    nothing of it adds nothing, and extras.gs_blend2 says how the GS mixes it.
+    """
+    if len(shader.passes) < 2:
+        return
+    layer = shader.passes[1]
+    if (not layer.flags & mdl.PASS_BLEND_FLAG or layer.alpha != mdl.ALPHA_ADD or not layer.fix
+            or layer.uv_source != shader.passes[0].uv_source
+            or layer.texture_hash not in library.textures):
+        return
+    material['emissiveTexture'] = {
+        'index': add_texture(builder, library.read_texture(layer.texture_hash))}
+    material['emissiveFactor'] = [0.0, 0.0, 0.0]
+    material['extras']['gs_blend2'] = {'alpha': layer.alpha, 'fix': layer.fix}
+
+
 def add_material(builder, library, shader_hash, cache, layers=False):
     if shader_hash in cache:
         return cache[shader_hash]
@@ -390,6 +409,7 @@ def add_material(builder, library, shader_hash, cache, layers=False):
         # How the GS mixes the first pass with the screen: its ALPHA register and FIX, as stored.
         first = blending.passes[0]
         material.setdefault('extras', {})['gs_blend'] = {'alpha': first.alpha, 'fix': first.fix}
+        add_second_pass(builder, library, material, blending)
     if layers:
         shader = library.shader(shader_hash)
         # The game draws opaque shaders at once and alpha ones later, so alpha wins an exact tie.
