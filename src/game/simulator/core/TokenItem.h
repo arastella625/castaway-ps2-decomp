@@ -30,7 +30,7 @@ public:
     int GetAttribute(int a);
     void SetAttribute(int a, s16 b);
     void AddAtribute(s16 a);
-    int GetStatusText();
+    s8 GetStatusText();
     void SetStatusText(s8 a);
     u32 GetToken();
     void LoadItemInfo(cXObject *a, Family *b, s16 c);

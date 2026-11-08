@@ -20,10 +20,10 @@ public:
     ObjectItem(int guid);
     ObjectItem(cXObject *object);
 
-    int GetID() const;
+    s16 GetID() const;
     u32 GetGuid() const;
     int GetCategory() const;
-    int GetCount() const;
+    s16 GetCount() const;
     int GetOwnerID() const;
     int GetOwnershipPoints(s16 a) const;
     s8 GetStatusText();

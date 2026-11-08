@@ -9,7 +9,8 @@ class ClothingItem;
 class Family;
 class cXObject;
 
-// Wii: InventoryItem. Its vptr comes after the first word.
+// Wii: InventoryItem. Its vptr comes after the first word. The slots are named from the game's
+// ObjectItem and TokenItem vtables (0x4BB460 and 0x4BB570), which tools/verify_vtables.py checks.
 class InventoryItem {
 public:
     s16 mInstanceID; // 0x00  Wii: GetInstanceID, given by InventoryItems::SetInstanceID
@@ -18,19 +19,19 @@ public:
     s16 GetInstanceID() const { return mInstanceID; }
     void SetInstanceID(s16 id) { mInstanceID = id; }
 
-    virtual s16 GetID();
-    virtual void Slot1();
-    virtual void Slot2();
-    virtual s8 GetKind();
-    virtual void Slot4();
-    virtual void Slot5();
-    virtual void Slot6();
-    virtual void Slot7();
-    virtual void Slot8();
-    virtual void Slot9();
-    virtual void Slot10();
-    virtual void Slot11();
-    virtual void IncrementCount(s16 count); // slot 12, at +0x68
+    virtual s16 GetID() const;                        // 0: the token's or clothing's ID
+    virtual s16 GetCount() const;                     // 1
+    virtual u32 GetGuid() const;                      // 2
+    virtual int GetCategory() const;                  // 3: 0 object, 1 ownable, 2 token, 3 clothing
+    virtual int GetOwnerID() const;                   // 4
+    virtual int GetOwnershipPoints(s16 a) const;      // 5
+    virtual int GetNumAttributes() const;             // 6
+    virtual int GetAttribute(int index);              // 7
+    virtual void SetAttribute(int index, s16 value);  // 8
+    virtual void AddAtribute(s16 value);              // 9 (the game's spelling)
+    virtual s8 GetStatusText();                       // 10
+    virtual void SetStatusText(s8 text);              // 11
+    virtual void IncrementCount(s16 count);           // 12
 };
 
 // Wii: InventoryItems. Only what the decompiled code calls is declared so far.

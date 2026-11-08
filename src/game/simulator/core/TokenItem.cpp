@@ -43,7 +43,7 @@ void TokenItem::AddAtribute(s16 a)
 {
 }
 
-int TokenItem::GetStatusText()
+s8 TokenItem::GetStatusText()
 {
     return -1;
 }

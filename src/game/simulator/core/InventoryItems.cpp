@@ -24,7 +24,7 @@ void InventoryItems::AddTokenItem(s16 id, s16 count)
     MarkTokenAsBeingCollected(id);
     for (InventoryItem **i = mItems.begin(); i != mItems.end(); ++i) {
         InventoryItem *item = *i;
-        if (item->GetKind() == 2 && item->GetID() == id) {
+        if (item->GetCategory() == 2 && item->GetID() == id) {
             item->IncrementCount(count);
             CheckForAddGoals(0, id);
             return;

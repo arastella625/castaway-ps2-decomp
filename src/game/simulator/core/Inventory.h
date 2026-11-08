@@ -140,7 +140,7 @@ inline int InventoryItems::GetTokenItemIndex(s16 id)
     int index = 0;
     for (InventoryItem **i = mItems.begin(); i != mItems.end(); ++i, ++index) {
         InventoryItem *item = *i;
-        if (item->GetKind() == 2 && item->GetID() == id)
+        if (item->GetCategory() == 2 && item->GetID() == id)
             return index;
     }
     return -1;
