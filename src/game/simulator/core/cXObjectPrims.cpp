@@ -1,11 +1,16 @@
 #include "game/simulator/core/cXObject.h"
 
+#include "game/GameData.h"
+#include "game/UIDB.h"
+
 #include "common/EGlobal.h"
 #include "common/EVec3.h"
 #include "game/animation/SAnimator2.h"
 
 #include "game/simulator/core/Lot.h"
 #include "game/simulator/core/Neighborhood.h"
+#include "game/simulator/core/Plan.h"
+#include "game/simulator/core/Inventory.h"
 #include "game/simulator/core/cXMTObject.h"
 #include "game/simulator/core2/ObjTestSim.h"
 #include "game/simulator/core2/cXPerson.h"
@@ -13,26 +18,41 @@
 
 #define OBJECT_ERROR_CHECK(condition, code) TREE_CHECK(this, condition, code, return -1)
 
-class Player {
-public:
-    Neighbor *GetPrimaryNeighbor();
-};
-
-class GameData {
-public:
-    u32 pad_0x0[0x2a];
-    int mInitialSimSelection; // 0xa8
-    u32 pad_0xac[7];
-    Player mPlayer;           // 0xc8
-
-    Player *GetPlayer() { return &mPlayer; }
-};
-extern GameData _gd;
-
 namespace InteractorModule {
-class DirectInteractor {
+// The vtable pointer is at +0x68, after 0x68 bytes of data: GCC 2.95 puts it after a base
+// class's data, so that data is a base of its own.
+struct DirectInteractorData {
+    u32 pad_0x0[0x1a];
+};
+
+class DirectInteractorVirtuals : public DirectInteractorData {
 public:
-    u32 pad_0x0[0x23];
+    virtual void Slot0();
+    virtual void Slot1();
+    virtual void Slot2();
+    virtual void Slot3();
+    virtual void Slot4();
+    virtual void Slot5();
+    virtual void Slot6();
+    virtual void Slot7();
+    virtual void Slot8();
+    virtual void Slot9();
+    virtual void Slot10();
+    virtual void Slot11();
+    virtual void Slot12();
+    virtual void Slot13();
+    virtual void Slot14();
+    virtual void Slot15();
+    virtual void Slot16();
+    virtual void Slot17();
+    virtual void Slot18();
+    virtual void StartRumble(cXObject *source); // GenericSimCall 0x2D
+    virtual void StopRumble();                  // GenericSimCall 0x2D with t0 of -1
+};
+
+class DirectInteractor : public DirectInteractorVirtuals {
+public:
+    u32 pad_0x6c[8];
     int mAutonomous; // 0x8c  Wii: IsAutonomous
 };
 
@@ -149,8 +169,12 @@ long cXObject::TryRandom(StackElem *elem, XPrimParam *primParam)
 }
 
 #ifdef NON_MATCHING
-// 410 of the 411 words line up. One branch to the bad mode error goes to the error's alignment
-// nop in the game and just past it here. The delay slot is the same, so it behaves the same.
+// 410 of the 411 words line up. The switch's two branches to the bad mode error both take the
+// error's `lui` into their delay slot. In the game the live one (mode above 2, at 0x226E00) then
+// goes to the alignment nop before the error and the dead one (mode below 0) just past it; here
+// both go past it. Same behaviour. Tried and no better: default first, default with break, an
+// if chain, switching on an int copy, case orders, case 3 into default, and four forms of the
+// `!object` check before the switch. This comes from the delay slot filler, not the source shape.
 // Primitive 0x1c: run a tree found by name.
 class CallNamedTreeParam {
 public:
@@ -264,27 +288,123 @@ long cXObject::TryCallNamedTree(StackElem *elem, XPrimParam *primParam)
 
 #endif
 
-// Wii: the object's TTAB. Only the slot PushAction calls.
-class TreeTab {
+// Primitive 0x2f: tell the plans that something happened to a Sim.
+class NotifyPlansParam {
 public:
-    virtual void Slot0();
-    virtual void Slot1();
-    virtual void Slot2();
-    virtual void Slot3();
-    virtual void Slot4();
-    virtual void Slot5();
-    virtual void Slot6();
-    virtual void Slot7();
-    virtual void Slot8();
-    virtual void Slot9();
-    virtual void Slot10();
-    virtual void Slot11();
-    virtual void Slot12();
-    virtual void Slot13();
-    virtual void Slot14();
-    virtual void Slot15();
-    virtual void *GetEntry(int index);
+    s8 mNotification;  // 0x00  0 is error 0x6A
+    u8 mLocationOwner; // 0x01  the value is this operand: scope
+    s16 mLocationData; // 0x02  and data
+    u8 mFlags;         // 0x04  bit 0: the Sim is the object in temp 0, not me
+
+    bool GetUseSimFromTemp() const { return mFlags & 1; }
 };
+
+long cXObject::TryNotifyPlans(StackElem *elem, XPrimParam *primParam)
+{
+    NotifyPlansParam *param = (NotifyPlansParam *)primParam;
+    cXPerson *person;
+    if (param->GetUseSimFromTemp()) {
+        cXObject *object = GetObjectFromID(mTemps[0]);
+        if (object && object->IsPerson()) {
+            person = object->GetPerson();
+        } else {
+            OBJECT_ERROR_CHECK(false, 0x1c);
+        }
+    } else {
+        person = GetPerson();
+    }
+    if (!person)
+        return 1;
+    s16 value;
+    if (InterpValue(param->mLocationOwner, param->mLocationData, 0, 0, &value, 0) == -1) {
+        OBJECT_ERROR_CHECK(false, 9);
+    }
+    if (!param->mNotification) {
+        OBJECT_ERROR_CHECK(false, 0x6a);
+    }
+    PlanManager::GetInstance()->SendNotification(param->mNotification, value, person);
+    return 1;
+}
+
+// Primitive 0x14: run one of the stack object's functional trees (an entry point) as a
+// subroutine, with my temps 0 to 3 as its parameters.
+class CallFunctionalTreeParam {
+public:
+    s16 mFunction; // 0x00  0 to 0x10, see the switch; 0xD and anything else is false
+    u16 mFlags;    // 0x02  bit 0: change the icon
+
+    bool GetChangeIcon() const { return mFlags & 1; }
+};
+
+long cXObject::TryCallFunctionalTree(StackElem *elem, XPrimParam *primParam)
+{
+    CallFunctionalTreeParam *param = (CallFunctionalTreeParam *)primParam;
+    cXObject *object = GetObjectFromID(elem->mStackObject);
+    OBJECT_ERROR_CHECK(object, 0x15);
+    int entry;
+    switch (param->mFunction) {
+    case 0xc:
+        entry = 0x10;
+        break;
+    case 0x0:
+        entry = 0x12;
+        break;
+    case 0x1:
+        entry = 0x13;
+        break;
+    case 0x2:
+        entry = 0x14;
+        break;
+    case 0x3:
+        entry = 0x15;
+        break;
+    case 0x4:
+        entry = 0x16;
+        break;
+    case 0x5:
+        entry = 0x17;
+        break;
+    case 0x6:
+        entry = 0x18;
+        break;
+    case 0x7:
+        entry = 0x19;
+        break;
+    case 0x8:
+        entry = 0x1a;
+        break;
+    case 0x9:
+        entry = 0x1b;
+        break;
+    case 0xa:
+        entry = 0xe;
+        break;
+    case 0xb:
+        entry = 0x1c;
+        break;
+    case 0xe:
+        entry = 0x1d;
+        break;
+    case 0xf:
+        entry = 0x20;
+        break;
+    case 0x10:
+        entry = 0x21;
+        break;
+    default:
+        return 0;
+    }
+    s16 tree = object->mSelector->GetFnTable()->HasFunction(entry);
+    s16 params[8];
+    memset(params, 0, sizeof(params));
+    params[0] = mTemps[0];
+    params[1] = mTemps[1];
+    params[2] = mTemps[2];
+    params[3] = mTemps[3];
+    if (tree && GosubObjectTree(object, params, tree, param->GetChangeIcon()))
+        return 3;
+    return 0;
+}
 
 // Primitive 0xd: put an interaction on a Sim's queue.
 class PushActionParam {
@@ -408,8 +528,12 @@ cXObject *cXObject::GetInteractionLeader()
 }
 
 #ifdef NON_MATCHING
-// The logic is complete, from the Wii build, and 563 of the game's 732 words line up on a first
-// pass. It's 25 words short: the neighbour lookups need checking case by case against the game.
+// Not matched: 632 of the game's 732 words line up (with s1 and s4 swapped), and ours is 713.
+// Most of the rest is one pattern: the game loads each looked-up Neighbor into $v0 and copies it
+// into the saved register, and here the load goes straight there. About fifteen bodies for the
+// lookup were tried (early returns, one result variable, ?:, a reference, Wii's GetID check);
+// a single result variable brings the copies back but adds 22 words elsewhere. The game also
+// keeps the high half of pNeighborhood in $fp for the whole function, and `from` on the stack.
 // Wii: an object's or neighbour's relationships. Only the slots Relationship2 calls.
 class RelMatrix {
 public:
@@ -420,13 +544,8 @@ public:
     virtual void SetCount(s16 key, int count);
     virtual void Slot5();
     virtual void Slot6();
-    virtual s16 Get(s16 key, int field);
+    virtual int Get(s16 key, int field);
     virtual void Set(s16 key, int field, s16 value);
-};
-
-class H2DTarget {
-public:
-    void RelationshipChangeOccured(int change);
 };
 
 // Primitive 0x1a: read or write one field of a relationship.
@@ -478,7 +597,7 @@ long cXObject::TryRelationship2(StackElem *elem, XPrimParam *primParam)
         case 0:
             owner = this;
             if (param->GetUseNeighbors())
-                neighbor = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+                neighbor = neighborhood->FindNeighborByIDJoined(elem->mStackObject);
             else
                 other = GetObjectFromID(elem->mStackObject);
             break;
@@ -487,13 +606,13 @@ long cXObject::TryRelationship2(StackElem *elem, XPrimParam *primParam)
                 OBJECT_ERROR_CHECK(false, 0x5b);
             }
             owner = GetObjectFromID(elem->mStackObject);
-            neighbor = neighborhood->FindNeighborByIDInline(mID);
+            neighbor = neighborhood->FindNeighborByIDJoined(mID);
             break;
         case 2:
             OBJECT_ERROR_CHECK(param->mLocal < elem->mNumLocals, 0x34);
             owner = GetObjectFromID(elem->mStackObject);
             if (param->GetUseNeighbors())
-                neighbor = neighborhood->FindNeighborByIDInline(elem->GetLocals()[param->mLocal]);
+                neighbor = neighborhood->FindNeighborByIDJoined(elem->GetLocals()[param->mLocal]);
             else
                 other = GetObjectFromID(elem->GetLocals()[param->mLocal]);
             break;
@@ -501,7 +620,7 @@ long cXObject::TryRelationship2(StackElem *elem, XPrimParam *primParam)
             OBJECT_ERROR_CHECK(param->mLocal < elem->mNumLocals, 0x34);
             owner = GetObjectFromID(elem->GetLocals()[param->mLocal]);
             if (param->GetUseNeighbors())
-                neighbor = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+                neighbor = neighborhood->FindNeighborByIDJoined(elem->mStackObject);
             else
                 other = GetObjectFromID(elem->mStackObject);
             break;
@@ -518,40 +637,42 @@ long cXObject::TryRelationship2(StackElem *elem, XPrimParam *primParam)
         matrix = owner->mRelMatrix;
         key = neighbor->GetID();
     } else if (param->GetUseNeighbors()) {
+        Neighbor *source = 0;
         Neighbor *to = 0;
         switch (param->mWho) {
         case 0: {
             cXPerson *person = GetPerson();
             OBJECT_ERROR_CHECK(person, 0x1c);
-            from = neighborhood->FindNeighborByIDInline(person->GetNeighborID());
-            to = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+            source = neighborhood->FindNeighborByIDJoined(person->GetNeighborID());
+            to = neighborhood->FindNeighborByIDJoined(elem->mStackObject);
             break;
         }
         case 1: {
             cXPerson *person = GetPerson();
             OBJECT_ERROR_CHECK(person, 0x1c);
-            from = neighborhood->FindNeighborByIDInline(elem->mStackObject);
-            to = neighborhood->FindNeighborByIDInline(person->GetNeighborID());
+            source = neighborhood->FindNeighborByIDJoined(elem->mStackObject);
+            to = neighborhood->FindNeighborByIDJoined(person->GetNeighborID());
             break;
         }
         case 2:
             OBJECT_ERROR_CHECK(param->mLocal < elem->mNumLocals, 0x34);
-            from = neighborhood->FindNeighborByIDInline(elem->mStackObject);
-            to = neighborhood->FindNeighborByIDInline(elem->GetLocals()[param->mLocal]);
+            source = neighborhood->FindNeighborByIDJoined(elem->mStackObject);
+            to = neighborhood->FindNeighborByIDJoined(elem->GetLocals()[param->mLocal]);
             break;
         case 3:
             OBJECT_ERROR_CHECK(param->mLocal < elem->mNumLocals, 0x34);
-            from = neighborhood->FindNeighborByIDInline(elem->GetLocals()[param->mLocal]);
-            to = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+            source = neighborhood->FindNeighborByIDJoined(elem->GetLocals()[param->mLocal]);
+            to = neighborhood->FindNeighborByIDJoined(elem->mStackObject);
             break;
         }
-        if (!(from && to)) {
+        if (!(source && to)) {
             OBJECT_ERROR_CHECK(false, 0x15);
         }
         OBJECT_ERROR_CHECK(param->mField != 2, 0x56);
-        matrix = from->mRelations;
+        matrix = source->mRelations;
         key = to->GetID();
-        RelationshipAccessed(mModule, from, to, param->GetAssign());
+        RelationshipAccessed(mModule, source, to, param->GetAssign());
+        from = source;
     } else {
         cXObject *first = 0;
         cXObject *second = 0;
@@ -581,11 +702,12 @@ long cXObject::TryRelationship2(StackElem *elem, XPrimParam *primParam)
         matrix = first->mRelMatrix;
         key = second->mID;
         if (first->GetType() == 2 && second->GetType() == 2) {
-            from = neighborhood->FindNeighborByIDInline(first->GetPerson()->GetNeighborID());
-            matrix = from->mRelations;
+            Neighbor *source = neighborhood->FindNeighborByIDJoined(first->GetPerson()->GetNeighborID());
+            from = source;
+            matrix = source->mRelations;
             key = second->GetPerson()->GetNeighborID();
             OBJECT_ERROR_CHECK(param->mField != 2, 0x56);
-            RelationshipAccessed(mModule, from, neighborhood->FindNeighborByIDInline(key), param->GetAssign());
+            RelationshipAccessed(mModule, source, neighborhood->FindNeighborByIDJoined(key), param->GetAssign());
         }
     }
 
@@ -610,9 +732,11 @@ long cXObject::TryRelationship2(StackElem *elem, XPrimParam *primParam)
         }
         return 1;
     }
-    OBJECT_ERROR_CHECK(ref, 0x13);
-    InterpWriteValue(param->mScope, param->mData, &ref, matrix->Get(key, param->mField));
-    return 1;
+    if (ref) {
+        InterpWriteValue(param->mScope, param->mData, &ref, matrix->Get(key, param->mField));
+        return 1;
+    }
+    OBJECT_ERROR_CHECK(false, 0x13);
 }
 
 #endif
@@ -864,6 +988,9 @@ public:
     int GetX() const { return mX; }
     int GetY() const { return mY; }
     int GetLevel() const { return mLevel; }
+    // The same, called as functions (0x248DB8, 0x248DC0) where they aren't inlined.
+    int GetXOutOfLine() const;
+    int GetYOutOfLine() const;
 };
 
 inline CTilePt cXObject::GetCTilePt() const
@@ -880,9 +1007,46 @@ inline s16 GetTileObjectID(ObjectModule *module, const CTilePt &tile)
     return module->mTileObjects[y][x];
 }
 
+// GenericSimCall 0x3A: one tile's walls, 0x40 bytes, with an out-of-line destructor. A segment
+// is one side of the tile.
+class TileWalls {
+public:
+    u32 pad_0x0[0x10];
+
+    TileWalls(const TileWalls &other);                    // 0x1E2AF0
+    ~TileWalls();                                         // 0x1E2B20
+    int HasWall(int segment) const;                       // 0x1E2B78
+    void AddWall(int segment);                            // 0x1E2EF0
+    void SetStyle(int style, int segment);                // 0x1E2EB8
+    void SetPattern(int pattern, int segment, int side);  // 0x1E2D60
+    static int GetWallSegsBetweenTiles(CTilePt *a, CTilePt *b, int &segmentA, int &segmentB); // 0x1C1F98
+};
+
+class ERoom {
+public:
+    static void DeleteWallAtTile(const CTilePt &tile, TileWalls &walls, int segment); // 0x31F8C8
+};
+
+// The tile flag grid: row pointers by x, a byte for each y.
+struct TileFlagGrid {
+    u8 pad_0x0[0xc];
+    s8 **mRows; // 0x0c
+};
+
 class cFixedWorld {
 public:
+    u8 pad_0x0[0x20];
+    TileFlagGrid *mFlags; // 0x20
+
     int OutOfGrid(const CTilePt &tile) const;
+    TileWalls GetWall(const CTilePt &tile);              // 0x1C5470
+    void SetWall(const CTilePt &tile, TileWalls walls);  // 0x1C5910
+    void CommitWallChanges();                            // 0x1E4998
+    int GetXSize() const; // 0x1E4378, +0x10
+    int GetYSize() const; // 0x1E4380, +0x14
+    // Wii: GetFlags and SetFlags, inlined in GenericSimCall 0x33.
+    s8 GetFlags(const CTilePt &tile) const { return mFlags->mRows[tile.GetXOutOfLine()][tile.GetYOutOfLine()]; }
+    void SetFlags(const CTilePt &tile, s8 flags) { mFlags->mRows[tile.GetXOutOfLine()][tile.GetYOutOfLine()] = flags; }
 };
 extern cFixedWorld *gFixedWorld;
 
@@ -2087,6 +2251,8 @@ class EHouse {
 public:
     u32 pad_0x0[0xf];
     int mLot; // 0x3c
+
+    s8 GetLotNum() const { return mLot; } // Wii: GetLotNum; GenericSimCall 0x40 reads a byte
 };
 
 class LotTransitionParam {
@@ -2185,5 +2351,885 @@ long cXObject::TryLotTransition(StackElem *elem, XPrimParam *primParam)
         return 1;
     }
     return -1;
+}
+#endif
+
+#ifdef NON_MATCHING
+// GenericSimCall 8 and 9. On PS2 the singleton is a static at 0x492904, which GetSingleton
+// reads inline.
+class LoadingScreenStateMachine {
+public:
+    static void StartingLoad(int mode);   // 0x2704A8, a CLoadingScreen::eLoadingScreenMode
+    static bool LoadInProgress();         // 0x2704F8
+    static void LoadFinishing();
+    static LoadingScreenStateMachine *sInstance; // 0x492904, our name
+    static LoadingScreenStateMachine *GetSingleton() { return sInstance; }
+    bool IsIrisTransitionInComplete();    // 0x270428
+};
+// GenericSimCall 0x27: Wii AutoFood, made on the stack. The names below AutoFood are ours. Each
+// choice is four words its own constructor (0x2BC028) zeroes; the vtable is at 0x4BB1A0, after
+// 0x1B48 bytes of data.
+struct AutoFoodChoice {
+    u32 pad_0x0[4];
+    AutoFoodChoice();
+};
+struct AutoFoodList {
+    AutoFoodChoice mChoices[0x30];
+    int mCount;      // 0x300
+    int field_0x304; // 0x304
+    AutoFoodList() : mCount(0), field_0x304(0) {}
+};
+struct AutoFoodData {
+    AutoFoodList mLists[9];
+};
+class AutoFood : public AutoFoodData {
+public:
+    AutoFood() {}
+    virtual ~AutoFood() {}
+    int AutonomousFoodSelection(int a, int b, int c); // 0x2A3A28
+};
+
+// GenericSimCall 0x37: Wii NghResFile::GetNumModifiableFamilies, a static read inline on PS2.
+class NghResFile {
+public:
+    static s16 sNumModifiableFamilies; // 0x4927C0, our name
+    static int GetNumModifiableFamilies() { return sNumModifiableFamilies; }
+};
+
+// GenericSimCall 0x39. Deleted through the virtual destructor in its first slot.
+class CatalogResource {
+public:
+    virtual ~CatalogResource();
+    static void DestroyInstance(CatalogResource *resource) { delete resource; }
+};
+
+// GenericSimCall 0x3A: Wii cXObject::IsDoor and IsGate, inlined on PS2. 0x2456C8 returns the
+// object's definition word 0x1C; that name is ours.
+s16 GetDefinitionKind(cXObject *object); // 0x2456C8
+inline bool IsDoorInline(cXObject *object)
+{
+    return object->GetTypeOutOfLine() == 8 && GetDefinitionKind(object) == 2
+        && (s16)object->mSelector->GetFnTable()->HasFunction(0xf);
+}
+inline bool IsGateInline(cXObject *object)
+{
+    return object->GetTypeOutOfLine() == 8 && GetDefinitionKind(object) == 1
+        && (s16)object->mSelector->GetFnTable()->HasFunction(0xf);
+}
+
+// The family with this number, or null.
+inline Family *Neighborhood::GetFamilyInline(int number)
+{
+    for (Family **i = mFamilies.begin(); i != mFamilies.end(); ++i) {
+        if ((*i)->GetNumber() == number)
+            return *i;
+    }
+    return 0;
+}
+
+// Nothing if the number is taken, otherwise 0x205250 with a 1 first.
+inline Family *Neighborhood::MakeNewFreePlayFamily(int number)
+{
+    if (GetFamilyInline(number))
+        return 0;
+    return MakeNewFamily(true, number);
+}
+
+// GenericSimCall 3: Wii StateMachineFlow::SetFlowRequest, inlined on PS2 as a store to 0x492908.
+class StateMachineFlow {
+public:
+    enum eGameState {
+    };
+    static int sFlowRequest; // 0x492908, our name
+    static void SetFlowRequest(eGameState state) { sFlowRequest = state; }
+};
+// GenericSimCall 0x10: the game's scripted sequences.
+class SequenceManager {
+public:
+    enum eSequenceType {
+    };
+    static SequenceManager *GetSingleton();
+    void StartSequence(eSequenceType type);
+    int IsSequenceStarted(eSequenceType type);
+    int IsSequenceComplete(eSequenceType type);
+};
+
+// GenericSimCall 0x2A: the camera director, _globals +0x1D0.
+class CameraDirector {
+public:
+    u32 pad_0x0[0xac];
+    int mState; // 0x2b0
+
+    // Wii: IsInControl, inlined on PS2. States 0 and 8 aren't in control.
+    bool IsInControl() const
+    {
+        bool inControl = false;
+        if (mState)
+            inControl = mState != 8;
+        return inControl;
+    }
+};
+
+// GenericSimCall 0x32: _globals +0x1F8.
+class OptionsRecon {
+public:
+    int GetIsMusicGenreEnabled(int genre);
+};
+
+// Wii: GetEORGlobals, a pointer on PS2 at 0x50A6A8.
+extern EGlobal *gEORGlobals;
+
+// GenericSimCall 0: Wii GetWeatherManager, a pointer on PS2 at 0x50A6A4.
+class WeatherManager {
+public:
+    void SetWeatherState(const char *name, int a, bool b);
+};
+extern WeatherManager *gWeatherManager;
+
+// GenericSimCall 0x13 and 0x14 inline these. The flags are the word at +4 of each row.
+inline void InventoryItems::GimmeAllFood(s16 count)
+{
+    const ERQTable *table = GetObjectFolder()->mDatabase->GetTable("InventoryTokens");
+    if (!table)
+        return;
+    for (int i = 0; i < (int)table->count; i++) {
+        const InventoryTokens *token = &((const InventoryTokens *)table->rows)[i];
+        if (*(const u32 *)&token->field_0x4 & 4)
+            AddTokenItem(token->mID, count);
+    }
+}
+
+inline void InventoryItems::GimmeAllResources(s16 count)
+{
+    const ERQTable *table = GetObjectFolder()->mDatabase->GetTable("InventoryTokens");
+    if (!table)
+        return;
+    for (int i = 0; i < (int)table->count; i++) {
+        const InventoryTokens *token = &((const InventoryTokens *)table->rows)[i];
+        if ((*(const u32 *)&token->field_0x4 & 6) == 2 && (u16)(token->mID - 0x32) >= 4)
+            AddTokenItem(token->mID, count);
+    }
+}
+
+// ObjectModule::DisableBuyAndBuild and EnableBuyAndBuild on Wii, inlined here.
+inline void DisableBuyAndBuild(ObjectModule *module, cXObject *object)
+{
+    module->mModeBlockers.push_back(object);
+}
+inline void EnableBuyAndBuild(ObjectModule *module, cXObject *object)
+{
+    eastl::vector<cXObject *, eastl::allocator> &blockers = module->mModeBlockers;
+    for (cXObject **it = blockers.begin(); it != blockers.end(); ++it) {
+        if (*it == object) {
+            blockers.erase(it);
+            return;
+        }
+    }
+}
+
+// Primitive 1: GenericSimCall, a switch on the s16 at +0 with its operands in my temps.
+// Not matched, but every call is written. The cases are in the game's order, which is proven:
+// GCC lays the bodies out as the source has them, and the jump table at 0x4BA900 sorted by
+// address gives that order. 2,341 words against the game's 2,388, 1,904 of them lined up.
+// docs/formats/bhav.md has what each call does, and Wii's TryGenericSimCall names nearly every
+// function they call.
+long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
+{
+    long result = 1;
+    switch (*(s16 *)primParam) {
+    case 0x00:
+        gWeatherManager->SetWeatherState("hurricane", 2, false);
+        break;
+    case 0x01: {
+        // Swaps me and the stack object, both Sims. Each is placed on the object the other
+        // holds in object variable 2 (tile (-1, -1), level 1), takes the other's direction, and
+        // is offset by that object's first slot, turned by its direction. The offsets add up:
+        // the second Sim's includes the first's. Only my object is checked for being missing,
+        // as on Wii.
+        cXPerson *me = GetPerson();
+        OBJECT_ERROR_CHECK(me, 0x1c);
+        cXObject *object = GetObjectFromID(elem->mStackObject);
+        OBJECT_ERROR_CHECK(object, 0x15);
+        cXPerson *other = object->GetPerson();
+        OBJECT_ERROR_CHECK(other, 0x1c);
+        cXObject *mine = GetObjectFromID(mVars[2]);
+        OBJECT_ERROR_CHECK(mine, 0x15);
+        cXObject *theirs = GetObjectFromID(object->mVars[2]);
+        OBJECT_ERROR_CHECK(mine, 0x15);
+        s16 myDirection = me->mVars[1];
+        s16 theirDirection = other->mVars[1];
+        me->Pickup();
+        other->Pickup();
+        FTilePt tile;
+        tile.mX = -0x10;
+        tile.mY = -0x10;
+        if (me->CanPlace(tile, 1, theirs, 0))
+            me->Place(tile, 1, theirs, 0);
+        if (other->CanPlace(tile, 1, mine, 0))
+            other->Place(tile, 1, mine, 0);
+        me->mVars.WriteVar(1, theirDirection);
+        other->mVars.WriteVar(1, myDirection);
+        me->mAnimator->Slot6();
+        other->mAnimator->Slot6();
+        f32 x = 0.0f;
+        f32 y = x;
+        f32 direction = x;
+        ObjectSlot *slot = theirs->GetObjectSlot(0);
+        if (slot) {
+            f32 slotX = slot->GetXOffset();
+            f32 slotY = slot->GetYOffset();
+            CardinalRotateCoords((int)theirs->mVars[1], slotX, slotY);
+            x += slotX;
+            y += slotY;
+            me->mAnimator->Slot11Offset(x, y, direction);
+        }
+        slot = mine->GetObjectSlot(0);
+        if (slot) {
+            f32 slotX = slot->GetXOffset();
+            f32 slotY = slot->GetYOffset();
+            CardinalRotateCoords((int)mine->mVars[1], slotX, slotY);
+            x += slotX;
+            y += slotY;
+            other->mAnimator->Slot11Offset(x, y, direction);
+        }
+        break;
+    }
+    case 0x03: {
+        // Only for the selected Sim: asks the game flow for state 0x20.
+        cXPerson *person = GetObjectFromID(elem->mStackObject)->GetPerson();
+        OBJECT_ERROR_CHECK(person, 0x1c);
+        OBJECT_ERROR_CHECK(person == _globals.GetSelectedPerson(), 0x14);
+        StateMachineFlow::SetFlowRequest((StateMachineFlow::eGameState)0x20);
+        break;
+    }
+    case 0x02: {
+        // The stack object becomes the icon of my current action, if it has an ID.
+        cXObject *object = GetObjectFromID(elem->mStackObject);
+        OBJECT_ERROR_CHECK(object, 0xa);
+        cXPerson *person = GetPerson();
+        OBJECT_ERROR_CHECK(person, 0x1c);
+        Interaction *action = person->GetCurrentAction();
+        if (action->HasID())
+            action->SetIconObject(object);
+        break;
+    }
+    case 0x04: {
+        // Moves the stack object's neighbour into family t1, or the selected family when t1 is
+        // 0 or less, making family t1 if it doesn't exist. Person data 0x2D keeps the old
+        // family (0x28). A Sim of type 0 then takes neighbour t0's last name.
+        result = 0;
+        Neighborhood *neighborhood = GetNeighborhood();
+        Neighbor *neighbor = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+        OBJECT_ERROR_CHECK(neighbor, 0x38);
+        s16 oldFamily = neighbor->mPersonData[0x28];
+        Family *family;
+        if (mTemps[1] > 0) {
+            family = neighborhood->GetFamilyInline(mTemps[1]);
+            if (!family)
+                family = neighborhood->MakeNewFreePlayFamily(mTemps[1]);
+        } else {
+            family = neighborhood->GetFamilyInline(_gd.GetSelectedFamily());
+        }
+        if (neighbor->mPersonData[0x28] != 0 && neighborhood->RemoveFromFamily(neighbor, true))
+            break;
+        if (neighborhood->AddToFamily(neighbor, family))
+            break;
+        neighbor->mPersonData[0x2d] = oldFamily;
+        Neighbor *from = neighborhood->FindNeighborByIDInline(mTemps[0]);
+        cXPerson *person = neighbor->mPerson;
+        result = 1;
+        if (from && person && !person->GetSimType()) {
+            neighbor->mSelector->SetUserLastName(from->mSelector->GetUserLastName());
+            CasSimDescription *description = person->GetNonCostumedSimDescription();
+            if (description)
+                ewcsncpy(description->lastName, from->mSelector->GetUserLastName().c_str(), 0x20);
+        }
+        break;
+    }
+    case 0x05: {
+        // Merges family t0 into the selected family: its funds, then its inventory.
+        result = 0;
+        Neighborhood *neighborhood = GetNeighborhood();
+        Family *from = neighborhood->GetFamilyInline(mTemps[0]);
+        Family *to = neighborhood->GetFamilyInline(_gd.GetSelectedFamily());
+        if (to && from) {
+            result = 1;
+            GetSimulator()->AddFunds(from->GetFunds());
+            to->GetInventory()->MergeInventories(from->GetInventory());
+        }
+        break;
+    }
+    case 0x06: {
+        // Takes the stack object's neighbour out of its family. True only if that worked.
+        Neighborhood *neighborhood = GetNeighborhood();
+        Neighbor *neighbor = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+        OBJECT_ERROR_CHECK(neighbor, 0x38);
+        result = 0;
+        if (!neighborhood->RemoveFromFamily(neighbor, false))
+            result = 1;
+        break;
+    }
+    case 0x08:
+        // t0 non-zero starts a loading screen. Otherwise 4, run again, until the iris is in.
+        if (mTemps[0] != 0) {
+            LoadingScreenStateMachine::StartingLoad(6);
+            return 1;
+        }
+        if (!LoadingScreenStateMachine::LoadInProgress()) {
+            LoadingScreenStateMachine::StartingLoad(6);
+            return 4;
+        }
+        if (!LoadingScreenStateMachine::GetSingleton()->IsIrisTransitionInComplete())
+            return 4;
+        return 1;
+    case 0x09:
+        _gd.mLoadInfo->field_0x10 = 0;
+        LoadingScreenStateMachine::LoadFinishing();
+        break;
+    case 0x25:
+        _globals.field_0x4c4 = mTemps[0] != 0;
+        break;
+    case 0x0a:
+        // Buy and build stay off while I'm on this list.
+        DisableBuyAndBuild(mModule, this);
+        break;
+    case 0x0b:
+        EnableBuyAndBuild(mModule, this);
+        break;
+    case 0x0d: {
+        // ObjectModule::CleanupPeople, inlined: every other person forgets the stack object.
+        cXObject *object = GetObjectFromID(elem->mStackObject);
+        if (!object) {
+            OBJECT_ERROR_CHECK(false, 0xa);
+        }
+        eastl::vector<cXPerson *, eastl::allocator> &people = mModule->mPeople;
+        for (cXPerson **it = people.begin(); it != people.end(); ++it) {
+            if ((cXObject *)*it != object)
+                (*it)->Cleanup(object);
+        }
+        break;
+    }
+    case 0x0e:
+        GetSimulator()->mGlobals[0x1f] = mTemps[0];
+        break;
+    case 0x0f: {
+        // Person data 0x20 = t0, 0x21 = 0. With t0 of 0, the Sim's rectangle is worked out again.
+        cXPerson *person = GetPerson();
+        OBJECT_ERROR_CHECK(person, 0x1c);
+        person->SetPersonData(0x20, mTemps[0]);
+        person->SetPersonData(0x21, 0);
+        if (mTemps[0] == 0)
+            person->ComputeRect(person->GetLocationRef(), (FTileRect *)person->mRect);
+        break;
+    }
+    case 0x10: {
+        // t0 0 and 1 start sequences 2 and 3, and t0 becomes -1 or -2 while it waits on them.
+        SequenceManager *sequences = SequenceManager::GetSingleton();
+        if (mTemps[0] == 0) {
+            sequences->StartSequence((SequenceManager::eSequenceType)2);
+            mTemps[0] = -1;
+            return 4;
+        }
+        if (mTemps[0] == 1) {
+            sequences->StartSequence((SequenceManager::eSequenceType)3);
+            mTemps[0] = -2;
+            return 4;
+        }
+        if (mTemps[0] == -1) {
+            if (sequences->IsSequenceComplete((SequenceManager::eSequenceType)2)) {
+                mTemps[0] = 0;
+                return 1;
+            }
+            if (sequences->IsSequenceStarted((SequenceManager::eSequenceType)2))
+                return 4;
+            return 1;
+        }
+        if (mTemps[0] == -2) {
+            if (sequences->IsSequenceComplete((SequenceManager::eSequenceType)3)) {
+                mTemps[0] = 1;
+                return 1;
+            }
+            if (sequences->IsSequenceStarted((SequenceManager::eSequenceType)3))
+                return 4;
+            return 1;
+        }
+        if (mTemps[0] == 2)
+            _gd.mHud->TriggerGameOver();
+        return 1;
+    }
+    case 0x15:
+        GetSimulator()->mGlobals[0x27] = mTemps[0];
+        break;
+    case 0x18:
+        GetSimulator()->mGlobals[0x29] = mTemps[0] == 0;
+        break;
+    case 0x19:
+        GetSimulator()->mGlobals[0x28] = mTemps[0];
+        break;
+    case 0x1a:
+        ChangeSelectedSimL();
+        break;
+    case 0x1f: {
+        // Select Sim t0. True if it's now the player's Sim.
+        cXObject *object = GetObjectModule()->GetObjectFromIDInline(mTemps[0]);
+        if (!object)
+            return 0;
+        cXPerson *person = object->GetPerson();
+        if (!person)
+            return 0;
+        gEORGlobals->SetSelectedPerson(person);
+        return person == gEORGlobals->mPlayerPerson;
+    }
+    case 0x21:
+        return ShowAllObjectDialogs(elem, primParam);
+    case 0x22: {
+        // Opens Create-a-Sim for neighbour t2 on lot t1 (flow state 8), keeping the selected
+        // Sim to come back to. While the HUD's transition target is 3 it returns 2.
+        s16 selected = 0;
+        if (_globals.mPlayerPerson)
+            selected = _globals.mPlayerPerson->GetNeighborID();
+        HUDTarget *hud = _gd.mHudTarget;
+        if (!hud)
+            break;
+        if (hud->GetHudTransitionTarget() == 3) {
+            result = 2;
+            break;
+        }
+        UIDB::UIDBSetInt("CAS_mode", 1);
+        UIDB::UIDBSetInt("CAS_neighborID", mTemps[2]);
+        UIDB::UIDBSetInt("CAS_CurrentGameTime", GetSimulator()->mGameTime);
+        UIDB::UIDBSetInt("CAS_lotnumber", mTemps[1]);
+        UIDB::UIDBSetInt("PlayerNumber", 0);
+        StateMachineFlow::SetFlowRequest((StateMachineFlow::eGameState)8);
+        _gd.SetInitialSimSelection(selected);
+        break;
+    }
+    case 0x26: {
+        // t1 = 1 if object t0 is in the world. False if there's no object.
+        cXObject *object = GetObjectModule()->GetObjectFromIDInline(mTemps[0]);
+        if (!object) {
+            result = 0;
+            break;
+        }
+        if (object->IsInWorld())
+            mTemps[1] = 1;
+        else
+            mTemps[1] = 0;
+        result = 1;
+        break;
+    }
+    case 0x28:
+        mTemps[0] = 0;
+        result = 1;
+        break;
+    case 0x29:
+        // Only checks: t0 above 1 is error 0x14, and not being a Sim is error 0x4C.
+        OBJECT_ERROR_CHECK((u16)mTemps[0] < 2, 0x14);
+        OBJECT_ERROR_CHECK(GetPerson(), 0x4c);
+        result = 1;
+        break;
+    case 0x2a:
+        mTemps[0] = !_globals.mCameraDirector->IsInControl();
+        result = 1;
+        break;
+    case 0x2b: {
+        int count = 0;
+        if (_gd.mHud)
+            count = _gd.mHud->CountModelessDialogs();
+        mTemps[0] = count;
+        result = 1;
+        break;
+    }
+    case 0x2c:
+        result = 1;
+        if (_gd.mHud)
+            _gd.mHud->CleanupModelessDialogs();
+        break;
+    case 0x2d: {
+        // Rumble, for the player's Sim only, from the stack object. t0 of -1 stops it.
+        u16 source = elem->mStackObject;
+        if (!source)
+            break;
+        cXPerson *player = gEORGlobals->mPlayerPerson;
+        if (!player)
+            break;
+        if (player->mESimPerson != mESimPerson)
+            break;
+        InteractorModule::DirectInteractor *interactor =
+            InteractorModule::InteractorManager::GetSingleton()->GetPlayerInteractor(0, -1);
+        if (!interactor)
+            break;
+        if (mTemps[0] == -1) {
+            interactor->StopRumble();
+            break;
+        }
+        cXObject *object = GetObjectFromID(source);
+        if (object)
+            interactor->StartRumble(object);
+        break;
+    }
+    case 0x30: {
+        // Aspiration points: neighbourhood variables 0xC and 0xD hold them as low and high
+        // halves of ten thousand. t0 is added, up to 999,999.
+        Neighborhood *neighbors = GetNeighborhood();
+        int total = neighbors->mVars[0xd] * 10000 + neighbors->mVars[0xc] + mTemps[0];
+        if (total > 999999)
+            total = 999999;
+        neighbors->mVars[0xc] = total % 10000;
+        neighbors->mVars[0xd] = total / 10000;
+        break;
+    }
+    case 0x32:
+        result = 1;
+        if (_globals.mOptionsRecon) {
+            if (_globals.mOptionsRecon->GetIsMusicGenreEnabled(mTemps[7]))
+                mTemps[7] = 1;
+            else
+                mTemps[7] = 0;
+            result = 1;
+        }
+        break;
+    case 0x33: {
+        // Blocks routing (tile flag 0x10) over t1 by t2 tiles from the stack object's tile, along
+        // its direction (object variable 1), or clears the flag when t0 is 0. The bounds test
+        // swaps x and y for directions 2 and 6, as the game's does; the loop doesn't.
+        cXObject *object = gObjectModule->GetObjectFromIDInline(elem->mStackObject);
+        OBJECT_ERROR_CHECK(object, 0x33);
+        bool block = mTemps[0] != 0;
+        int width = mTemps[1];
+        int depth = mTemps[2];
+        OBJECT_ERROR_CHECK(width > 0 && depth > 0, 0x14);
+        result = 0;
+        int direction = object->mVars[1];
+        CTilePt start;
+        start.mX = object->mTileX >> 4;
+        start.mLevel = 0;
+        start.mY = object->mTileY >> 4;
+        int farX = 0;
+        int farY = 0;
+        switch (direction) {
+        case 0:
+            farX = start.mX - 1 + width;
+            farY = start.mY - 1 + depth;
+            break;
+        case 2:
+            farX = start.mY + 1 - depth;
+            farY = start.mX - 1 + width;
+            break;
+        case 4:
+            farX = start.mX + 1 - width;
+            farY = start.mY + 1 - depth;
+            break;
+        case 6:
+            farX = start.mY - 1 + depth;
+            farY = start.mX + 1 - width;
+            break;
+        }
+        OBJECT_ERROR_CHECK((object->mTileX >> 4) > 0 && (object->mTileY >> 4) > 0 && farX >= 0
+                               && farX <= gFixedWorld->GetXSize() && farY >= 0
+                               && farY <= gFixedWorld->GetYSize(),
+                           0x5e);
+        for (int i = 0; i < width; i++) {
+            for (int j = 0; j < depth; j++) {
+                int x = start.mX;
+                int y = start.mY;
+                switch (direction) {
+                case 0:
+                    x += i;
+                    y += j;
+                    break;
+                case 2:
+                    x -= j;
+                    y += i;
+                    break;
+                case 4:
+                    x -= i;
+                    y -= j;
+                    break;
+                case 6:
+                    x += j;
+                    y -= i;
+                    break;
+                }
+                CTilePt tile(x, y, 0);
+                s8 flags = gFixedWorld->GetFlags(tile) & ~0x10;
+                if (block)
+                    flags |= 0x10;
+                gFixedWorld->SetFlags(tile, flags);
+            }
+        }
+        result = 1;
+        break;
+    }
+    case 0x34:
+        mTemps[2] = 0;
+        break;
+    case 0x35: {
+        // Not used by any tree: t0 = the stack object's GUID modulo 0xF08A.
+        cXObject *object = GetObjectModule()->GetObjectFromIDInline(elem->mStackObject);
+        OBJECT_ERROR_CHECK(object, 0x33);
+        mTemps[0] = object->mSelector->GetGUID() % 0xf08a;
+        break;
+    }
+    case 0x36:
+        // Every value of t7 returns 0.
+        if (mTemps[7] == 0)
+            return 0;
+        if (mTemps[7] == 1)
+            return 0;
+        return 0;
+    case 0x37: {
+        // Neighbour t0 joins the first family, numbered from 1, that doesn't exist or isn't in
+        // use, up to the number that may change; t1 = its number. False if every one is taken.
+        result = 0;
+        Neighbor *neighbor = GetNeighborhood()->FindNeighborByIDInline(mTemps[0]);
+        OBJECT_ERROR_CHECK(neighbor, 0x38);
+        s16 count = NghResFile::GetNumModifiableFamilies();
+        s16 number = 1;
+        while (number <= count) {
+            Family *family = GetNeighborhood()->GetFamilyInline(number);
+            if (!family || !family->slot7())
+                break;
+            number++;
+        }
+        if (number > count)
+            break;
+        Family *family = GetNeighborhood()->GetFamilyInline(number);
+        if (!family)
+            family = GetNeighborhood()->MakeNewFreePlayFamily(number);
+        GetNeighborhood()->AddToFamily(neighbor, family);
+        mTemps[1] = number;
+        result = 1;
+        break;
+    }
+    case 0x39: {
+        // Drops the catalog resources cached for the stack object and its master selector, and
+        // every object's pointer to either.
+        ObjectModule *module = gObjectModule;
+        cXObject *object = module->GetObjectFromIDInline(elem->mStackObject);
+        CatalogResource *objectResource = object->mCachedCatalogResource;
+        ObjSelector *master = object->mSelector->GetMasterSelector();
+        CatalogResource *selectorResource = master->mCachedCatalogResource;
+        int count = gObjectModule->GetNumObjects();
+        for (int i = 0; i < count; i++) {
+            cXObject *other = gObjectModule->GetObject(i);
+            if (other && other->mCachedCatalogResource) {
+                if (other->mCachedCatalogResource == selectorResource)
+                    other->mCachedCatalogResource = 0;
+                else if (other->mCachedCatalogResource == objectResource)
+                    other->mCachedCatalogResource = 0;
+            }
+        }
+        master->mCachedCatalogResource = 0;
+        if (selectorResource)
+            CatalogResource::DestroyInstance(selectorResource);
+        if (objectResource != selectorResource && objectResource)
+            CatalogResource::DestroyInstance(objectResource);
+        result = 1;
+        break;
+    }
+    case 0x3a: {
+        // Adds (t2 = 1) or removes (t2 = 0) the wall between the tiles of objects t0 and t1.
+        cXObject *first = gObjectModule->GetObjectFromIDInline(mTemps[0]);
+        cXObject *second = gObjectModule->GetObjectFromIDInline(mTemps[1]);
+        OBJECT_ERROR_CHECK(first && second, 0x33);
+        CTilePt firstTile(first->mTileX >> 4, first->mTileY >> 4, first->mLevel);
+        CTilePt secondTile(second->mTileX >> 4, second->mTileY >> 4, second->mLevel);
+        int firstSegment;
+        int secondSegment;
+        OBJECT_ERROR_CHECK(TileWalls::GetWallSegsBetweenTiles(&firstTile, &secondTile, firstSegment, secondSegment),
+                           0x60);
+        if (mTemps[2] == 1) {
+            cFixedWorld *world = gFixedWorld;
+            TileWalls walls = world->GetWall(firstTile);
+            if (walls.HasWall(firstSegment)) {
+                result = 0;
+                break;
+            }
+            walls.AddWall(firstSegment);
+            if (IsDoorInline(first))
+                walls.SetStyle(3, firstSegment);
+            else if (IsGateInline(first))
+                walls.SetStyle(0x11, firstSegment);
+            else
+                walls.SetStyle(1, firstSegment);
+            walls.SetPattern(0, firstSegment, 0);
+            result = 1;
+            world->SetWall(firstTile, walls);
+            TileWalls other = world->GetWall(secondTile);
+            other.AddWall(secondSegment);
+            other.SetPattern(0, secondSegment, 0);
+            world->SetWall(secondTile, other);
+            world->CommitWallChanges();
+        } else if (mTemps[2] == 0) {
+            cFixedWorld *world = gFixedWorld;
+            TileWalls walls = world->GetWall(firstTile);
+            if (walls.HasWall(firstSegment)) {
+                result = 1;
+                ERoom::DeleteWallAtTile(firstTile, walls, firstSegment);
+                world->CommitWallChanges();
+            } else {
+                result = 0;
+            }
+        } else {
+            OBJECT_ERROR_CHECK(false, 0x61);
+        }
+        break;
+    }
+    case 0x12:
+        return _gd.mBuildBuyMode != 0;
+    case 0x3b:
+        PlanManager::GetInstance()->ToggleAllPlansInUI();
+        break;
+    case 0x3e:
+        PlanManager::GetInstance()->ToggleIgnoreRequirements();
+        break;
+    case 0x3f:
+        PlanManager::GetInstance()->ForceAllPlansToUnlock();
+        break;
+    case 0x3c: {
+        // t1 = the first word of the stack object's plan, or 0 if it has none. A multi-tile
+        // object tries its master's GUID, then its interaction leader's, then each part's.
+        cXObject *object = GetObjectFromID(elem->mStackObject);
+        OBJECT_ERROR_CHECK(object, 0x17);
+        Plan *plan;
+        if (object->IsMultiTile()) {
+            plan = PlanManager::GetInstance()->GetPlanByGUID(
+                object->mSelector->GetMasterSelector()->GetGUID());
+            if (!plan)
+                plan = PlanManager::GetInstance()->GetPlanByGUID(
+                    object->GetInteractionLeader()->mSelector->GetGUID());
+            if (!plan) {
+                cXMTObject *part = object->GetMTObject();
+                if (part) {
+                    part = part->GetFirstMultiTileObject();
+                    while (part && !plan) {
+                        plan = PlanManager::GetInstance()->GetPlanByGUID(part->mSelector->GetGUID());
+                        part = part->mNextPart;
+                    }
+                }
+            }
+        } else {
+            plan = PlanManager::GetInstance()->GetPlanByGUID(object->mSelector->GetGUID());
+        }
+        if (plan)
+            mTemps[1] = plan->field_0x0;
+        else
+            mTemps[1] = 0;
+        break;
+    }
+    case 0x3d: {
+        // t1 = the plan made from token t0. No such plan is error 0x6B.
+        Plan *plan = PlanManager::GetInstance()->GetPlanByTokenID(mTemps[0]);
+        OBJECT_ERROR_CHECK(plan, 0x6b);
+        mTemps[1] = plan->field_0x0;
+        break;
+    }
+    case 0x40: {
+        // t1 = the last lot on neighbour t0's way to this lot, or 0 when they're already here
+        // or have no lot (both true). False if there's no way.
+        s16 id = mTemps[0];
+        mTemps[1] = 0;
+        Neighbor *neighbor = GetNeighborhood()->FindNeighborByIDInline(id);
+        OBJECT_ERROR_CHECK(neighbor, 0x38);
+        float distance = 0;
+        s16 steps = 0;
+        u8 path[30];
+        memset(path, 0, sizeof(path));
+        s8 from = neighbor->mPersonData[0x22];
+        s8 to = _globals.mHouse->GetLotNum();
+        if (from == to || from == -1) {
+            mTemps[1] = 0;
+            return 1;
+        }
+        if (!LotManager::Instance()->CanSimGetToLot(id, from, to, steps, distance, path))
+            return 0;
+        int length = 0;
+        while (length < 30 && path[length])
+            length++;
+        if (length == 30 || length == 0)
+            return 0;
+        mTemps[1] = path[length - 1];
+        return 1;
+    }
+    case 0x41: {
+        // True if there's a tribe and t0 is an InventoryTokens ID. It doesn't ask whether the
+        // tribe has the token.
+        InventoryItems *tribe = InventoryItems::GetTribeInventory();
+        result = 0;
+        if (tribe) {
+            if (InventoryItems::GetTokenFromID(mTemps[0]))
+                result = 1;
+            else
+                result = 0;
+        }
+        break;
+    }
+    case 0x42: {
+        s16 value = GetNeighborhood()->mGoals.GetGoalValue(mTemps[0]);
+        if (value) {
+            mTemps[1] = value;
+            break;
+        }
+    }
+    case 0x38:
+        result = 0;
+        break;
+    case 0x11:
+        if (_gd.mHud && _gd.mHud->mActionMenu)
+            _gd.mHud->mActionMenu->SetupHarvestCount(mTemps[0]);
+        break;
+    case 0x07: {
+        GoalAndUnlockData *goals = &GetNeighborhood()->mGoals;
+        if (goals)
+            goals->Slot20();
+        break;
+    }
+    case 0x13: {
+        InventoryItems *tribe = InventoryItems::GetTribeInventory();
+        if (tribe)
+            tribe->GimmeAllFood(mTemps[0]);
+        break;
+    }
+    case 0x17: {
+        LotManager *lots = LotManager::Instance();
+        if (lots)
+            lots->UnlockEverything();
+        break;
+    }
+    case 0x14: {
+        InventoryItems *tribe = InventoryItems::GetTribeInventory();
+        if (tribe)
+            tribe->GimmeAllResources(mTemps[0]);
+        break;
+    }
+    case 0x0c: {
+        InventoryItems *tribe = InventoryItems::GetTribeInventory();
+        if (tribe)
+            tribe->GimmeAllTools();
+        break;
+    }
+    case 0x24: {
+        InventoryItems *tribe = InventoryItems::GetTribeInventory();
+        if (tribe)
+            tribe->Replenish(mTemps[0]);
+        break;
+    }
+    case 0x27: {
+        // AutoFood picks a food from t1, t2 and t3. True if it found one.
+        AutoFood food;
+        if (food.AutonomousFoodSelection(mTemps[1], mTemps[2], mTemps[3]))
+            return 1;
+        return 0;
+    }
+    case 0x16:
+    case 0x2e:
+    case 0x2f:
+    case 0x31:
+        break;
+    default:
+        OBJECT_ERROR_CHECK(false, 0x2a);
+    }
+    return result;
 }
 #endif

@@ -32,7 +32,7 @@ import verify  # noqa: E402  (shares the compiler flags and the Wine sandbox)
 
 WORK = verify.BUILD / 'rebuild'
 UNLINKED = '__unlinked'
-SHT_PROGBITS, STT_SECTION = 1, 3
+SHT_PROGBITS, STT_OBJECT, STT_SECTION = 1, 1, 3
 R_MIPS_NONE, R_MIPS_HI16, R_MIPS_LO16 = 0, 5, 6
 BINUTILS_TIMEOUT = 600  # seconds; assembling the whole game takes about 40
 # A line of split assembly: /* file offset, address, bytes */ mnemonic operands
@@ -114,36 +114,39 @@ def resolve_local_data(source, dest, addresses, slus):
             if name not in addresses:
                 continue
             base = addresses[name]
-            sites = []  # (position of the relocation entry, offset in the function, type)
+            # (position of the relocation entry, offset in the function, type, where the
+            # symbol starts in .rodata). A literal is reached through the section's symbol; a
+            # named constant, such as a static const array, through its own.
+            sites = []
             for pos in range(rel['offset'], rel['offset'] + rel['size'], 8):
                 r_offset, r_info = struct.unpack_from('<II', data, pos)
                 sym = symbols[r_info >> 8]
-                if sym[3] == STT_SECTION and sym[4] == ro_index:
-                    sites.append((pos, r_offset, r_info & 0xFF))
-            if not sites or any(kind not in (R_MIPS_HI16, R_MIPS_LO16) for _, _, kind in sites):
+                if sym[4] == ro_index and sym[3] in (STT_SECTION, STT_OBJECT):
+                    sites.append((pos, r_offset, r_info & 0xFF, sym[1] if sym[3] == STT_OBJECT else 0))
+            if not sites or any(kind not in (R_MIPS_HI16, R_MIPS_LO16) for _, _, kind, _ in sites):
                 continue
             ours = lambda offset: struct.unpack_from('<I', data, target['offset'] + offset)[0]
-            words = {offset: game_bytes(slus, base + offset, 4) for _, offset, _ in sites}
+            words = {offset: game_bytes(slus, base + offset, 4) for _, offset, _, _ in sites}
             if None in words.values():
                 continue
             game = {offset: struct.unpack('<I', w)[0] for offset, w in words.items()}
-            highs = {game[o] & 0xFFFF for _, o, kind in sites if kind == R_MIPS_HI16}
+            highs = {game[o] & 0xFFFF for _, o, kind, _ in sites if kind == R_MIPS_HI16}
             targets, ok = set(), True
-            for _, offset, kind in sites:
+            for _, offset, kind, start in sites:
                 if kind == R_MIPS_HI16:
                     ok = ok and ours(offset) & 0xFFFF == 0  # our .rodata is far smaller than 64 KB
                     continue
                 fits = {t for t in ((h << 16) + sext16(game[offset] & 0xFFFF) for h in highs)
-                        if same_data(obj, ro_bytes, ro_relocs, symbols, sext16(ours(offset) & 0xFFFF), slus, t,
+                        if same_data(obj, ro_bytes, ro_relocs, symbols, start + sext16(ours(offset) & 0xFFFF), slus, t,
                                      rel['info'], base)}
                 ok = ok and len(fits) == 1
                 targets |= fits
             # every lui must be the top half of an address that was checked
             ok = ok and all(any((t + 0x8000) >> 16 & 0xFFFF == game[o] & 0xFFFF for t in targets)
-                            for _, o, kind in sites if kind == R_MIPS_HI16)
+                            for _, o, kind, _ in sites if kind == R_MIPS_HI16)
             if not ok:
                 continue
-            for pos, offset, _ in sites:
+            for pos, offset, _, _ in sites:
                 struct.pack_into('<I', data, target['offset'] + offset, ours(offset) & 0xFFFF0000 | game[offset] & 0xFFFF)
                 struct.pack_into('<I', data, pos + 4, R_MIPS_NONE)
             resolved.add(name)

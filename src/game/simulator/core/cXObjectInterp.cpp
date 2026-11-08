@@ -46,6 +46,15 @@ inline int fround(f32 value)
 // all agree with the game, so what follows reads the same as the game's code. What still differs:
 // - Scope 0x22: the game has a compare with 7 and a branch to the end, then v0 = 1 in a delay
 //   slot, though neither does anything. Wii has the same compare. Nothing tried here keeps it.
+//   Also tried (round 15), all dropped whole, so the REF_VALUE tail cross-jumps as before:
+//   "if (data == 7) break;", an empty inline call, and dead stores to isPerson, isNeighbor and
+//   object. Only a real side effect keeps the compare: re-storing *ref under data == 7 gives
+//   the game's compare (inverted) and +6 aligned words, but it isn't the game's code (the game's
+//   branch has no body), so it isn't used. The v0 = 1 is reorg filling the branch's delay slot
+//   from the end block, not source.
+// - The neighbour lookup: also tried (round 15) with FindNeighborByIDJoined, a separate
+//   neighbourhood local, zero set outside an inline getter, and one function-scope variable for
+//   all five lookups (worse, 2,827). None moves the copy.
 // - The neighbour lookup: the game loads into v0 and copies to the variable (lw, move) in scopes
 //   0x20, 0x26 and 0x2e, and sets zero straight into the variable. This loads straight into it.
 // - Scopes 0x34 to 0x37: the same tail as this but with v0 and v1 swapped, which stops them
@@ -53,6 +62,23 @@ inline int fround(f32 value)
 // - Scope 0x1a: the game retests the constants pointer in the else branch; here that's folded.
 // - Scope 0x2a: the game keeps a null test on the table that does nothing, with the row loop's
 //   exit block placed inside it.
+// Parked (round 16). The 188 words still off, by pattern, with the game addresses of the dd hunks
+// (dd.py's own trailing "insert" of 25 words at 0x238860 is the next function, not a difference):
+// 1. Tail merging, about 30 words: scopes 0x34 to 0x37's person data tails. The game keeps a
+//    copy in each scope (0x2383CC, 0x23847C, 0x238538, 0x23864C, 0x238658); ours shares one,
+//    and the error blocks around them fill their delay slots differently (0x2383A4 to 0x2383BC).
+//    The v0/v1 swap noted above is what lets ours merge.
+// 2. A branch that dies late, about 10 words: scope 0x22's compare with 7 (0x235A90, 0x235AB8).
+// 3. Register allocation, 3 words: the neighbour lookups load into v0 and copy (0x23651C,
+//    0x2366F4, 0x2375A0).
+// 4. An inlined helper, about 6 words: LotManager::IsTransitionOpen's "both" test selects with
+//    movn from 0 where ours uses movz from 1, and HasTransitionBeenUsed's bool is normalised
+//    after the load (0x237DF8 to 0x237E9C). Lot.h's shapes match other functions; three other
+//    shapes tried here were equal or worse.
+// 5. A REF_VALUE tail shared where the game repeats it, about 4 words (0x236288, 0x236298).
+// 6. Alignment nops, about 15 single words: they follow from the size differences above and
+//    should go once those are fixed. 0x2371A8's lui is a relocation shown unresolved, not code.
+// The scope 0x1a and 0x2a notes above weren't seen as separate hunks this round.
 // Reads one operand. scope picks where it lives and data says which one (bhav.md has the list).
 // value gets the number. ref gets its address when it can be written through, and floatRef the
 // address of a motive, which is a float underneath.
@@ -996,6 +1022,11 @@ inline void OnEdithSetFlagField1(int mask, bool wasSet, bool isSet)
 // 618 of the 632 words line up, and the size is right. What's left is alignment nops: after each
 // failed float test the game has no nop where this has one, and it has one at the end of the
 // if/else instead. The checks are nested in an if, which gives the branch-likely and registers.
+// In the game the float code's label sits straight after the error block's jump with no padding,
+// and the join after it is padded; here it's the other way round. Tried on case 0x0b with no
+// change: float first with the error in else, a plain check, else-if, the read in both arms,
+// the 1.0f in a local, a pointer copy, breaking out of the else, and reading through a u16 or a
+// copied pointer. Like TryCallNamedTree, this looks like the delay slot filler, not the source.
 // Primitive 2. Reads two operands and compares or changes the left one. Motives are floats
 // underneath, so where the left operand has no s16 to write through it uses the float.
 long cXObject::TryExpression(ExpressionParam *param)

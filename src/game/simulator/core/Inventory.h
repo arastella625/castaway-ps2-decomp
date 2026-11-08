@@ -5,6 +5,7 @@
 #include "common/ERQuickdata.h"
 #include "common/eastl.h"
 #include "common/types.h"
+#include "game/simulator/core/ClothingItem.h"
 #include "game/simulator/core/InventoryItems.h"
 #include "game/simulator/core/Neighborhood.h"
 #include "game/simulator/core2/cXPerson.h"
@@ -111,6 +112,37 @@ inline const InventoryTokens *InventoryItems::GetTokenFromID(s16 id)
     return 0;
 }
 
+// The row of the "ClothingItems" table with this ID, or null. Inlined on PS2; the name is ours.
+inline const ClothingItemsRow *InventoryItems::GetClothingItemsRow(s16 id)
+{
+    if (id == 0)
+        return 0;
+    const ERQTable *table = GetObjectFolder()->mDatabase->GetTable("ClothingItems");
+    if (table == 0)
+        return 0;
+    for (u32 i = 0; i < table->count; i++) {
+        if (((const ClothingItemsRow *)table->rows)[i].mID == id)
+            return &((const ClothingItemsRow *)table->rows)[i];
+    }
+    return 0;
+}
+
+// Wii: GetTokenIDFromGUID. The token whose row's first word is the GUID, or 0.
+inline s16 InventoryItems::GetTokenIDFromGUID(int guid)
+{
+    if (guid == 0)
+        return 0;
+    const ERQTable *table = GetObjectFolder()->mDatabase->GetTable("InventoryTokens");
+    if (table == 0)
+        return 0;
+    for (u32 i = 0; i < table->count; i++) {
+        const InventoryTokens *token = &((const InventoryTokens *)table->rows)[i];
+        if (*(const int *)&token->field_0x0 == guid)
+            return token->mID;
+    }
+    return 0;
+}
+
 inline InventoryItems *InventoryItems::GetTribeInventory()
 {
     cXPerson *person = _globals.mPlayerPerson;
@@ -124,7 +156,7 @@ inline int InventoryItems::GetTokenItemIndex(s16 id)
     int index = 0;
     for (InventoryItem **i = mItems.begin(); i != mItems.end(); ++i, ++index) {
         InventoryItem *item = *i;
-        if (item->GetKind() == 2 && item->GetID() == id)
+        if (item->GetCategory() == 2 && item->GetID() == id)
             return index;
     }
     return -1;

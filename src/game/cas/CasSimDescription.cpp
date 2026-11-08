@@ -533,8 +533,7 @@ u8 CasSimDescription::GetClothingSetUIIndex(Character::eBodyPart part) const
 }
 
 // Makes an inventory item for each piece of clothing the sim wears, worn down by `count`
-// steps first. ClothingItem derives from InventoryItem, which isn't declared yet, hence
-// the cast.
+// steps first.
 void CasSimDescription::CreateWornClothingItemsInInventory(InventoryItems *items, s16 neighborID, int count)
 {
     if (items != 0) {
@@ -548,7 +547,7 @@ void CasSimDescription::CreateWornClothingItemsInInventory(InventoryItems *items
                     for (int i = 0; i < count; i++)
                         bodyPart->Degrade();
                     ClothingItem *item = new ClothingItem(id, male);
-                    items->AddItem((InventoryItem *)item);
+                    items->AddItem(item);
                     bodyPart->SetClothingItem(item);
                     item->SetNeighborID(neighborID);
                     item->CopyFromSimBodyPart(bodyPart);

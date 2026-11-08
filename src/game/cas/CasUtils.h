@@ -6,6 +6,7 @@
 #include "common/ERQuickdata.h"
 #include "common/types.h"
 #include "game/cas/CasSimDescription.h"
+#include "game/UIDB.h"
 
 // The function at 0x3D9930. Ghidra's name list calls it EChecksum::ComputeSymbol; the
 // parameter types are read from its callers.
@@ -22,11 +23,6 @@ struct GlobalData {
 };
 extern GlobalData _gd;
 
-// Wii: UIDBGetInt__4UIDBFPCc. Reads a named integer from the UI database.
-class UIDB {
-public:
-    static int UIDBGetInt(const char *name);
-};
 
 namespace Sim {
 
@@ -53,6 +49,7 @@ public:
     static Character::eBodyPart GetS2CEquivalentBodyPart(Character::eBodyPart part);
     static u8 GetClothingSetIndexByName(bool a, Character::eBodyPart part, const char *name);
     static const char *GetBodyPartName(Character::eBodyPart part);
+    static Character::eBodyPart GetBodyPartByName(const char *name);
 
     // Inlined on PS2. The quickdata is loaded on first use (0x2A2AF469 is its resource id).
     static ERQuickdata *GetQuickdata()

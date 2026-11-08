@@ -1,6 +1,6 @@
 #include "game/simulator/core/ObjectItem.h"
 
-int ObjectItem::GetID() const
+s16 ObjectItem::GetID() const
 {
     return 0;
 }
@@ -15,7 +15,7 @@ int ObjectItem::GetCategory() const
     return 0;
 }
 
-int ObjectItem::GetCount() const
+s16 ObjectItem::GetCount() const
 {
     return 1;
 }
@@ -48,7 +48,7 @@ void ObjectItem::DecrementCount(s16 a)
 {
 }
 
-int ObjectItem::GetToken()
+const InventoryTokens *ObjectItem::GetToken()
 {
     return 0;
 }

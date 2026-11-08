@@ -2,6 +2,7 @@
 #define GAME_SIMULATOR_CORE_CLOTHINGITEM_H
 
 #include "common/types.h"
+#include "game/simulator/core/InventoryItems.h"
 
 class Family;
 class SimBodyPart;
@@ -15,32 +16,31 @@ class cXObject;
 //
 // The fields from 0x08 on, and the functions after the blank line, were added by hand from
 // the Create-a-Sim code that uses them.
-class ClothingItem {
+class ClothingItem : public InventoryItem {
 public:
-    u8 pad_0x0[0x8];
     s32 currentHitPoints; // 0x08
-    s16 field_0xc;        // 0x0c
+    s16 field_0xc;        // 0x0c  the owner's neighbour ID
     s16 field_0xe;        // 0x0e
     u32 bodyPart;         // 0x10  a Character::eBodyPart
     u8 clothingSetIndex;  // 0x14
     int isMale;           // 0x18  a bool on Wii, a word here
-    s32 isDamaged;        // 0x1c
+    s32 isDamaged;        // 0x1c  0x20 bytes in all: InventoryItems::AddClothingItem allocates that
 
     s16 GetID() const;
-    int GetCount() const;
-    int GetGuid() const;
+    s16 GetCount() const;
+    u32 GetGuid() const;
     int GetCategory() const;
-    s16 GetOwnerID() const;
+    int GetOwnerID() const;
     int GetOwnershipPoints(s16 a) const;
     int GetNumAttributes() const;
     int GetAttribute(int a);
     void SetAttribute(int a, s16 b);
     void AddAtribute(s16 a);
-    int GetStatusText();
+    s8 GetStatusText();
     void SetStatusText(s8 a);
     void IncrementCount(s16 a);
     void DecrementCount(s16 a);
-    int GetToken();
+    const InventoryTokens *GetToken();
     int GetIngredientToken();
     void LoadItemInfo(cXObject *a, Family *b, s16 c);
     int MakeObject(Family *a, s16 b);
@@ -50,8 +50,8 @@ public:
     bool IsFastTool();
     bool IsResource();
     bool CanBePlanted();
-    bool IsSeed();
-    bool CanBecomeSeed();
+    virtual bool IsSeed();        // slot 32, ClothingItem's own
+    virtual bool CanBecomeSeed(); // slot 33
     bool IsHandObject();
     bool IsClothing();
     bool IsDye();
@@ -66,6 +66,15 @@ public:
     u32 GetBodyPart() const { return bodyPart; }
     u8 GetClothingSetIndex() const { return clothingSetIndex; }
     void CopyFromSimBodyPart(SimBodyPart *part);
+};
+
+// One row of the "ClothingItems" quickdata table, 0x10 bytes. The struct's name is ours.
+struct ClothingItemsRow {
+    s16 mID;                      // 0x00
+    s16 pad_0x2;                  // 0x02
+    const char *mBodyPartName;    // 0x04  for CasUtils::GetBodyPartByName
+    const char *mClothingSetName; // 0x08
+    u32 field_0xc;                // 0x0c
 };
 
 #endif

@@ -439,11 +439,11 @@ The stack object is the frame's object ID. A call passes it on to the called tre
 | CreateObject | See its own section |
 | Dialog | `+1` icon index; `+7` bits 1-3 icon type, bits 4-6 result temp, bit 7 semi-global strings |
 | DirectionTo, DistanceTo | A flag byte (`+4`, `+2`), bit 0 set: the "from" value is the scope in the next byte and the data after it. Clear: scope 3, data 0xB. DistanceTo bit 1 returns sixteenths of a tile |
-| FindGoodLocation | `+2` flags: bit 0 start at relative object, 1 not prefer empty tiles, 2 editable tiles only, 3 orientation in temp 0, 4 prefer under roof |
+| FindGoodLocation | `+2` flags: bit 0 start at relative object, 1 not prefer empty tiles, 2 editable tiles only (tile flag 0x20 clear, as `MayEditTile` in world.md), 3 orientation in temp 0, 4 prefer under roof |
 | Grab | `+0` bit 0 parenting prop bone |
 | IdleAnimate | `+2` low byte decrement parameter, high byte sync object; `+5` flags; `+6` behaviour; `+7` literal loop count |
 | KillObject | `+2` bit 0 return immediately, bit 1 clear means clean up all |
-| PlaySound | `+4` bit 0 looped, bit 1 stack object is source, bit 7 sound in temp 0 |
+| PlaySound | **Proven, read line by line on PS2 (`0x234CF8`), not matched.** `+0` s16 the sound, or temp 0 if `+4` bit 7. Source: me if `+4` is 0xFF, else the stack object if bit 1, else me. Bit 0, looped, isn't read on PS2. The sound's `SoundInfo` is looked up in my tree's namespace, then the global one. Found, with a sound event ID (`+0x4C`) and the player ready, it queues a play of that event from the source at volume -400. **It returns 1 on every path, with no error**, found or not |
 | PushAction | See its own section |
 | Relationship | Flag byte `+4`: bit 0 clear means create, bit 1 use neighbours |
 | SetBalloon | `+0` bit 0 over stack object; `+2` index, group; `+6` type, then flags |
@@ -596,6 +596,50 @@ So a tree animates in a loop: the false branch handles an event, then comes back
 
 On an object that isn't a Sim, `cXObject::TryAnimate` (`0x234558`) is all there is: behaviour 7 uses me, 8 the stack object, and anything else is error 5. It resolves a skill for passive influence and plays nothing. It matches the game.
 
+## AnimateObject (opcode 0x37)
+
+**Proven for the primitive: read line by line on PS2 (`0x231C40`, 244 words) and the same as Wii step for step. Not matched.** What the object model does with it, `ISimsObjectModel::TryAnimateObject` (PS2 `0x332840`), is **likely**: read on Wii only. 250 uses. It animates an object that isn't a Sim, through the object's model.
+
+| Operand | Meaning |
+|---|---|
+| `+0` bit 0 | The stack object animates, not me. Missing is error 0x15 |
+| `+0` bit 1 | Ignore animation events |
+| `+0` bit 2 | Preload only |
+| `+0` bit 3 | Set a sync object, with preload only |
+| `+0` bit 4 | `+4` is an index into the object's animation table |
+| `+0` bit 5 | Run immediately |
+| `+1` u8 | The local that events go to |
+| `+2`, `+3` | Otherwise the animation is an operand: scope `+2`, data `+3` |
+| `+4` u16 | The table index, or temp 0 if it's 0 |
+| `+6` u8 | The sync object, an operand |
+
+1. The object's model is its `ISimsObjectModel`. An object without one is error 0x15.
+2. **The animation:**
+   - With `+0` bit 4, it's entry `+4` (or temp 0) of the model's animation table, and object data 0x23 = that index. An entry that doesn't exist is error 0x42.
+   - Otherwise it's the operand at `+2`/`+3` (an `InterpValue` error stops the tree), and data 0x23 = 0.
+3. **Object data 0x38 holds the animation flags.**
+   - Bit 1 = run immediately.
+   - Bit 0 = table animation.
+   - Unless it runs immediately, and only if bit 3 isn't set yet, bits 2 and 3 are set as well.
+4. **Preload only:**
+   - With bit 3, the sync object is resolved from `+6` and stored at object `+0x124` (`+0x12C` = 1, `+0x128` = 0). The stack object itself, or none, clears all three.
+   - Without bit 3, my `+0x124` is cleared.
+   - Then the model preloads the animation, and its result is the primitive's.
+5. **Otherwise:** the model's `TryAnimateObject(animation, event target)`, and its result is the primitive's. The event target is local `+1`, or none with `+0` bit 1.
+
+**The model's part, likely, from Wii:**
+
+1. If a load is pending for another animation, it's dropped. If it's pending for this one and not loaded yet: return 2.
+2. The first time, object data 0 = the animation (unless it's a table animation), and the model marks it started.
+3. **Events:** with an event target, a queued event goes into the local and it **returns 0**, the false branch, clearing flag bit 3. With none queued the local gets -1. Without a target, a queued event is just dropped.
+4. **Waiting:** unless it runs immediately, it waits while the animation plays.
+   - A loaded animation shorter than the time so far is done.
+   - Otherwise it **returns 2**, wait.
+   - An animation that isn't loaded starts loading and returns 2.
+5. **Done:** clear started and flag bit 3, **return 1**, the true branch.
+
+**For a port:** return 1 at once for "run immediately", or after the animation's length otherwise. Write -1 into the event local, since no events are delivered. Error 0x15 for a missing stack object or a missing model, and 0x42 for a table index the object doesn't have.
+
 ## Idle (opcode 0)
 
 **Proven:** `cXObject::TryIdle` byte-matches. 3 uses on the disc.
@@ -644,12 +688,21 @@ The generator is at `0x262AF0`: `state = state * 0x41C64E6D + 0x3039`, returning
 | Definition word | Meaning |
 |---|---|
 | `+0x14` s16 | Which multi-tile object in this file. 0 is a single tile |
-| `+0x16` s16 | -1 on the master. On a part, its place: y in the high byte, x in the low byte |
+| `+0x16` s16 | -1 on the master. On a part, its place: **x in the high byte (signed), y in the low byte**. Proven, see below. (This row used to have them the other way round.) |
 | `+0x1C` u32 | GUID. The master's GUID is just the master definition's GUID |
 
 1. A definition with `+0x14` of 0 is its own master.
 2. Otherwise it walks every selector for one with the same file (selector `+4`, the namespace ID), the same `+0x14`, and `+0x16` of -1.
 3. If none is found, it's its own master.
+
+**Which byte is x. Proven, PS2.** A part's tile in its object is x in the high byte of `+0x16` and y in the low byte, in the game's axes (x is the first word of a tile point, see "Which way is x" under Routing). The chain:
+
+1. **`ObjDefinition::GetMultiTileOffsets` (`0x253278`)** gives the high byte, sign-extended, as its first result and the low byte, unsigned, as its second.
+2. **`cXMTObject::Initialize` (`0x250168`)** stores those at `+0x144` and `+0x148`, and definition `+0x70` (the level) at `+0x14C`.
+3. **`AssignOffsets`**, which matches, subtracts the first part's `+0x144` and `+0x148` from each part's, and turns the result by the first part's direction into `+0x150` and `+0x154`.
+4. **`cXMTObject::Place` (`0x2000A0`)** builds a tile point from `+0x150` and `+0x154` through `0x175800`, which stores its first argument × 16 as x and its second × 16 as y. It then moves each part by it.
+
+So the high byte ends up in x. Wii's `ObjDefinition::GetSubIndex(a, b)`, `(a << 8) | (b & 0xFF)`, packs x first, y second. On a part whose object faces direction 0, the part's tile is the first part's plus (high byte, low byte) whole tiles; other directions turn that offset as `AssignOffsets` does.
 
 So there's no stored master GUID to decode. **On the disc:** 509 definitions are single tiles and 826 are in 131 multi-tile objects, and every one of the 131 has exactly one master. `+0x10` is the control, and gives 123 with one, 6 with none and 2 with two. `tools/bhav.py` reruns this, and `read_masters` returns the table from GUID to master GUID.
 
@@ -687,6 +740,151 @@ It always returns 1, the true branch, unless there's an error.
 3. `AddToKillQueue` queues it. A Sim's data is saved first through `SavePersistentData`.
 4. If I killed myself in the main simulation, and bit 0 is clear, frame `+8` becomes 1 and it returns 2, so the tree stops here. Otherwise **true**.
 
+### What happens to a killed object
+
+The primitive only queues. The object goes when the queue is flushed.
+
+**`ObjectModule::AddToKillQueue(id, cleanupAll)`**, PS2 `0x222A48`. **Proven:** read on PS2 and the same as Wii step for step.
+
+1. No such object: nothing happens.
+2. A part of a multi-tile object that isn't dynamic is swapped for the object's first part (PS2 `+0x140`), and that part's ID is queued instead.
+3. It walks up the containers (object data 0xE and 0x1A on PS2, `GetContainer` on Wii). If any container is already queued, it stops: the container takes this object with it.
+4. If the ID is already queued, it stops.
+5. `Pickup()` (PS2 vtable `+0x128`): **the object leaves the world now**, not at the flush.
+6. Misc flag 0x1000 (`+0xE4`) is set when `cleanupAll` is false and cleared when it's true.
+7. The ID is pushed onto the s16 vector at ObjectModule `+0x2040` (Wii `+0x203C`).
+
+**`KillQueueFlush`**, run by `ObjectModule::PostSim` (after each simulation step) and by `PostLoad`. **Proven on Wii, likely on PS2:** PS2's flush hasn't been located yet. It takes IDs from the front of the queue until it's empty. For each one that still exists, a dynamic multi-tile object is first removed from the dynamic list, then `ObjectModule::KillObject(id)` runs:
+
+1. The object, and every part of a multi-tile one, is marked as being killed, and Sims inside each are taken out (`ExtractContainedSims`).
+2. `Pickup()` again.
+3. With certain definition flags (`+0xB6` bits 1 to 2) and a house loaded, and not while killing everything, the house is recalculated. Types 5, 8 and 0xE also update room styles and wall posts.
+4. `KillOutOfWorldObject(id, false)`.
+5. If object data 7 was non-zero, global event 0x8E is dispatched with the object's room.
+
+**`KillOutOfWorldObject(id, partsOnly)`**, **proven on Wii, likely on PS2:**
+
+1. If the definition's `+0x9C` is set, the object's instance is removed from the tree branch manager.
+2. Every object forgets it (`ClearAwarenessOfObject`).
+3. A multi-tile part, unless called for parts: if the object has a lead (`+0x13C`), the lead is killed instead. Otherwise every part gets misc flag 0x40, and each part in the chain at `+0x138` is killed with `partsOnly` true. Then it returns.
+4. Otherwise: global event 0x83 with the ID, misc flag 0x40, and:
+   - It stops being the tutorial object if it was.
+   - If it's the selected Sim, the selection moves on to the next Sim, or to none.
+5. `CleanupPeople(object)`, so every Sim drops it, then `object->Cleanup(0)`. That runs the object's **Cleanup tree (entry point 3)** on each part, clears data 0x3E, and resets each part's stack to its main tree.
+6. **Everything in its object slots is killed too** (`KillObject` on each non-zero slot ID).
+7. It's cut from its container (`HierSever`) and removed from the object list.
+8. If the action menu had it selected, that selection is cleared.
+9. The object is deleted (destructor, vtable `+0x18` on Wii).
+10. Every remaining object's relationship matrix drops the ID.
+11. Global event 0x84 with the ID.
+
+**For a port:** queue in the primitive and pick the object up at once. Flush after the step: run Cleanup (entry point 3), kill slot contents, then remove the object and its relationships.
+
+## CallFunctionalTree (opcode 0x14)
+
+**Proven**: `TryCallFunctionalTree` (`0x22D358`) matches the game byte for byte. 79 uses. It runs one of the stack object's functional trees, an entry point, as a subroutine.
+
+| Operand | Meaning |
+|---|---|
+| `+0` s16 | Which function, below |
+| `+2` bit 0 | Change the icon: the last argument of `GosubObjectTree` |
+
+| `+0` | 0 to 9 | 0xA | 0xB | 0xC | 0xD | 0xE | 0xF | 0x10 | Others |
+|---|---|---|---|---|---|---|---|---|---|
+| Entry point | 0x12 to 0x1B | 0xE | 0x1C | 0x10 | none, false | 0x1D | 0x20 | 0x21 | none, false |
+
+1. The stack object must exist, or it's error 0x15.
+2. Its tree for that entry point comes from its selector's function table.
+3. **No tree is false**: it returns 0, and nothing runs.
+4. The tree is pushed with 8 parameters: temps 0 to 3, then four zeros. Then it **returns 3**, so the pushed tree runs now. When it returns, the node takes the true or false branch from its result, as a call does (see "Running a tree").
+5. If the push fails, it's false.
+
+So this is how entry points 14, 16, 18 to 29, 32 and 33 are reached, which "Entry points" lists as having no caller by number.
+
+## NotifyPlans (opcode 0x2F)
+
+**Proven**: `TryNotifyPlans` (`0x23CFD8`) matches the game byte for byte. 60 uses. It tells the plan system that something happened to a Sim.
+
+| Operand | Meaning |
+|---|---|
+| `+0` s8 | The notification. 0 is error 0x6A |
+| `+1` u8, `+2` s16 | An operand, scope and data: the notification's value |
+| `+4` bit 0 | The Sim is the object in temp 0, not me |
+
+1. **The Sim:**
+   - With `+4` bit 0, it's the object whose ID is in temp 0. A missing object, or one that isn't a Sim (type 2), is error 0x1C.
+   - Otherwise it's me, as a Sim.
+2. **No Sim (I'm not one) returns 1**, true, and nothing is sent.
+3. The operand is read. An error there stops the tree with error 9.
+4. A notification of 0 is error 0x6A.
+5. `PlanManager::SendNotification(notification, value, Sim)`, then **true**. What the plans do with it is in `PlanManager`, which isn't read yet.
+
+## FamilyInventory (opcode 0x46)
+
+`TryFamilyInventory`, PS2 `0x23A9D0`, about 2,000 instructions with the inventory calls inlined. Not matched.
+
+- **Proven on PS2:** the 14 operations, where each error comes from, and the operands being read through `InterpValue`.
+- **Likely, read on Wii:** the detail of each operation (`TryFamilyInventory__8cXObject`, which names everything it calls).
+
+| Operand | Meaning |
+|---|---|
+| `+0` s8 | Operation, 0 to 0xD below. Anything else does nothing and is true |
+| `+1` bits 0 to 2 | Category: 0 object, 1 ownable, 2 token, 3 clothing |
+| `+1` bit 5 | Remove an object by an object ID in `+2` |
+| `+1` bit 6 | Whose inventory: the neighbour with the stack object's ID, not the stack object's Sim |
+| `+1` bit 7 | `+2` is an item's place in the inventory (or an object ID, for an add), not a GUID |
+| `+2`, `+3` u8 | Operands, in LotTransition's one-byte code: 0 my ID, 1 the stack object's ID, 2 to 9 temps 0 to 7, 0xA to 0x11 scope 0x19 0 to 7, 0x12 to 0x19 scope 9 0 to 7, anything else the number code − 0x7E |
+| `+4` s32 | The literal: an object's or ownable's GUID, or a token's or clothing item's ID |
+
+**Whose inventory:**
+
+- With `+1` bit 6, it's the neighbour whose ID is the stack object's. None is error 0x38.
+- Otherwise it's the stack object, which must exist (error 0x15) and be a Sim (error 0x1C), through its neighbour.
+- Either way the inventory is the neighbour's family's.
+
+The result is true unless an operation below says otherwise.
+
+**A family holds at most 0x20 items that aren't tokens. Proven, PS2** (`InventoryItems::AddOwnableItem`, `0x1F9CB8`, matches). The count is the byte at the inventory's `+0`. An object or ownable add when it's full adds nothing and is false. A successful add gives the item an instance ID from a global counter, if it has none.
+
+**What each add does. Proven, PS2** (`AddObjectItem` by GUID `0x1F9798` and by object `0x1F9908`, and `AddOwnableItem` by object `0x1F9CB8`, all three match; the ownable-by-GUID add is inlined in `0x23A9D0`):
+
+| Add | Token GUID becomes a token | On-add tree | Add goals |
+|---|---|---|---|
+| Object by GUID (`+4`) | yes | no | yes |
+| Object by object (bit 7) | yes | yes | yes |
+| Ownable by GUID (`+4`) | no | no | no |
+| Ownable by object (bit 7) | no | yes | no |
+
+- **A token GUID:** before the limit is checked, the object's GUID is looked up in the first word of each `InventoryTokens` row. If a row matches, one of that row's token (ID at `+0xC`) is added instead, and the add is true even when the inventory is full. GUID 0 is never a token.
+- **The on-add tree** runs with the family, the object and the new item's place (the last one). An add by GUID has no object, so it doesn't run.
+- **The add goals** (`0x1F9AC0`, Wii `CheckForAddGoals`) get the GUID and 0. They run after the on-add tree.
+
+**Tokens and clothing. Proven, PS2** (`AddTokenItem` `0x1F9608` and `AddClothingItem` `0x1F9DB8`, both match). Neither counts toward the 0x20 limit.
+
+- **A token add** first sets the token's bit in the "ever collected" bits (token column 16), then adds the count to the token's item if the inventory has one, or makes a new item with that count. Either way the add goals get 0 and the token's ID.
+- **A clothing add** looks the ID up in the `ClothingItems` table (0x10-byte rows: ID at `+0`, body-part name at `+4`, clothing-set name at `+8`). An unknown ID adds nothing. Otherwise the set's man's piece and woman's piece **each** become an item, if the set has one for that sex. So one clothing add can add two items, and Count (op 3) goes up by two. Adding clothing ID 0x90 also unlocks goal-and-unlock entry 0x20B of kind 2. Clothing adds don't run the add goals.
+
+**Removing. Proven, PS2** (`RemoveItem` `0x1FA390`, matches; every remove in FamilyInventory goes through it). It takes a place and a count. A place past the end does nothing. If the item's count minus the count asked for is above 0, the item's count goes down by that much. Otherwise the item is deleted and taken out of the list, so every later item's place goes down by one, and if it was an object or an ownable the non-token count goes down by one. Asking for more than the item has removes it, with no error. Objects, ownables and clothing always have a count of 1.
+
+| Op | What it does |
+|---|---|
+| 0 | **Add**, by category. Object or ownable with bit 7: the object whose ID is `+2` (none is error 0x33), added as itself. Without bit 7: the GUID in `+4`. An object whose GUID is a token's adds one of that token instead (see the table above). True if the add worked. Token: ID `+2` with bit 7, else `+4`, count `+3`. Clothing: ID `+2` with bit 7, else `+4`. Tokens and clothing are always true |
+| 1 | **Remove**, by category. With bit 7, the item at place `+2`: one of it, or `+3` of a token. Otherwise: an object by GUID `+4`, or with bit 5 the object whose ID is `+2`, found by GUID (see below); an ownable by owner `+3` and GUID `+4`; a token by ID `+4`, count `+3`; clothing by ID `+4`. True if something was removed |
+| 2 | **Find**: the place of the object with GUID `+4`, the ownable with owner `+3` and GUID `+4`, the token with ID `+4`, or the clothing with ID `+4`. It's written to `+2`, -1 if there's none, and the result is true only if found |
+| 3 | **Count**: `+2` = the number of items |
+| 4 | Item at place `+2` gets a new attribute `+3` |
+| 5 | `+3` = attribute temp 0 of item `+2` |
+| 6 | `+3` = the number of attributes of item `+2` |
+| 7 | `+3` = the owner ID of item `+2`. No such item is error 0x6C |
+| 8 | `+3` = the category of item `+2`. Error 0x6C if there's none |
+| 9 | `+3` = the count of item `+2`. Error 0x6C if there's none |
+| 0xA | Item `+2` gets status text `+4` (a byte). Error 0x6C if there's none |
+| 0xB | `+2` = the number of items that aren't tokens |
+| 0xC | Item `+2`: attribute temp 0 = `+3` |
+| 0xD | `+2` = 0 for an object or ownable, or `+4` for a token or clothing item. Any other category is error 0x18 |
+
+**One quirk, Wii:** removing an object by object ID (op 1, category 0, bit 5) finds the object's place in the **tribe's** inventory, then removes that place from the target inventory. A port that keeps one inventory won't notice. With no tribe it's false. Operations 4, 5, 6 and 0xC don't check that the item exists.
+
 ## SetMotiveDelta (opcode 0x1D)
 
 **Proven**: `cXObject::TrySetMotiveDelta` and `cXPerson::TrySetMotiveDelta` match the game byte for byte. 401 uses.
@@ -708,7 +906,7 @@ The change is the value times 1/1800, so it's per tick.
 
 ## Routing
 
-What's here comes from the PS2 code where it gives an address, and the names come from the Wii build. **Proven** means read on PS2 or tested on the disc. **Likely** means read on Wii only, with PS2's function found by its calls but not compared line by line. Below `TryGotoRoutingSlot` and `TryGotoRelative`, only `RoutingSlot`'s small methods are matched: `WriteSlot`, `AllowDirection`, `SetFacingDirection`, `SetDistances`, `SetTileDistances`, `GetXOffset` and `GetYOffset`. Its constructor isn't: it writes a vtable at `0x4B7FC0`, and the name in `symbols.txt` is on `0x4B8020`, which needs sorting out with the `Slot` base class first.
+What's here comes from the PS2 code where it gives an address, and the names come from the Wii build. **Proven** means read on PS2 or tested on the disc. **Likely** means read on Wii only, with PS2's function found by its calls but not compared line by line. Below `TryGotoRoutingSlot` and `TryGotoRelative`, 19 of the 20 handlers match byte for byte: all but `WaitingForStand`, which is parked. So do `GotoRoutingSlot` itself (`0x1AA008`) and `XRoute`'s constructor, copy constructor and `Construct`; `vector<XRoute>::DoInsertValue` (`0x1D16D0`) is not matched yet. PS2 emits most of the short ones together after `Routing_Failed`, in Wii's order. `RoutingSlot`'s small methods match too: `WriteSlot`, `AllowDirection`, `SetFacingDirection`, `SetDistances`, `SetTileDistances`, `GetXOffset` and `GetYOffset`. Its constructor isn't: it writes a vtable at `0x4B7FC0`, and the name in `symbols.txt` is on `0x4B8020`, which needs sorting out with the `Slot` base class first.
 
 | Function | PS2 | Wii |
 |---|---|---|
@@ -716,8 +914,13 @@ What's here comes from the PS2 code where it gives an address, and the names com
 | `Routing_Initial` | `0x1AA6D0` | `800C5D08` |
 | `Routing_WaitingForPortal` | `0x1AA980` | `800C5F78` |
 | `Routing_Walking` | `0x1AAAC8` | `800C60DC` |
+| `Routing_WaitingForStand` | `0x1AABE0` | |
 | `Routing_Trapped` | `0x1AAC70` | `800C6320` |
+| `Routing_WaitingForSit` | `0x1DC6A0` | |
 | `Routing_Failed` | `0x1DC708` | `800C64F4` |
+| `Routing_WalkingSucceeded`, `WalkingFailed`, `WalkTerminated` | `0x1DC778`, `0x1DC7C8`, `0x1DC818` | |
+| `Routing_FoundPath`, `RouteInvalidatedWhileWalking` | `0x1DC868`, `0x1DC8D0` | |
+| `Routing_WaitingForFailureFeedback`, `ObjectDeleted`, `ObjectDeletedWhileWalking` | `0x1DC920`, `0x1DC960`, `0x1DC970` | |
 | `Routing_Succeeded` | `0x1AAE78` | `800C657C` |
 | `Routing_Waiting` | `0x1AB150` | `800C6900` |
 | `Routing_WaitingForPersonToMove` | `0x1AB278` | `800C6A38` |
@@ -974,7 +1177,7 @@ It places the **stack object**, which must exist or it's error 0x15. It returns 
 | `+1` u8 | Local holding the relative object's ID. A bad index is error 0x34, a missing object 0x17 |
 | `+2` bit 0 | Start at the relative object. Without it, the start is tile (1, 1), level 1, and there's no relative object |
 | `+2` bit 1 | Don't prefer empty tiles |
-| `+2` bit 2 | Only tiles that may be edited (tile flag 0x20) |
+| `+2` bit 2 | Only tiles that may be edited: tile flag 0x20 **clear**. (This row used to say the flag was needed; it's the other way round, proven below) |
 | `+2` bit 3 | The object's direction comes from temp 0. Anything but a Sim loses bit 0 of it |
 | `+2` bit 4 | Prefer under a roof: placement tests also want a roof, error 0xA without |
 
@@ -986,7 +1189,7 @@ It places the **stack object**, which must exist or it's error 0x15. It returns 
 | 3 | **Search along the relative object's direction** | 0x3D with no relative object |
 | 4 | **The same, direction + 2** | 0x3D |
 | 5 | **Multi-tile link:** the object turns to match the relative object, and goes where the two leaders' part offsets (definition `+0x16`) say | 0x3D, 0x15 for no leader |
-| 6 | **Random:** 10 tries at random tiles, the middle of the tile. With bit 2 it needs flag 0x20, and when preferring empty the tile must have no object | False |
+| 6 | **Random:** 10 tries at random tiles, below | False |
 | 7 | **Search along temp 1 as the direction**, modulo 8 | 0x3D |
 | 8 | **Multi-tile, every turn:** it tries directions 0, 2, 4 and 6 and keeps the nearest good tile. It tries with bit 4 if set, then without, then with stay-in-room off | False |
 
@@ -995,7 +1198,7 @@ Directions must be even or -1, or it's error 0x5F. Modes 3, 4 and 7 use `CanPlac
 **The search** (`FindGoodLocation`). It starts at the given tile, or the cursor without one, kept to 1 and size - 2, on level 1 if none is given. Stay in room is on, and it's the start tile's room. From offset (0, 0) it tests each tile:
 
 1. Out of bounds: not good, and it counts. It stops once (width + height) x 4 tiles in a row are out of bounds. Going past -0x40 on either axis also stops it.
-2. Editable only: tile flag 0x20 is needed.
+2. Editable only: tile flag 0x20 must be **clear** (`0x1E47C0`: editable is `!(flags & 0x20)`, or every tile when the object at `0x50A6A8` has `+0x414` set). **Proven, PS2.** This used to say the flag was needed.
 3. Prefer empty: a tile with an object isn't good, unless the object is type 5, type 0xE, or a type 8 without entry point 15.
 4. A tile with a diagonal wall isn't good.
 5. Stay in room: the tile must be in the start's room.
@@ -1011,6 +1214,26 @@ else y += 1;
 ```
 
 With direction 0 or 4 the offset goes 0, +1, -1, +2, -2 and so on along y. With 2 or 6 it does that along x.
+
+**Mode 6, the random tile. Proven, PS2** (`0x2255A8` to `0x225880` in `TryFindGoodLocation`, read instruction by instruction). It doesn't use the search. It makes **exactly 10 tries**, and each try is:
+
+1. **x first:** `x = GetNextRandomNumber() % xsize`, where xsize is `cFixedWorld::GetXSize` (`gFixedWorld +0x10`). If xsize is 0, x is 0 and no number is drawn. **Then y:** the same with `GetYSize` (`+0x14`). Both use unsigned modulo, so each is 0 to size - 1. Unlike the search, there's no clamping to 1..size-2, so edge tiles can be picked. x and y are kept as signed bytes.
+2. The point is the middle of the tile, (x × 16 + 8, y × 16 + 8). The level is the start's: the relative object's with `+2` bit 0, otherwise 1.
+3. **With `+2` bit 2 (editable only):** the try fails if the tile's flag 0x20 is **set**. The flag is the byte `flags[x][y]` of the table at `gFixedWorld +0x20` (its `+0xC` is the row pointers). Unlike the search, the "edit anywhere" override at `0x50A6A8 +0x414` isn't consulted.
+4. **Unless `+2` bit 1 (prefer empty, the default):** the try fails if the object-ID grid (`gObjectModule +0x30`, s16 at `[y × 64 + x]`) holds any object there. There are none of the search's exceptions for types 5, 0xE and 8. Outside 0 to 0x3F on either axis it counts as empty. This grid isn't per level.
+5. `CanPlace(point, level, 0, 0)` (vtable slot 37). False fails the try.
+6. Otherwise `Place` (slot 38) with the same arguments, and the mode succeeds. With `+2` bit 3, the direction from temp 0 is written after the place (bit 0 cleared for anything but a Sim).
+
+There's no other test: no wall check, no room check and no roof check. A failed try leaves nothing behind. After 10 failed tries the result is false.
+
+**The random numbers. Proven, PS2.** `GetNextRandomNumber` (`0x262AF0`) is the one generator. The Random primitive draws from it through `SRand` (`limit ? GetNextRandomNumber() % limit : 0`, the same shape mode 6 inlines), as do the game's other callers (39 call sites in all, mode 6's two among them). They all share one 32-bit state at `0x5112E8`:
+
+```
+state = state * 0x41C64E6D + 0x3039            (mod 2^32)
+result = ((u64)old_state * 0x41C64E6D + 0x3039) >> 16, low 32 bits
+```
+
+So the number it returns is bits 16 to 47 of the 64-bit sum, not the new state. I checked this formula against a simulation of the instructions on 100,000 random states. Each try draws two numbers when both sizes are non-zero, so 10 failed tries move the state on by 20. `GetSRandSeed` (`0x262AD0`) and `SetSRandSeed` (`0x262AE0`) read and write the state. A recon stream saves it and restores it (`0x1BED6C` to `0x1BED88`). Likely: one other caller (`0x1EF52C`) seeds it from a call result when the simulator starts.
 
 ## Update (opcode 0x07)
 
@@ -1081,37 +1304,137 @@ The primitive keeps its state in frame `+8`, the word this page calls waiting el
 2. State 0: turn on smooth routing and find the slot. A missing stack object is error 0x35, a parameter past the frame's count is error 8, a bad slot number or `+2` value is error 0x25.
 3. Any other state: no slot is looked up, and the route already under way carries on.
 
-`GotoRoutingSlot` then runs. State 0 or 0x15 starts a route:
+`GotoRoutingSlot` (`0x1AA008`) then runs. **Proven: it matches the game byte for byte.** State 0 or 0x15 starts a route:
 
-- A multi-tile target with a TS2 routing slot is checked first: a part whose definition has `+0x3A` above 0 means the route can go ahead.
-- No object, or one that isn't in the world, returns 0.
-- The route (`XRoute`, 0xA4 bytes) goes on the Sim's list at Wii `+0x5C4`, unless the Sim is already facing the target and is there, which returns 1 at once.
+1. A TS2 slot (flag bit 17) on a multi-tile target moves the target to the first part, along the part list, whose definition has `+0x3A` above 0.
+2. No target, or one that isn't in the world (either tile coordinate below 1), returns 0, false.
+3. A new route (`XRoute`, 0xA8 bytes on PS2) is made from the Sim, the target and a copy of the slot.
+4. A ghost's copy gets flag 0x800, ignore rooms.
+5. If the Sim already has a route that doesn't allow failure trees, the new one doesn't either.
+6. Otherwise, with no route under way, variable 0x11 at 0, the target being the Sim itself and the slot's facing -2: it turns to the target (`CalcShortDistance`) and returns 1 at once.
+7. The route goes on the end of the Sim's list (PS2 `+0x5D0`), which clears animator byte `+0x664` if it was the first. The state becomes 1.
 
-Each tick, a loop calls the handler for the state until one says it's done. Handlers return the next state, and set the tree's result. It starts as 2, wait.
+Then, every tick:
+
+1. With no route on the list it returns 0.
+2. A route whose target is gone is popped: state 0, return 2.
+3. A target that left the world gives state 0x13, or 0x14 if walking (state 3).
+4. A route marked invalid (`+0x7C` 0) in state 2 drops its portal, and in state 3 becomes state 0xF. Then it's valid again.
+5. The handler for the state runs, and returns the next state, until one sets done. A state number of 0x15 or more becomes 7.
+6. The tree's code is returned. If it isn't 2, person `+0x5E0` is cleared.
+
+**What the code means to the tree.** The primitive returns it unchanged, so these are `TryElement`'s values:
+
+| Code | Tree |
+|---|---|
+| 0 | False branch: the route failed. Person data 0x1C has the reason |
+| 1 | True branch: the Sim is at the slot |
+| 2 | Wait: the node runs again next tick, in the same state (frame `+8`) |
+| 3 | A handler pushed a tree (a waiting, ask-to-move, stand-up or failure-feedback animation). The pushed tree runs now. When it returns, frame `+8` keeps the node, so routing carries on |
+| -1 | An error stopped the tree |
+
+Handlers return the next state and set the code. It starts at 2.
 
 | State | Handler | What it does |
 |---|---|---|
-| 1 | Initial | Interrupted is route result 4, then state 7. A Sim sitting on the wrong chair runs the stand tree, state 5. Otherwise it builds the goals, then state 0x12 |
-| 2 | WaitingForPortal | Waits to pass through a portal |
-| 3 | Walking | Interrupted or nothing left to walk is state 0xB. Otherwise it asks the animator: 1 is state 9, 0 state 0xA, 2 is wait this tick |
-| 4, 5 | WaitingForSit, WaitingForStand | Wait on the animation |
-| 6 | Trapped | Asks others to move, up to a trap count, then state 7 or 0x10 |
+| 1 | Initial | **Proven.** Variable 8 without bit 3 is state 7. A Sim that isn't a ghost (person data 0xC with bit 2 of the neighbour's word 0x2A) and isn't in the target's room goes to state 2, or state 7 if the target is a portal (type 8) one of its routes already uses. Interrupted is result 4, state 7. Then it builds the goals. Not sitting (person data 0 isn't 1) is state 0x12. Sitting on the goal chair is state 8. Sitting on a chair (function table entry 0x1A) runs its entry point 0x1B with the route's exit direction (`+0x78`) as parameter 0: person data 0x12 = that direction, 0x20 = 0, code 3, state 5. A chair without that tree is state 7, and sitting on something that isn't a chair is tree error 0x35, code -1, state 7 |
+| 2 | WaitingForPortal | **Proven.** Interrupted is result 4, state 7. In the destination's room (data 0x1D): person data 0x20 = route `+0x9C`, state 1. Otherwise a current portal with no last result runs `cXPortal::FailedPortalTree`, then room routing: found is code 3, state 2 again; not found is result 2, state 0x10 |
+| 3 | Walking | **Proven.** Interrupted (result 4) or no route or path is state 0xB. Otherwise `FollowOneStep` on the animator, which is also the tree's code: 1 is state 9, 2 is done this tick and stay, anything else state 0xA |
+| 4, 5 | WaitingForSit, WaitingForStand | **Proven.** Sit: a last transition is state 8, else route result = person data 0x1C (5 if 0), state 0x10. Stand: person data 0x20 = route `+0x9C`, then a last transition with the Sim idling (person data 0 is 0 or 3) is state 1, else result 6, state 0x10 |
+| 6 | Trapped | **Proven.** Waits for a routing turn like state 0x12, code 2. Then by the trap count (`+0x5C`): 0 compares where the Sim stands with where it was last time (`+0x64`), and moving more than 0x40 in squared sixteenths of a tile (half a tile) is count 0, state 1, otherwise count 1, stay. 1 is count 2 and `AskOthersToMove`: state 0xE if it asked someone, else 0x10. 2 is count 3, state 1. 3 is state 0x10, anything else state 7 |
 | 7 | Failed | Result 1 if none was set, cleans up, **returns 0**, the false branch |
-| 8 | Succeeded | Result 0, turns to face if the slot says so, cleans up, **returns 1**, the true branch |
-| 9 | WalkingSucceeded | State 8 once the animator agrees |
+| 8 | Succeeded | **Proven.** Person data 0x20, if set, is copied to 0x21, and cleared again if the Sim can't be placed. `CanPlace` where it stands: then `Place`, and with two or more path points and variable 9 at 0, variable 1 = the direction of the last step (eighths, 0 to 7) and `ForceLocation`. Result 0, code 1, true. Can't place: an idle Sim (person data 0 is 0) is result 1, state 7; otherwise result 0, code 1. Then cleans up |
+| 9 | WalkingSucceeded | **Proven.** State 8 once `EndFollow` is true, else done this tick |
 | 0xA | WalkingFailed | State 6 once the animator agrees |
 | 0xB | WalkTerminated | State 7 once the animator agrees |
-| 0xC | FoundPath | Starts the walk, then state 3 |
-| 0xD | Waiting | Waits for a timer, or fails if interrupted |
-| 0xE | WaitingForPersonToMove | Waits on the Sim asked to move |
+| 0xC | FoundPath | **Proven.** `BeginFollow` with `CalcShortDistance` to the target, done this tick, state 3 |
+| 0xD | Waiting | **Proven.** Interrupted is result 4, state 7. For 30 ticks from route `+0x60` (simulator ticks, `+0x9C`) it runs the Sim's own `sg_route waiting animation` tree: code 3, stay. After that, or with no such tree, it clears the wait and goes back to state 1 |
+| 0xE | WaitingForPersonToMove | **Proven.** Interrupted is result 4, state 7. When the other Sim (`+0x84`) has gone: clear the wait, and the trap count too if the move worked (`+0x88`), state 1. On the first tick it runs its own `sg_route ask to move animation` tree with the other Sim as stack object, code 3, stay. Then up to 300 ticks of `sg_route waiting animation`. After that, or with no tree, state 6 |
 | 0xF | RouteInvalidatedWhileWalking | Replans |
-| 0x10, 0x11 | NeedFailureFeedback, WaitingForFailureFeedback | Runs the object's failure tree, if `+4` allowed it, then state 7 |
-| 0x12 | FoundGoals | Waits for a routing turn: a queue allows so many Sims a frame. Then a path: 0 is state 6, 1 state 8, 2 state 0xC, 3 waits for a portal, others state 7 |
+| 0x10, 0x11 | NeedFailureFeedback, WaitingForFailureFeedback | **Proven for 0x10.** Result 1 if none, copied to person data 0x1C. If the routing slot has flag bit 14, the target's `gl_route failure feedback` tree runs on the target with parameters (result, blocking object ID from route `+0x90`, 0, 0): code 3, state 0x11. Otherwise, or with no such tree, state 7 |
+| 0x12 | FoundGoals | **Proven.** One Sim routes a frame: it may when nobody has yet and the routing queue (24 Sims) is empty or has it first. Otherwise it joins the queue once (PS2 flag `+0x5E8`), code 2, stay. Then `InitRoute` gives the code: 0 is state 6, 1 state 8, 2 state 0xC, 3 is person data 0x20 = 0 and state 4, others state 7. (An earlier version of this row said 3 waits for a portal: it's state 4, WaitingForSit.) |
 | 0x13, 0x14 | ObjectDeleted, ObjectDeletedWhileWalking | The target went away: state 7 |
+
+The tree's code, the second handler argument, is a 64-bit `long` on PS2. Handlers set it to 3 while they wait, and Failed sets 0.
 
 Person data 0x1C ends up holding the route's result: 0 worked, 1 failed, 4 interrupted. If the target leaves the world part way, the state changes to 0x13 or, while walking, 0x14.
 
 **For a port:** no pathfinding is needed for trees to run. Wait a tick or more, put the Sim on the slot, and return 1. Return 0 for a slot that can't be reached.
+
+### How a slot becomes goals
+
+`XRoute::ConstructGoals` (PS2 `0x1CDBE0`, Wii `800ED934`) turns the slot into goal tiles. Positions are `FTilePt`s, in sixteenths of a tile. **The rotation and the on-top case are proven on PS2**; the directional search is **likely**, read on Wii, with PS2's version found by its calls.
+
+**The frame.** The object's direction is its data 1, in eighths, or 0 if the slot is absolute. The origin is the object's location. With flag bit 16 it's the object's average location instead (for a multi-tile object, its anchor).
+
+**The rotation, `TransformToWorldCoords`. Proven, PS2 `0x1CA758`.** An offset (x, y) in the slot's frame becomes origin + the offset turned by the direction. Each sum is cut to an integer:
+
+| Direction | Added to the origin |
+|---|---|
+| 0 | (x, y) |
+| 2 | (−y, x) |
+| 4 | (−x, −y) |
+| 6 | (y, −x) |
+| Odd | The offset turned by the object's rotation matrix, through world coordinates |
+
+**On top of the object** (no direction bits in the flags' low byte). **Proven, PS2.**
+
+1. The goal is the rotation of the slot's own offset, `GetXOffset` and `GetYOffset`, which add the Sim type's extra (see the facing table above).
+2. The Sim must face the direction from the origin to that tile, or any direction if it's the origin's own tile.
+3. If the tile can be stood on, it's the only goal, with score 100. Otherwise the route's result comes from what blocked it.
+
+**Around the object** (likely, Wii):
+
+1. **The slot must make sense:** minimum 0 to 0x200, maximum 1 to 0x200, minimum ≤ optimal ≤ maximum, all in sixteenths of a tile. Otherwise there are no goals.
+2. **Levels:** the score bonus is multiplier 1 × 10 on the Sim's level. Otherwise it's the larger of multipliers 0 and 2, × 10.
+3. **Walls:** unless rooms are ignored (flag 0x800), a wall next to the object's tile blocks the directions it covers and the ones beside them.
+4. **The search:**
+   - The step is the slot's resolution, or 16 (a whole tile) when there's a level multiplier.
+   - For each allowed direction d (flag bits 0 to 7, turned by the object's direction), it walks outward one step at a time.
+   - It keeps points whose distance from the origin is between minimum and maximum.
+   - The Sim faces the object: direction (object direction + d + 4) mod 8.
+5. **The score:**
+   - 100 − round(|distance − optimal| × gradient), plus the level bonus.
+   - ± up to 10 at random with flag bit 13.
+   - 25 more in one case not yet named, and 20 more if the tile is where the Sim already stands.
+6. **A chair** on the tile, facing the right way and allowing that side (definition `+0x84`), is a goal to sit on, with its ID. If someone else is in it, that's recorded as the blocking object.
+7. **Each point** is checked like the on-top goal, and the usable ones are added. With random scoring, a door there rules the tile out.
+
+The route then walks to the best goal it can reach. **For a port:** the on-top case, with the rotation above, gives the exact tile. For the others, the point at the optimal distance in the best allowed direction, facing the object, is a good stand-in.
+
+### Which way is x, and how directions turn
+
+**Proven, PS2.** `TransformToWorldCoords` (`0x1CA758`) and `cXMTObject::AssignOffsets` (`0x1FFC90`) match the game byte for byte. `OffsetCoordsInDirection` is inlined in `ConstructGoals` (`0x1CE898`) and was read there, the same as Wii's.
+
+**The axes.** Everything here is in the game's own tile axes. x is the first word of an `FTilePt`: an object's location at `+0xC4`, which `IsInWorld` tests along with y at `+0xC8`. Both are in sixteenths of a tile. **A routing slot's first offset is that x**:
+
+- Descriptor `+0x04` is `RoutingSlot +0x04`.
+- `GetXOffset` returns it, with the Sim type's extra added.
+- `ConstructGoals` passes that as x to `TransformToWorldCoords`, which adds it to the origin's first word.
+- The second offset (`+0x08`) is y in the same way. The third (`+0x0C`) isn't used for the tile.
+
+So if a port's data has x and y swapped from these axes, it has to swap a slot's offsets and object locations the same way before applying any of the rules below.
+
+**Directions** are in eighths, and all three functions agree on which way they turn:
+
+| Direction | `OffsetCoordsInDirection`: one step | `TransformToWorldCoords`: offset (x, y) becomes | `AssignOffsets`: part offset (x, y) becomes |
+|---|---|---|---|
+| 0 | y − 1 | (x, y) | (x, y) |
+| 2 | x + 1 | (−y, x) | (−y, x) |
+| 4 | y + 1 | (−x, −y) | (−x, −y) |
+| 6 | x − 1 | (y, −x) | (y, −x) |
+| Odd | Both: 1, 3, 5, 7 are (+1, −1), (+1, +1), (−1, +1), (−1, −1) | The object's rotation matrix, through world coordinates | (0, 0) |
+
+**Checking it:** turning direction 0's step, (0, −1), by direction 2 gives (+1, 0), which is direction 2's step. Turning it by 4 gives (0, +1) and by 6 gives (−1, 0). So "direction d" means the same thing in all three: it faces −y at 0 and +x at 2.
+
+- **`TransformToWorldCoords`**, in full: the offset is turned as above, then **x = origin x + x and y = origin y + y**, each cut to an integer. For directions 2 and 6, the old x is cut to an integer before it's moved to the other axis.
+- **`AssignOffsets`:**
+  1. The first part (`+0x140`, or the object itself) gives the base: position words `+0x144` and `+0x148`, plus a third at `+0x14C`, and the first part's data 1 as the direction.
+  2. For each part along `+0x13C`, it stores (part − base) at `+0x150`, `+0x154` and `+0x158`.
+  3. Then it turns the first two by that direction, **the same way as `TransformToWorldCoords`, not the reverse**.
+  4. Odd directions store (0, 0).
+
+  Each part's own data 1 is also read in the loop, and not used.
 
 ## PushAction (opcode 0x0D)
 
@@ -1229,51 +1552,64 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 
 **Proven for the numbering**: every call was compared with the PS2 function (`0x22D518`), and all 67 entries of its switch on `+0` do the same job as on Wii. No number differs. Calls 9 to 0x12, 0x16, 0x18, 0x1F, 0x25, 0x29, 0x2C, 0x2D, 0x31, 0x34, 0x36 and 0x38 were read line by line on PS2. The rest are compared by what they call, so their details are **likely**. 290 uses. Past 0x42, and at 0x1B to 0x1E, 0x20 and 0x23, is error 0x2A.
 
+**Proven, the source order:** the jump table at `0x4BA900` sorted by address gives the order the cases were written in, since GCC lays them out in source order: 0, 1, 3, 2, 4, 5, 6, 8, 9, 0x25, 0xA, 0xB, 0xD, 0xE, 0xF, 0x10, 0x15, 0x18, 0x19, 0x1A, 0x1F, 0x21, 0x22, 0x26, 0x28 to 0x2D, 0x30, 0x32 to 0x37, 0x39, 0x3A, 0x12, 0x3B, 0x3E, 0x3F, 0x3C, 0x3D, 0x40, 0x41, 0x42, 0x38, 0x11, 7, 0x13, 0x17, 0x14, 0xC, 0x24, 0x27, then the error cases and the shared `return 1` of 0x16, 0x2E, 0x2F and 0x31. `TryGenericSimCall` in `cXObjectPrims.cpp` is started in that order, under `NON_MATCHING`.
+
 `+0` s16 is the call. Everything else comes from temps, written t0 to t7 here. Unless it says otherwise, a call returns 1. Calls not listed aren't used by any tree on the disc.
 
 | Call | Uses | What it does |
 |---|---|---|
-| 2 | 2 | Stack object is the icon of my current action. Missing is error 0xA, not a Sim error 0x1C |
-| 3 | 1 | If the stack object is the selected Sim, asks the game flow for 0x20, otherwise error 0x14. Not a Sim is error 0x1C |
-| 4 | 8 | Moves the neighbour in the stack object into family t1, or the selected family if t1 is 0 or less. Makes the family if needed. Copies the last name |
-| 5 | 1 | Merges family t0 into the selected family: funds and inventories |
-| 6 | 6 | Removes the neighbour in the stack object from its family. False if that fails |
+| 0 | 0 | Starts the `hurricane` weather state (`SetWeatherState("hurricane", 2, false)`). **Proven, PS2.** No tree uses it |
+| 1 | 0 | **Swaps me and the stack object**, both Sims (not a Sim is error 0x1C, no stack object 0x15). Each is picked up and placed (if `CanPlace` allows) on the object the other holds in object variable 2, at tile (-1, -1), level 1, and takes the other's direction (variable 1). Each animator then gets an offset from that object's first slot, turned by its direction. **Quirks:** the offsets add up, so the second Sim's offset includes the first's; and only my object is checked for being missing (error 0x15), as on Wii. **Proven, PS2.** No tree uses it |
+| 2 | 2 | Stack object is the icon of my current action, if the action has an ID. Missing is error 0xA, me not a Sim error 0x1C. **Proven, PS2** |
+| 3 | 1 | If the stack object is the selected Sim, asks the game flow for 0x20, otherwise error 0x14. Not a Sim is error 0x1C. **Proven, PS2** |
+| 4 | 8 | Moves the neighbour in the stack object into family t1, or the selected family if t1 is 0 or less. Makes family t1 if it doesn't exist. Person data 0x2D gets the old family (0x28). If removing it from its old family or adding it fails, false. Then, if neighbour t0 exists and the moved Sim is of type 0, it takes t0's last name (selector and sim description). No neighbour is error 0x38. **Proven, PS2** |
+| 5 | 1 | Merges family t0 into the selected family: t0's funds are added to the funds, then the selected family's inventory takes t0's (`MergeInventories`). False if either family is missing. **Proven, PS2** |
+| 6 | 6 | Removes the neighbour in the stack object from its family. No neighbour is error 0x38. False if that fails. **Proven, PS2** |
 | 7 | 1 | Goal and unlock data call |
 | 8 | 11 | Loading screen. t0 non-zero starts one and returns 1. Otherwise it returns 4 until the iris transition is in, then 1 |
 | 9 | 24 | Finishes loading: clears `_gd +0x9C`'s word `+0x10`, then `LoadFinishing` |
 | 0xA, 0xB | 4, 5 | Adds me to, or removes me from, ObjectModule's list at `+0x2030`. Buy and build are off while anything is on it |
 | 0xC | 1 | Tribe gets all tools |
-| 0xD | 2 | `CleanupPeople` on the stack object. Missing is error 0xA |
+| 0xD | 2 | `CleanupPeople` on the stack object, inlined: every person but the stack object gets `Cleanup(stack object)`, vtable `+0xE0`. Missing is error 0xA |
 | 0xE | 3 | Global 0x1F = t0. Globals are s16s from simulator `+0x38` |
-| 0xF | 52 | Needs me to be a Sim, or error 0x1C. Person data 0x20 = t0, 0x21 = 0. With t0 of 0, also `ComputeRect` from my location |
-| 0x10 | 6 | Game sequences, by t0: 0 starts sequence 2, 1 sequence 3, -1 and -2 wait for them, 2 is game over. Waiting returns 4 |
+| 0xF | 52 | Needs me to be a Sim, or error 0x1C. Person data 0x20 = t0, 0x21 = 0. With t0 of 0, also `ComputeRect` from my location **Proven, PS2.** |
+| 0x10 | 6 | Game sequences, by t0: 0 starts sequence 2, 1 sequence 3, -1 and -2 wait for them, 2 is game over. Waiting returns 4 **Proven, PS2.** |
 | 0x11 | 8 | Sets the harvest count to t0 |
 | 0x12 | 12 | True if in build or buy mode |
-| 0x13, 0x14 | 1, 1 | Tribe gets all food, all resources, amount t0 |
+| 0x13, 0x14 | 1, 1 | Tribe gets t0 of every food, or every resource. **Proven, PS2:** it walks the `InventoryTokens` table and adds a row whose flags word (`+4`) has bit 2 for food. For resources, bits 1 and 2 must be exactly 2, and IDs 0x32 to 0x35 are skipped. No player Sim does nothing |
+| 0x15 | 0 | Global 0x27 = t0. **Proven, PS2.** No tree uses it |
 | 0x16, 0x31 | 7, 10 | Nothing: returns 1 |
-| 0x17 | 2 | Unlocks everything |
+| 0x17 | 2 | Unlocks everything. **Proven, PS2:** sets bit 0 (visited) on all 0x1B lots and bits 0 to 2 on all 0x48 transitions in `LotManager` |
 | 0x18 | 2 | Global 0x29 = 1 if t0 is 0, else 0 |
+| 0x19 | 0 | Global 0x28 = t0. **Proven, PS2.** No tree uses it |
 | 0x1A | 1 | Changes the selected Sim |
-| 0x1F | 6 | Selects Sim t0. True if it's now selected. Not a Sim, or missing, is false |
+| 0x1F | 6 | Selects Sim t0 through `EGlobal::SetSelectedPerson`, then true if it's now `_globals +0x174`, the player's Sim. Not a Sim, or missing, is false |
 | 0x21 | 1 | Shows all object dialogs |
-| 0x22 | 5 | Starts a lot change to lot t2 |
+| 0x22 | 5 | **Opens Create-a-Sim**, not a lot change (this row used to say "starts a lot change to lot t2"). Sets the UI values `CAS_mode` 1, `CAS_neighborID` t2, `CAS_CurrentGameTime` the game time, `CAS_lotnumber` t1 and `PlayerNumber` 0, asks the game flow for state 8, and remembers the selected Sim's neighbour ID to select afterwards. Returns 2 (and does nothing) while the HUD's transition target is 3. **Proven, PS2** |
 | 0x24 | 1 | Replenishes the tribe, t0 |
 | 0x25 | 5 | A flag = t0 != 0: `_globals +0x4C4` on PS2, a byte at `+0x3FB` on Wii |
-| 0x26 | 2 | t1 = 1 if object t0 is in the world, else 0. False if there's no object |
-| 0x27 | 1 | `AutonomousFoodSelection` on t1, t2, t3. Its result |
-| 0x29 | 4 | Only checks: t0 above 1 is error 0x14, and not being a Sim is error 0x4C |
-| 0x2C | 17 | Closes modeless dialogs |
-| 0x2D | 30 | Controller rumble, for the player's Sim only. `+4` u16 is the effect, 0 is none, and t0 is an object, or -1 for none |
+| 0x26 | 2 | t1 = 1 if object t0 is in the world, else 0. False if there's no object **Proven, PS2.** |
+| 0x27 | 1 | `AutonomousFoodSelection` on t1, t2, t3, through a new `AutoFood`. True if it chose something. **Proven, PS2** |
+| 0x29 | 4 | Only checks: t0 above 1 is error 0x14, and not being a Sim is error 0x4C **Proven, PS2.** |
+| 0x2C | 17 | Closes modeless dialogs **Proven, PS2.** |
+| 0x2D | 30 | Controller rumble, for the player's Sim only. **Proven, PS2; corrects an earlier reading.** The source is the stack object, not an operand: none does nothing, and so does a Sim other than the player's. t0 of -1 stops the rumble; anything else starts one from the stack object, through the player interactor. (This row used to say `+4` u16 was the effect and t0 an object: `+4` is the frame's stack object.) |
+| 0x2A | 0 | t0 = 1 unless the camera director (`_globals +0x1D0`) is in control: its state at `+0x2B0` isn't 0 or 8. **Proven, PS2.** No tree uses it |
+| 0x2B | 0 | t0 = the number of modeless dialogs open. **Proven, PS2.** No tree uses it |
+| 0x30 | 0 | Adds t0 to the aspiration points, which are neighbourhood variables 0xC (below 10,000) and 0xD (tens of thousands), up to 999,999. **Proven, PS2.** No tree uses it |
+| 0x32 | 0 | t7 = 1 if music genre t7 is enabled in the options (`_globals +0x1F8`), else 0. **Proven, PS2.** No tree uses it |
+| 0x33 | 0 | **Blocks routing over a rectangle:** tile flag 0x10 is set (t0 non-zero) or cleared (t0 0) on t1 by t2 tiles from the stack object's tile, t1 along its direction (object variable 1: 0 is +x, 2 is +y, 4 is -x, 6 is -y) and t2 to its side. t1 or t2 not above 0 is error 0x14, no stack object 0x33. A bounds test first: the object's tile above 0 on both axes, and the far corner within 0 to the world's size, or error 0x5E. **Quirk:** for directions 2 and 6 that test swaps the corner's x and y, so it can pass or fail wrongly; the tiles changed are the right ones. Other directions change only the object's own tile. **Proven, PS2.** No tree uses it |
 | 0x34 | 1 | t2 = 0 |
+| 0x35 | 0 | t0 = the stack object's GUID modulo 0xF08A. Missing is error 0x33. **Proven, PS2.** No tree uses it |
 | 0x36 | 4 | Returns 0 whatever t7 holds |
-| 0x37 | 1 | Moves neighbour t0 into the first free family, and t1 = its number. Missing is -1 |
+| 0x37 | 1 | Moves neighbour t0 into the first free family, and t1 = its number. Free: numbers from 1 up to the number of modifiable families (`NghResFile`), the first that doesn't exist (it's made) or whose family slot 7 is 0. None free: false, and t1 is left alone (this row used to say -1). No neighbour is error 0x38. **Proven, PS2** |
 | 0x38 | 1 | Returns 0 |
-| 0x39 | 9 | Clears cached catalog resources of the stack object |
-| 0x3A | 4 | Adds or removes the wall between objects t0 and t1. t2 of 1 adds |
+| 0x39 | 9 | Clears cached catalog resources: the stack object's (`+0x138`) and its master selector's (`+0xB0`). Every object pointing at either loses the pointer, then both are deleted (once, if they're the same). There's no test for a missing stack object. **Proven, PS2** |
+| 0x3A | 4 | Adds (t2 = 1) or removes (t2 = 0) the wall between the tiles of objects t0 and t1 (`TileWalls::GetWallSegsBetweenTiles`; no such wall segment is error 0x60, any other t2 0x61, a missing object 0x33). **Adding:** false if t0's tile already has that wall. Otherwise the wall goes on both tiles' sides, styled 3 if t0 is a door, 0x11 if a gate (type 8, definition word 0x1C 2 or 1, with function 0xF), else 1, pattern 0, then the walls are committed. **Removing:** false if there's no wall; otherwise `ERoom::DeleteWallAtTile` on t0's tile and a commit. **Proven, PS2** |
 | 0x3B, 0x3E, 0x3F | 1 each | Plans: toggles all in the UI, ignores requirements, forces unlock |
-| 0x3C | 12 | Is the stack object's plan unlocked? Missing is error 0x17 |
-| 0x40 | 2 | Neighbour t0's lot, t1 = 0 if it's here |
-| 0x41 | 3 | True if the tribe has token t0 |
+| 0x3C | 12 | t1 = the first word of the stack object's plan (`GetPlanByGUID`; scope 0x43's field 0), or 0 with no plan. Whether that word means "unlocked" isn't shown by this code. A multi-tile object tries its master's GUID, then its interaction leader's, then each part's in order. Missing is error 0x17. **Proven, PS2** |
+| 0x3D | 0 | t1 = the first word of the plan made from token t0. No such plan is error 0x6B. **Proven, PS2.** No tree uses it |
+| 0x40 | 2 | Neighbour t0's way here (`LotManager::CanSimGetToLot`). t1 = 0 first. Already on this lot, or no lot (-1): true. Otherwise false unless the lot graph exists, this lot has been visited and a route is found. The route is up to 30 lot numbers, and t1 = the last one; a route of 0 or 30 lots is false. No neighbour is error 0x38. **Proven, PS2** |
+| 0x41 | 3 | **Proven, PS2 and Wii; corrects an earlier reading.** True if there's a player tribe inventory and t0 is an ID in the `InventoryTokens` table. It doesn't check that the tribe has the token. No player Sim is false |
 | 0x42 | 7 | t1 = a goal value for t0. False if there's none |
 
 ## What a placed object starts with
@@ -1427,6 +1763,8 @@ So an object with no cleanup tree runs init twice when it resets on load, on a s
 **`Cleanup(0)`. Proven on PS2 for the entry points.** With a cleanup tree (entry point 3), it runs that on me, or on each part of a multi-tile object, then clears variable 0x3E and bit 5 of variable 8, and puts main back on the stack. Without one, it saves my place, calls `Pickup`, then `Reset(true)` unless flag 0x40 is set, then `Place` if I was placed. `Pickup` runs entry point 10 and `Place` entry point 9, so those run during such a cleanup too.
 
 **Type attributes. Proven on the disc.** `GetTypeAttributes` asks `ObjectFolder` for a block by definition `+0xB8`, or by GUID if that's 0. `+0xB8` is 0 on all 1,335 definitions, so blocks are per GUID. They're shared by all objects of that type, and they aren't in `ObjM`.
+
+**With no block. Proven: `CountTypeAttributes` (`0x1DA3D0`) and `GetTypeAttributes` (`0x1DA408`) match byte for byte.** A definition with no block has a count of 0 and a null array. Scopes 0x24 and 0x25 check the index against the count first, so every read or write is error 0x40 and the null array is never touched. A new Sim from `template_person`, with no block, gets error 0x40 for any type attribute.
 
 ## Lot transitions
 

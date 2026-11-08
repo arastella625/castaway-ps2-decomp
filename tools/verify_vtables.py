@@ -49,7 +49,9 @@ def build_probe(tool_dir, name, header):
     WORK.mkdir(parents=True, exist_ok=True)
     safe = name.replace('::', '_')
     src, ii, asm, obj, stamp = (WORK / (safe + e) for e in ('.cpp', '.ii', '.s', '.o', '.key'))
-    src.write_text('#include "%s"\n\nstruct Probe : public %s {\n    virtual void probe_();\n};\n\n'
+    # Probe() is declared and never defined, so a class with only constructors that take
+    # arguments can still be a base: nothing here ever constructs a Probe.
+    src.write_text('#include "%s"\n\nstruct Probe : public %s {\n    Probe();\n    virtual void probe_();\n};\n\n'
                    'void Probe::probe_()\n{\n}\n' % (header, name))
     key = verify.source_key(src, verify.BUILD_KEY)
     if not (obj.is_file() and stamp.is_file() and stamp.read_text() == key):

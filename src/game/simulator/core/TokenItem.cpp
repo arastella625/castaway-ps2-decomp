@@ -43,7 +43,7 @@ void TokenItem::AddAtribute(s16 a)
 {
 }
 
-int TokenItem::GetStatusText()
+s8 TokenItem::GetStatusText()
 {
     return -1;
 }
@@ -52,9 +52,9 @@ void TokenItem::SetStatusText(s8 a)
 {
 }
 
-u32 TokenItem::GetToken()
+const InventoryTokens *TokenItem::GetToken()
 {
-    return field_0x10;
+    return mToken;
 }
 
 void TokenItem::LoadItemInfo(cXObject *a, Family *b, s16 c)

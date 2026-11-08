@@ -4,6 +4,8 @@
 #include "common/Vector.h"
 #include "common/types.h"
 
+class cXPerson;
+
 // Wii: Plan, one thing a Sim can build. The offsets are from InterpValue's scope 0x43.
 class Plan {
 public:
@@ -39,7 +41,13 @@ public:
 
     static PlanManager *GetInstance();
     Plan *GetPlanByID(s16 id);
+    Plan *GetPlanByGUID(int guid); // 0x1B3FF8
     int IsPlanUnlocked(s16 id);
+    void ToggleAllPlansInUI();
+    Plan *GetPlanByTokenID(s16 token);
+    void SendNotification(s8 notification, s16 value, cXPerson *person);
+    void ToggleIgnoreRequirements();
+    void ForceAllPlansToUnlock();
 };
 
 #endif

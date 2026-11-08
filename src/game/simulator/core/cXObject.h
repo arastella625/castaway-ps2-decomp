@@ -34,6 +34,53 @@ public:
     int mY; // 0x04
 
     FTilePt() {}
+
+    int SquareDist(const FTilePt &other) const
+    {
+        int dx = other.mX - mX;
+        int dy = other.mY - mY;
+        return dx * dx + dy * dy;
+    }
+
+    // Wii: GetApproximateDirection, the direction 0 to 7 from here to `to`, by eighths.
+    int GetApproximateDirection(const FTilePt &to) const
+    {
+        int dx = to.mX - mX;
+        int dy = to.mY - mY;
+        int ax = dx > -1 ? dx : -dx;
+        int ay = dy > -1 ? dy : -dy;
+        int dir;
+        if (ax * 2 < ay)
+            dir = 4;
+        else if (ay * 2 < ax)
+            dir = 2;
+        else
+            dir = 3;
+        if (dx < 0) {
+            switch (dir) {
+            case 2:
+                dir = 6;
+                break;
+            case 3:
+                dir = 5;
+                break;
+            }
+        }
+        if (dy < 0) {
+            switch (dir) {
+            case 4:
+                dir = 0;
+                break;
+            case 3:
+                dir = 1;
+                break;
+            case 5:
+                dir = 7;
+                break;
+            }
+        }
+        return dir;
+    }
 };
 
 enum TFGL_ACTIONS { };
@@ -134,10 +181,12 @@ public:
 
 class RoutingSlot : public Slot {
 public:
-    f32 mOffset[3];   // 0x04
-    int mMultiplier;  // 0x10  SetMultiplier
-    int mMultiplier2; // 0x14
-    int mMultiplier3; // 0x18
+    // The copy constructor copies the offset as three floats and the multipliers in a loop, so
+    // the offset is three members and the multipliers an array.
+    f32 mOffsetX;       // 0x04
+    f32 mOffsetY;       // 0x08
+    f32 mOffsetZ;       // 0x0c
+    int mMultiplier[3]; // 0x10  SetMultiplier
     int mFlags;       // 0x1c  low byte the directions, 14 failure trees, 15 different levels
     int mSnapTarget;  // 0x20
     int mMin;         // 0x24
@@ -152,6 +201,7 @@ public:
 
     RoutingSlot();
     virtual ~RoutingSlot() {}
+    int GetAllowFailureTrees() const { return (mFlags >> 14) & 1; }
     void SetAllowFailureTrees(bool allow)
     {
         mFlags &= ~0x4000;
@@ -231,7 +281,7 @@ public:
     u8 field_0x12c;            // 0x12c
     u32 field_0x130;           // 0x130 the frame count when the object was made
     s32 mGraphicsTagged;       // 0x134
-    u32 field_0x138;           // 0x138
+    class CatalogResource *mCachedCatalogResource; // 0x138  Wii: GetCachedObjectCatalogResource
 
     // Virtual functions after TreeSim's, in the order of the Wii vtable.
     virtual ~cXObject();
@@ -253,7 +303,7 @@ public:
     virtual void Turn(int a);
     virtual void Pickup();
     virtual int CanPlace(const FTilePt &tile, int a, cXObject *object, int b);
-    virtual int Place(const FTilePt &tile, int a, cXObject *object, int b);
+    virtual void Place(const FTilePt &tile, int a, cXObject *object, int b);
     virtual int IsPartOfMe(cXObject *object);
     virtual int UserCanPlace(const FTilePt &tile, int a, cXObject *object, int b);
     virtual int UserPlace(const FTilePt &tile, int a, cXObject *object, int b);
@@ -277,6 +327,18 @@ public:
     void SetIdleStatus(int status) { mModule->SetIdleStatus(mID, status); }
     inline bool AllowIdleOptimization();
     s16 GetType() const { return mDef[9]; }
+    // The game also has GetType and IsInWorld as functions (0x245708, 0x2535B0), and
+    // GotoRoutingSlot calls those. Here they need their own names.
+    s16 GetTypeOutOfLine() const;
+    int IsInWorldOutOfLine() const;
+    // Wii: IsPortal, inlined on PS2. GotoRoutingSlot drops the result.
+    bool IsPortal()
+    {
+        bool portal = false;
+        if (GetTypeOutOfLine() == 8 && GetPortal())
+            portal = true;
+        return portal;
+    }
     bool IsPerson() const { return GetType() == 2; }
     bool IsMultiTile() const { return mDef[0xa] != 0; }
     bool IsInWorld() const
@@ -326,6 +388,10 @@ public:
     long TryCallNamedTree(StackElem *, XPrimParam *);
     long TryMakeActionString(StackElem *, XPrimParam *);
     long TryGenericSimCall(StackElem *, XPrimParam *);
+    f32 CalcShortDistance(cXObject *object) const;
+    cXObject *GetContainer();
+    long ShowAllObjectDialogs(StackElem *elem, XPrimParam *param);
+    static void ChangeSelectedSimL();
     long TryDialog(StackElem *, XPrimParam *, bool);
     long TrySnap(StackElem *, XPrimParam *);
     long TrySnap(const FTilePt &tile, int level, cXObject *object, int slot, bool ignoreRooms, int direction, bool footprint);

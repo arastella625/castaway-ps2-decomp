@@ -5,12 +5,12 @@ s16 ClothingItem::GetID() const
     return field_0xe;
 }
 
-int ClothingItem::GetCount() const
+s16 ClothingItem::GetCount() const
 {
     return 1;
 }
 
-int ClothingItem::GetGuid() const
+u32 ClothingItem::GetGuid() const
 {
     return 0;
 }
@@ -20,7 +20,7 @@ int ClothingItem::GetCategory() const
     return 3;
 }
 
-s16 ClothingItem::GetOwnerID() const
+int ClothingItem::GetOwnerID() const
 {
     return field_0xc;
 }
@@ -48,7 +48,7 @@ void ClothingItem::AddAtribute(s16 a)
 {
 }
 
-int ClothingItem::GetStatusText()
+s8 ClothingItem::GetStatusText()
 {
     return -1;
 }
@@ -65,7 +65,7 @@ void ClothingItem::DecrementCount(s16 a)
 {
 }
 
-int ClothingItem::GetToken()
+const InventoryTokens *ClothingItem::GetToken()
 {
     return 0;
 }

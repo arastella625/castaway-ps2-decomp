@@ -1,5 +1,9 @@
 #include "game/simulator/core2/cXPerson.h"
 
+#include "game/GameData.h"
+#include "game/simulator/core/Behavior.h"
+#include "game/simulator/core/Lot.h"
+
 #include "game/animation/SAnimator2.h"
 
 // Primitive 0x2d.
@@ -136,7 +140,7 @@ long cXPerson::TryGotoRelative(StackElem *elem, XPrimParam *primParam)
         return GotoRoutingSlot(object, 0, (int &)elem->mWaiting);
     }
     RoutingSlot slot;
-    slot.mMultiplier = 1;
+    slot.mMultiplier[0] = 1;
     slot.SetTileDistances(1.0f, 1.0f, 1.0f);
     slot.SetAllowFailureTrees(param->GetAllowFailureTrees());
     slot.SetAllowDifferentAlts(param->GetAllowDifferentAlts());
@@ -228,6 +232,44 @@ long cXPerson::TryIdleForInput(StackElem *elem, XPrimParam *primParam)
     return executeInterruptOnIdlePrimitve(elem, counter, param->mAllow != 0);
 }
 
+class EResource {
+public:
+    void DelRef();
+};
+class ERShader : public EResource {};
+
+// Wii: GetShaderForObject. Returns the icon, and the shader through the pointer.
+u32 GetShaderForObject(cXObject *object, ERShader **shader);
+
+// Wii: ActionQueue::Insert, which calls Queue<Interaction, 12>::Insert and AddActionToHUD. PS2
+// inlines both, and Interaction::GetID.
+int ActionQueue::Insert(const Interaction &action, u32 index)
+{
+    if (!QueueInsert(action, index))
+        return 0;
+    if (At(index)->field_0x30 == 0)
+        At(index)->SetUniqueID();
+
+    GameData *gd = &_gd;
+    if (gd->mHud)
+        mHudOff = 0;
+    if (mHudOff)
+        return 1;
+    Interaction *queued = At(index);
+    if (!IsVisibleAction(*queued))
+        return 1;
+    ERShader *shader;
+    u32 icon = GetShaderForObject(queued->GetIconObject(), &shader);
+    if (!icon && !shader)
+        return 1;
+    u32 guid = FindVisualInsertGUID(index);
+    if (gd->mHud)
+        gd->mHud->AddAction(queued, queued->GetName(), icon, shader, guid);
+    if (shader)
+        shader->DelRef();
+    return 1;
+}
+
 extern Interaction *sImmediateAction;
 extern cXPerson *sImmediatePerson;
 
@@ -303,9 +345,9 @@ void RoutingSlot::WriteSlot(SlotDescriptor *descriptor) const
 {
     descriptor->mType = 3;
     descriptor->mFlags = mFlags;
-    descriptor->mMultiplier[0] = mMultiplier;
-    descriptor->mMultiplier[1] = mMultiplier2;
-    descriptor->mMultiplier[2] = mMultiplier3;
+    descriptor->mMultiplier[0] = mMultiplier[0];
+    descriptor->mMultiplier[1] = mMultiplier[1];
+    descriptor->mMultiplier[2] = mMultiplier[2];
     descriptor->mSnapTarget = mSnapTarget;
     descriptor->mMin = mMin;
     descriptor->mMax = mMax;
@@ -313,9 +355,9 @@ void RoutingSlot::WriteSlot(SlotDescriptor *descriptor) const
     descriptor->mGradient = mGradient;
     descriptor->mFacing = mFacing;
     descriptor->mResolution = mResolution;
-    descriptor->mOffset[0] = mOffset[0];
-    descriptor->mOffset[1] = mOffset[1];
-    descriptor->mOffset[2] = mOffset[2];
+    descriptor->mOffset[0] = mOffsetX;
+    descriptor->mOffset[1] = mOffsetY;
+    descriptor->mOffset[2] = mOffsetZ;
 }
 
 void RoutingSlot::SetDistances(int min, int max, int optimal)
@@ -329,7 +371,7 @@ f32 RoutingSlot::GetXOffset(int simType) const
 {
     f32 extra;
     if (mFacing <= 0 || mFacing == 4)
-        return mOffset[0];
+        return mOffsetX;
     if ((mFacing & 1) == 0) {
         if (mFacing == 2)
             extra = -kStraightOffset[simType];
@@ -340,14 +382,14 @@ f32 RoutingSlot::GetXOffset(int simType) const
     } else {
         extra = kCornerOffset[simType];
     }
-    return mOffset[0] + extra;
+    return mOffsetX + extra;
 }
 
 f32 RoutingSlot::GetYOffset(int simType) const
 {
     f32 extra;
     if (mFacing < 0 || mFacing == 2 || mFacing == 6)
-        return mOffset[1];
+        return mOffsetY;
     if ((mFacing & 1) == 0) {
         if (mFacing == 4)
             extra = -kStraightOffset[simType];
@@ -358,7 +400,7 @@ f32 RoutingSlot::GetYOffset(int simType) const
     } else {
         extra = kCornerOffset[simType];
     }
-    return mOffset[1] + extra;
+    return mOffsetY + extra;
 }
 
 void RoutingSlot::AllowDirection(int direction)
@@ -382,13 +424,13 @@ void RoutingSlot::SetTileDistances(f32 min, f32 max, f32 preferred)
 
 RoutingSlot::RoutingSlot()
 {
-    mOffset[0] = 0;
-    mOffset[1] = 0;
-    mOffset[2] = 0;
+    mOffsetX = 0;
+    mOffsetY = 0;
+    mOffsetZ = 0;
     mFlags = 0;
-    mMultiplier = 0;
-    mMultiplier2 = 0;
-    mMultiplier3 = 0;
+    mMultiplier[0] = 0;
+    mMultiplier[1] = 0;
+    mMultiplier[2] = 0;
     mSnapTarget = -1;
     mMin = 16;
     mMax = 16;
@@ -396,4 +438,591 @@ RoutingSlot::RoutingSlot()
     mGradient = 0.1875f;
     mFacing = -2;
     mResolution = 16;
+}
+
+// Wii: cXPortal::FailedPortalTree, static.
+class cXPortal {
+public:
+    static void FailedPortalTree(ObjectModule *module, cXObject *object, cXPortal *portal);
+};
+
+// Through a portal: done once the Sim is in the destination's room, else route again.
+cXPerson::RoutingState cXPerson::Routing_WaitingForPortal(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    if (ShouldInterrupt() && mAnimator->IsInterruptable()) {
+        route->mResult = 4;
+        return kRoutingFailed;
+    }
+    s16 destRoom = route->mDest->mVars[0x1d];
+    if (destRoom != mVars[0x1d]) {
+        cXPortal *portal = route->mCurPortal;
+        if (portal && !GetLastResult())
+            cXPortal::FailedPortalTree(mModule, this, portal);
+        if (TryRoomRouting(route)) {
+            SetPersonData(0x20, 0);
+            code = 3;
+            done = true;
+            return kRoutingWaitingForPortal;
+        }
+        route->mResult = 2;
+        return kRoutingNeedFailureFeedback;
+    }
+    SetPersonData(0x20, route->field_0x9c);
+    return kRoutingInitial;
+}
+
+// One step of the walk. The animator's answer is also the tree's code.
+cXPerson::RoutingState cXPerson::Routing_Walking(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    if (ShouldInterrupt() && mAnimator->IsInterruptable()) {
+        route->mResult = 4;
+        return kRoutingWalkTerminated;
+    }
+    if (mRoutes.size() == 0)
+        return kRoutingWalkTerminated;
+    if (mPath.size() == 0)
+        return kRoutingWalkTerminated;
+    code = mAnimator->FollowOneStep();
+    switch (code) {
+    case 2:
+        done = true;
+        return kRoutingWalking;
+    case 1:
+        return kRoutingWalkingSucceeded;
+    case 0:
+        return kRoutingWalkingFailed;
+    }
+    return kRoutingWalkingFailed;
+}
+
+// For up to 30 ticks the Sim plays its "sg_route waiting animation" tree, then routes again.
+cXPerson::RoutingState cXPerson::Routing_Waiting(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    if (ShouldInterrupt() && mAnimator->IsInterruptable()) {
+        route->mResult = 4;
+        return kRoutingFailed;
+    }
+    int start = route->mWaitStartTicks;
+    if (!start)
+        start = GetSimulator()->mTicks;
+    if (GetSimulator()->mTicks - start < 30) {
+        s16 tree = mSelector->mBehavior->GetTreeIDByNameFast("sg_route waiting animation");
+        if (tree && GosubObjectTree(this, 0, tree, false)) {
+            code = 3;
+            done = true;
+            return kRoutingWaiting;
+        }
+    }
+    route->mWaitStartTicks = 0;
+    mAnimator->field_0x664 = 0;
+    return kRoutingInitial;
+}
+
+// The route failed. If the slot allows it, the target's "gl_route failure feedback" tree runs
+// with the result and the blocking object as its parameters.
+cXPerson::RoutingState cXPerson::Routing_NeedFailureFeedback(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    if (route->mResult == 0)
+        route->mResult = 1;
+    SetPersonData(0x1c, route->mResult);
+    if ((route->GetRoutingSlot()->mFlags >> 14) & 1) {
+        s16 tree = route->mDest->mSelector->mBehavior->GetTreeIDByNameFast("gl_route failure feedback");
+        s16 params[4] = {route->GetResult(), route->mBlockingObjectID, 0, 0};
+        if (tree && GosubObjectTree(route->mDest, params, tree, false)) {
+            SetPersonData(0x20, 0);
+            code = 3;
+            done = true;
+            return kRoutingWaitingForFailureFeedback;
+        }
+    } else if (!mAnimator->EndFollow()) {
+        done = true;
+    }
+    mAnimator->field_0x664 = 0;
+    return kRoutingFailed;
+}
+
+#ifdef NON_MATCHING
+// Not matched: 25 of 36 words line up. The game's inlined IsIdling clears its flag before the
+// load and sign-extends the state again before comparing with 3; no form tried does both (an
+// int or bool flag, ||, a switch, GetIdleState as int or s16, a person data getter).
+// Standing up: back to the start once the Sim is idle, else failure feedback with result 6.
+cXPerson::RoutingState cXPerson::Routing_WaitingForStand(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    SetPersonData(0x20, route->field_0x9c);
+    if (GetLastTransition() && IsIdling())
+        return kRoutingInitial;
+    route->mResult = 6;
+    return kRoutingNeedFailureFeedback;
+}
+#endif
+
+// Waits for a routing turn, then plans the route: InitRoute's answer is the tree's code.
+cXPerson::RoutingState cXPerson::Routing_FoundGoals(bool &done, TreeReturnCode &code)
+{
+    if (!CanRouteThisFrame()) {
+        if (!mInRoutingQueue) {
+            s_RoutingQueue.Enqueue(this);
+            mInRoutingQueue = 1;
+        }
+        code = 2;
+        done = true;
+        return kRoutingFoundGoals;
+    }
+    s_nNumRoutedThisFrame++;
+    code = InitRoute(GetCurrentRoute());
+    PopFromRoutingQueue(this);
+    switch (code) {
+    case 2:
+        return kRoutingFoundPath;
+    case 3:
+        SetPersonData(0x20, 0);
+        done = true;
+        return kRoutingWaitingForSit;
+    case 0:
+        return kRoutingTrapped;
+    case 1:
+        return kRoutingSucceeded;
+    }
+    return kRoutingFailed;
+}
+
+// Another Sim was asked to move. The Sim first plays "sg_route ask to move animation" at it, then
+// "sg_route waiting animation" for up to 300 ticks, and is trapped if the other doesn't move.
+cXPerson::RoutingState cXPerson::Routing_WaitingForPersonToMove(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    if (ShouldInterrupt() && mAnimator->IsInterruptable()) {
+        route->mResult = 4;
+        return kRoutingFailed;
+    }
+    mAnimator->field_0x664 = 0;
+    if (route->mMovingPerson == 0) {
+        route->mWaitStartTicks = 0;
+        if (route->mMoveSuccess)
+            route->mTrapCount = 0;
+        return kRoutingInitial;
+    }
+    if (route->mWaitStartTicks == 0) {
+        s16 tree = mSelector->mBehavior->GetTreeIDByNameFast("sg_route ask to move animation");
+        if (tree && GosubObjectTree(this, 0, tree, false)) {
+            GetCurElem()->mStackObject = route->mMovingPerson->mID;
+            code = 3;
+            done = true;
+            route->mWaitStartTicks = GetSimulator()->mTicks;
+            return kRoutingWaitingForPersonToMove;
+        }
+        return kRoutingTrapped;
+    }
+    if (GetSimulator()->mTicks - route->mWaitStartTicks < 300) {
+        s16 tree = mSelector->mBehavior->GetTreeIDByNameFast("sg_route waiting animation");
+        if (tree && GosubObjectTree(this, 0, tree, false)) {
+            code = 3;
+            done = true;
+            return kRoutingWaitingForPersonToMove;
+        }
+    }
+    route->mWaitStartTicks = 0;
+    return kRoutingTrapped;
+}
+
+// Trapped: on the routing turn, the trap count steps 0 to 3. A Sim that has moved more than 8
+// sixteenths of a tile since last time routes again; then it asks others to move; then it
+// routes again; then failure feedback.
+cXPerson::RoutingState cXPerson::Routing_Trapped(bool &done, TreeReturnCode &code)
+{
+    if (!CanRouteThisFrame()) {
+        if (!mInRoutingQueue) {
+            s_RoutingQueue.Enqueue(this);
+            mInRoutingQueue = 1;
+        }
+        code = 2;
+        done = true;
+        return kRoutingTrapped;
+    }
+    s_nNumRoutedThisFrame++;
+    PopFromRoutingQueue(this);
+    code = 2;
+    mAnimator->field_0x664 = 0;
+    XRoute *route = GetCurrentRoute();
+    if (route->mTrapCount == 0) {
+        FTilePt last = route->mLastLocation;
+        int dist = last.SquareDist(GetLocationRef());
+        last = GetLocationRef();
+        route->mLastLocation = last;
+        if (dist > 0x40) {
+            route->mTrapCount = 0;
+            return kRoutingInitial;
+        }
+        route->mTrapCount = 1;
+        return kRoutingTrapped;
+    }
+    if (route->mTrapCount == 1) {
+        route->mTrapCount = 2;
+        if (!route->mMovingPerson && AskOthersToMove(route))
+            return kRoutingWaitingForPersonToMove;
+        return kRoutingNeedFailureFeedback;
+    }
+    if (route->mTrapCount == 2) {
+        route->mTrapCount = 3;
+        return kRoutingInitial;
+    }
+    if (route->mTrapCount == 3)
+        return kRoutingNeedFailureFeedback;
+    return kRoutingFailed;
+}
+
+// Arrived: the Sim is placed where it stands, and faces along the last step of the path unless
+// variable 9 is set. Person data 0x20 goes to 0x21 if the place works. A Sim that can't be
+// placed still succeeds unless it's idle (person data 0 is 0).
+cXPerson::RoutingState cXPerson::Routing_Succeeded(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    int placed;
+    if (mPersonData[0x20]) {
+        SetPersonData(0x21, mPersonData[0x20]);
+        placed = CanPlace(GetLocationRef(), mLevel, 0, 0);
+        if (!placed)
+            SetPersonData(0x21, 0);
+    } else {
+        placed = CanPlace(GetLocationRef(), mLevel, 0, 0);
+    }
+    if (placed) {
+        Place(GetLocationRef(), mLevel, 0, 0);
+        if (mPath.size() >= 2 && mVars[9] == 0) {
+            FTilePt from = mPath[mPath.size() - 2];
+            s16 dir = from.GetApproximateDirection(mPath[mPath.size() - 1]);
+            mVars.WriteVar(1, dir);
+            ForceLocation();
+        }
+        route->mResult = 0;
+        code = 1;
+        done = true;
+    } else {
+        if (mPersonData[0] == 0) {
+            route->mResult = 1;
+            done = false;
+            return kRoutingFailed;
+        }
+        route->mResult = 0;
+        done = true;
+        code = 1;
+    }
+    CleanUpAfterFinishingRoute(kRoutingSucceeded);
+    return kRoutingSucceeded;
+}
+
+// The start of a route. A Sim in another room waits for a portal, unless the target is a portal
+// one of its routes already uses. A seated Sim stands up first through its chair's entry point
+// 0x1B, with the route's exit direction; seated on something that isn't a chair is error 0x35.
+cXPerson::RoutingState cXPerson::Routing_Initial(bool &done, TreeReturnCode &code)
+{
+    s16 flags = mVars[8];
+    if (!(flags & 8))
+        return kRoutingFailed;
+    XRoute *route = GetCurrentRoute();
+    cXObject *dest = route->mDest;
+    if (!IsGhost()) {
+        s16 destRoom = dest->mVars[0x1d];
+        if (destRoom != mVars[0x1d]) {
+            if (dest->GetType() == 8) {
+                for (XRoute *other = mRoutes.begin(); other != mRoutes.end(); ++other) {
+                    if ((cXObject *)other->mCurPortal == dest)
+                        return kRoutingFailed;
+                }
+            }
+            return kRoutingWaitingForPortal;
+        }
+    }
+    if (ShouldInterrupt() && mAnimator->IsInterruptable()) {
+        route->mResult = 4;
+        return kRoutingFailed;
+    }
+    route->BuildGoalList();
+    if (mPersonData[0] == 1) {
+        if (route->IsPersonSittingOnChairGoal(this))
+            return kRoutingSucceeded;
+        cXObject *chair = GetContainer();
+        if (chair && chair->mSelector->GetFnTable()->HasFunction(0x1a)) {
+            s16 tree = chair->mSelector->GetFnTable()->HasFunction(0x1b);
+            if (tree) {
+                s16 params[4] = {route->GetExitDirFlag()};
+                if (GosubObjectTree(chair, params, tree, false)) {
+                    SetPersonData(0x12, route->GetExitDirFlag());
+                    SetPersonData(0x20, 0);
+                    code = 3;
+                    done = true;
+                    return kRoutingWaitingForStand;
+                }
+            }
+        } else {
+            TREE_ERROR(0x35);
+            code = -1;
+            done = true;
+        }
+        return kRoutingFailed;
+    }
+    done = true;
+    return kRoutingFoundGoals;
+}
+
+#include "game/simulator/core/cXMTObject.h"
+
+// The routing state machine. State 0 or 0x15 starts a route to the slot; then the handler for
+// each state runs until one says it is done this tick. The tree's code comes back.
+long cXPerson::GotoRoutingSlot(cXObject *object, const RoutingSlot *slot, int &state)
+{
+    if (state == 0 || state == 0x15) {
+        // A TS2 slot on a multi-tile object goes to the first part that has one.
+        if (slot && slot->IsTS2RoutingSlot() && object->IsMultiTile()) {
+            cXMTObject *part = object->GetMTObject();
+            while (part) {
+                if (part->mDef && part->mDef[0x1d] > 0) {
+                    object = part;
+                    part = 0;
+                } else {
+                    part = part->mNextPart;
+                }
+            }
+        }
+        bool gone = false;
+        if (!object || !object->IsInWorldOutOfLine())
+            gone = true;
+        if (gone) {
+            if (object)
+                object->IsPortal();
+            return 0;
+        }
+        XRoute route(this, object, slot);
+        if (IsGhost())
+            route.GetRoutingSlot()->mFlags |= 0x800;
+        if (mRoutes.size() && !mRoutes[0].GetRoutingSlot()->GetAllowFailureTrees()) {
+            route.GetRoutingSlot()->SetAllowFailureTrees(false);
+        } else if (mRoutes.size() == 0 && mVars[0x11] == 0 && route.mDest == route.mStart
+                   && route.GetRoutingSlot()->mFacing == -2) {
+            CalcShortDistance(route.mDest);
+            return 1;
+        }
+        if (mRoutes.size() == 0)
+            mAnimator->field_0x664 = 0;
+        mRoutes.push_back(route);
+        state = kRoutingInitial;
+    }
+
+    XRoute *route = GetCurrentRoute();
+    if (!route)
+        return 0;
+    if (!route->mDest) {
+        mAnimator->IsFollowing();
+        state = 0;
+        mRoutes.pop_back();
+        return 2;
+    }
+    bool gone = false;
+    if (!route->mDest || !route->mDest->IsInWorldOutOfLine())
+        gone = true;
+    if (gone) {
+        if (state == kRoutingWalking)
+            state = kRoutingObjectDeletedWhileWalking;
+        else
+            state = kRoutingObjectDeleted;
+    }
+    if (!route->mValid) {
+        // States 4 to 0x11 change nothing. They are in two runs so that GCC still builds the
+        // jump table the game has (a single run of identical cases turns it into tests).
+        switch (state) {
+        case kRoutingWaitingForSit:
+        case kRoutingWaitingForStand:
+        case kRoutingTrapped:
+        case kRoutingFailed:
+        case kRoutingSucceeded:
+        case kRoutingWalkingSucceeded:
+        case kRoutingWalkingFailed:
+            break;
+        case kRoutingWaitingForPortal:
+            route->mCurPortal = 0;
+            break;
+        case kRoutingWalking:
+            state = kRoutingRouteInvalidatedWhileWalking;
+        case kRoutingWalkTerminated:
+        case kRoutingFoundPath:
+        case kRoutingWaiting:
+        case kRoutingWaitingForPersonToMove:
+        case kRoutingRouteInvalidatedWhileWalking:
+        case kRoutingNeedFailureFeedback:
+        case kRoutingWaitingForFailureFeedback:
+            ;
+        }
+        route->mValid = 1;
+    }
+
+    bool done = false;
+    TreeReturnCode code = 2;
+    do {
+        switch (state) {
+        case 0:
+            break;
+        case kRoutingFailed:
+            state = Routing_Failed(done, code);
+            break;
+        case kRoutingSucceeded:
+            state = Routing_Succeeded(done, code);
+            break;
+        case kRoutingNeedFailureFeedback:
+            state = Routing_NeedFailureFeedback(done, code);
+            break;
+        case kRoutingWaitingForFailureFeedback:
+            state = Routing_WaitingForFailureFeedback(done, code);
+            break;
+        case kRoutingWaitingForPortal:
+            state = Routing_WaitingForPortal(done, code);
+            break;
+        case kRoutingTrapped:
+            state = Routing_Trapped(done, code);
+            break;
+        case kRoutingInitial:
+            state = Routing_Initial(done, code);
+            break;
+        case kRoutingFoundGoals:
+            state = Routing_FoundGoals(done, code);
+            break;
+        case kRoutingFoundPath:
+            state = Routing_FoundPath(done, code);
+            break;
+        case kRoutingWalking:
+            state = Routing_Walking(done, code);
+            break;
+        case kRoutingObjectDeleted:
+            state = Routing_ObjectDeleted(done, code);
+            break;
+        case kRoutingObjectDeletedWhileWalking:
+            state = Routing_ObjectDeletedWhileWalking(done, code);
+            break;
+        case kRoutingWalkingFailed:
+            state = Routing_WalkingFailed(done, code);
+            break;
+        case kRoutingRouteInvalidatedWhileWalking:
+            state = Routing_RouteInvalidatedWhileWalking(done, code);
+            break;
+        case kRoutingWalkTerminated:
+            state = Routing_WalkTerminated(done, code);
+            break;
+        case kRoutingWalkingSucceeded:
+            state = Routing_WalkingSucceeded(done, code);
+            break;
+        case kRoutingWaitingForSit:
+            state = Routing_WaitingForSit(done, code);
+            break;
+        case kRoutingWaitingForStand:
+            state = Routing_WaitingForStand(done, code);
+            break;
+        case kRoutingWaitingForPersonToMove:
+            state = Routing_WaitingForPersonToMove(done, code);
+            break;
+        case kRoutingWaiting:
+            state = Routing_Waiting(done, code);
+            break;
+        default:
+            state = kRoutingFailed;
+            break;
+        }
+    } while (!done);
+    if (code != 2)
+        field_0x5e0 = 0;
+    return code;
+}
+
+// A failed route keeps its result, or gets 1, and the tree goes on with code 0.
+cXPerson::RoutingState cXPerson::Routing_Failed(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    if (route->mResult == 0)
+        route->mResult = 1;
+    CleanUpAfterFinishingRoute(kRoutingFailed);
+    code = 0;
+    done = true;
+    return kRoutingFailed;
+}
+
+// Sitting down: succeeded, or failure feedback with person data 0x1C as the result (5 if 0).
+cXPerson::RoutingState cXPerson::Routing_WaitingForSit(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    if (GetLastTransition())
+        return kRoutingSucceeded;
+    s16 result = mPersonData[0x1c];
+    if (result == 0)
+        route->mResult = 5;
+    else
+        route->mResult = result;
+    return kRoutingNeedFailureFeedback;
+}
+
+// The next four wait for the animator to finish the walk, then move on.
+cXPerson::RoutingState cXPerson::Routing_WalkingSucceeded(bool &done, TreeReturnCode &code)
+{
+    if (mAnimator->EndFollow())
+        return kRoutingSucceeded;
+    done = true;
+    return kRoutingWalkingSucceeded;
+}
+
+cXPerson::RoutingState cXPerson::Routing_WalkingFailed(bool &done, TreeReturnCode &code)
+{
+    if (mAnimator->EndFollow())
+        return kRoutingTrapped;
+    done = true;
+    return kRoutingWalkingFailed;
+}
+
+cXPerson::RoutingState cXPerson::Routing_WalkTerminated(bool &done, TreeReturnCode &code)
+{
+    if (mAnimator->EndFollow())
+        return kRoutingFailed;
+    done = true;
+    return kRoutingWalkTerminated;
+}
+
+// A path was found: the animator starts following it, with the distance to the target.
+cXPerson::RoutingState cXPerson::Routing_FoundPath(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    f32 distance = CalcShortDistance(route->mDest);
+    mAnimator->BeginFollow(distance);
+    done = true;
+    return kRoutingWalking;
+}
+
+cXPerson::RoutingState cXPerson::Routing_RouteInvalidatedWhileWalking(bool &done, TreeReturnCode &code)
+{
+    if (mAnimator->EndFollow())
+        return kRoutingInitial;
+    done = true;
+    return kRoutingRouteInvalidatedWhileWalking;
+}
+
+cXPerson::RoutingState cXPerson::Routing_WaitingForFailureFeedback(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    SetPersonData(0x1c, route->mResult);
+    mAnimator->field_0x664 = 0;
+    return kRoutingFailed;
+}
+
+cXPerson::RoutingState cXPerson::Routing_ObjectDeleted(bool &done, TreeReturnCode &code)
+{
+    mAnimator->field_0x664 = 0;
+    return kRoutingFailed;
+}
+
+cXPerson::RoutingState cXPerson::Routing_ObjectDeletedWhileWalking(bool &done, TreeReturnCode &code)
+{
+    if (mAnimator->EndFollow())
+        return kRoutingObjectDeleted;
+    done = true;
+    return kRoutingObjectDeletedWhileWalking;
 }

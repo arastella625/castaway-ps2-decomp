@@ -130,7 +130,7 @@ public:
     virtual u32 GetResFileID(s16 treeID);
     virtual void Slot6();
     virtual void Slot7();
-    virtual int GetTreeIDByNameFast(const char *name);
+    virtual s16 GetTreeIDByNameFast(const char *name);
 
     ObjSelector *mSelector; // 0x04
 

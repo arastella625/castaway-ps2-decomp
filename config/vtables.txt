@@ -25,3 +25,10 @@
 0x004B8220 TreeSim game/simulator/core2/TreeSim.h
 
 0x004BC630 cXObject                   game/simulator/core/cXObject.h
+
+# These come from the inventory items' constructors (ObjectItem 0x1FB930, TokenItem 0x24ED98,
+# ClothingItem 0x1FB588, OwnableItem 0x1FBB68).
+0x004BB460 ObjectItem                 game/simulator/core/ObjectItem.h
+0x004BB570 TokenItem                  game/simulator/core/TokenItem.h
+0x004BB230 ClothingItem               game/simulator/core/ClothingItem.h
+0x004BB350 OwnableItem                game/simulator/core/OwnableItem.h
