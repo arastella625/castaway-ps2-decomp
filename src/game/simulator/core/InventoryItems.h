@@ -38,6 +38,7 @@ public:
     static InventoryItems *GetTribeInventory();
     int GetTokenItemIndex(s16 id);
     bool HasTokenEverBeenCollected(s16 id) const;
+    void MarkTokenAsBeingCollected(s16 id);
 
     ClothingItem *GetClothingItem(s16 neighborID, Character::eBodyPart part);
     void AddItem(InventoryItem *item);

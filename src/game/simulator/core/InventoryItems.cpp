@@ -6,6 +6,16 @@
 #include "game/simulator/core/ObjectItem.h"
 #include "game/simulator/core/OwnableItem.h"
 
+// Sets the token's bit in the collected bits. Like HasTokenEverBeenCollected, it lets the word
+// one past the end through.
+void InventoryItems::MarkTokenAsBeingCollected(s16 id)
+{
+    int word = id / 32;
+    s16 bit = id % 32;
+    if (word <= mCollectedWords && mCollectedBits)
+        mCollectedBits[word] |= 1 << bit;
+}
+
 // An object by GUID. A GUID that names a token adds one of that token instead.
 int InventoryItems::AddObjectItem(int guid)
 {
