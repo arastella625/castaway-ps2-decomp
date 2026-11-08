@@ -545,6 +545,22 @@ cXPerson::RoutingState cXPerson::Routing_NeedFailureFeedback(bool &done, TreeRet
     return kRoutingFailed;
 }
 
+#ifdef NON_MATCHING
+// Not matched: 25 of 36 words line up. The game's inlined IsIdling clears its flag before the
+// load and sign-extends the state again before comparing with 3; no form tried does both (an
+// int or bool flag, ||, a switch, GetIdleState as int or s16, a person data getter).
+// Standing up: back to the start once the Sim is idle, else failure feedback with result 6.
+cXPerson::RoutingState cXPerson::Routing_WaitingForStand(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    SetPersonData(0x20, route->field_0x9c);
+    if (GetLastTransition() && IsIdling())
+        return kRoutingInitial;
+    route->mResult = 6;
+    return kRoutingNeedFailureFeedback;
+}
+#endif
+
 // A failed route keeps its result, or gets 1, and the tree goes on with code 0.
 cXPerson::RoutingState cXPerson::Routing_Failed(bool &done, TreeReturnCode &code)
 {
@@ -555,4 +571,83 @@ cXPerson::RoutingState cXPerson::Routing_Failed(bool &done, TreeReturnCode &code
     code = 0;
     done = true;
     return kRoutingFailed;
+}
+
+// Sitting down: succeeded, or failure feedback with person data 0x1C as the result (5 if 0).
+cXPerson::RoutingState cXPerson::Routing_WaitingForSit(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    if (GetLastTransition())
+        return kRoutingSucceeded;
+    s16 result = mPersonData[0x1c];
+    if (result == 0)
+        route->mResult = 5;
+    else
+        route->mResult = result;
+    return kRoutingNeedFailureFeedback;
+}
+
+// The next four wait for the animator to finish the walk, then move on.
+cXPerson::RoutingState cXPerson::Routing_WalkingSucceeded(bool &done, TreeReturnCode &code)
+{
+    if (mAnimator->EndFollow())
+        return kRoutingSucceeded;
+    done = true;
+    return kRoutingWalkingSucceeded;
+}
+
+cXPerson::RoutingState cXPerson::Routing_WalkingFailed(bool &done, TreeReturnCode &code)
+{
+    if (mAnimator->EndFollow())
+        return kRoutingTrapped;
+    done = true;
+    return kRoutingWalkingFailed;
+}
+
+cXPerson::RoutingState cXPerson::Routing_WalkTerminated(bool &done, TreeReturnCode &code)
+{
+    if (mAnimator->EndFollow())
+        return kRoutingFailed;
+    done = true;
+    return kRoutingWalkTerminated;
+}
+
+// A path was found: the animator starts following it, with the distance to the target.
+cXPerson::RoutingState cXPerson::Routing_FoundPath(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    f32 distance = CalcShortDistance(route->mDest);
+    mAnimator->BeginFollow(distance);
+    done = true;
+    return kRoutingWalking;
+}
+
+cXPerson::RoutingState cXPerson::Routing_RouteInvalidatedWhileWalking(bool &done, TreeReturnCode &code)
+{
+    if (mAnimator->EndFollow())
+        return kRoutingInitial;
+    done = true;
+    return kRoutingRouteInvalidatedWhileWalking;
+}
+
+cXPerson::RoutingState cXPerson::Routing_WaitingForFailureFeedback(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    SetPersonData(0x1c, route->mResult);
+    mAnimator->field_0x664 = 0;
+    return kRoutingFailed;
+}
+
+cXPerson::RoutingState cXPerson::Routing_ObjectDeleted(bool &done, TreeReturnCode &code)
+{
+    mAnimator->field_0x664 = 0;
+    return kRoutingFailed;
+}
+
+cXPerson::RoutingState cXPerson::Routing_ObjectDeletedWhileWalking(bool &done, TreeReturnCode &code)
+{
+    if (mAnimator->EndFollow())
+        return kRoutingObjectDeleted;
+    done = true;
+    return kRoutingObjectDeletedWhileWalking;
 }

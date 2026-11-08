@@ -126,7 +126,7 @@ public:
     virtual void Slot9();
     virtual void Slot10();
     virtual void Slot11Offset(f32 x, f32 y, f32 direction);
-    virtual void Slot12();
+    virtual void BeginFollow(f32 distance); // Wii SAnimator2 slot 12
     virtual int FollowOneStep(); // Wii SAnimator2 slot 13
     virtual int EndFollow(); // Wii SAnimator2 slot 14
     virtual void Slot15();
@@ -225,6 +225,25 @@ public:
     RoutingState Routing_Waiting(bool &done, TreeReturnCode &code);
     RoutingState Routing_NeedFailureFeedback(bool &done, TreeReturnCode &code);
     RoutingState Routing_Failed(bool &done, TreeReturnCode &code);
+    RoutingState Routing_WaitingForStand(bool &done, TreeReturnCode &code);
+    RoutingState Routing_WaitingForSit(bool &done, TreeReturnCode &code);
+    RoutingState Routing_WalkingSucceeded(bool &done, TreeReturnCode &code);
+    RoutingState Routing_WalkingFailed(bool &done, TreeReturnCode &code);
+    RoutingState Routing_WalkTerminated(bool &done, TreeReturnCode &code);
+    RoutingState Routing_FoundPath(bool &done, TreeReturnCode &code);
+    RoutingState Routing_RouteInvalidatedWhileWalking(bool &done, TreeReturnCode &code);
+    RoutingState Routing_WaitingForFailureFeedback(bool &done, TreeReturnCode &code);
+    RoutingState Routing_ObjectDeleted(bool &done, TreeReturnCode &code);
+    RoutingState Routing_ObjectDeletedWhileWalking(bool &done, TreeReturnCode &code);
+    // Wii: IsIdling, inlined on PS2.
+    int GetIdleState() const { return mPersonData[0]; }
+    bool IsIdling() const
+    {
+        int idle = 0;
+        if (GetIdleState() == 0 || GetIdleState() == 3)
+            idle = 1;
+        return idle;
+    }
     int RunImmediateAction(Interaction *action);
     int MoveOutOfWay(int priority);
     int GetSimType();

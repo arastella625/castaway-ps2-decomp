@@ -326,6 +326,7 @@ public:
     long TryCallNamedTree(StackElem *, XPrimParam *);
     long TryMakeActionString(StackElem *, XPrimParam *);
     long TryGenericSimCall(StackElem *, XPrimParam *);
+    f32 CalcShortDistance(cXObject *object) const;
     long ShowAllObjectDialogs(StackElem *elem, XPrimParam *param);
     static void ChangeSelectedSimL();
     long TryDialog(StackElem *, XPrimParam *, bool);
