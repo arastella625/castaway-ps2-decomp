@@ -1177,7 +1177,7 @@ It places the **stack object**, which must exist or it's error 0x15. It returns 
 | `+1` u8 | Local holding the relative object's ID. A bad index is error 0x34, a missing object 0x17 |
 | `+2` bit 0 | Start at the relative object. Without it, the start is tile (1, 1), level 1, and there's no relative object |
 | `+2` bit 1 | Don't prefer empty tiles |
-| `+2` bit 2 | Only tiles that may be edited (tile flag 0x20) |
+| `+2` bit 2 | Only tiles that may be edited: tile flag 0x20 **clear**. (This row used to say the flag was needed; it's the other way round, proven below) |
 | `+2` bit 3 | The object's direction comes from temp 0. Anything but a Sim loses bit 0 of it |
 | `+2` bit 4 | Prefer under a roof: placement tests also want a roof, error 0xA without |
 
@@ -1189,7 +1189,7 @@ It places the **stack object**, which must exist or it's error 0x15. It returns 
 | 3 | **Search along the relative object's direction** | 0x3D with no relative object |
 | 4 | **The same, direction + 2** | 0x3D |
 | 5 | **Multi-tile link:** the object turns to match the relative object, and goes where the two leaders' part offsets (definition `+0x16`) say | 0x3D, 0x15 for no leader |
-| 6 | **Random:** 10 tries at random tiles, the middle of the tile. With bit 2 it needs flag 0x20, and when preferring empty the tile must have no object | False |
+| 6 | **Random:** 10 tries at random tiles, below | False |
 | 7 | **Search along temp 1 as the direction**, modulo 8 | 0x3D |
 | 8 | **Multi-tile, every turn:** it tries directions 0, 2, 4 and 6 and keeps the nearest good tile. It tries with bit 4 if set, then without, then with stay-in-room off | False |
 
@@ -1198,7 +1198,7 @@ Directions must be even or -1, or it's error 0x5F. Modes 3, 4 and 7 use `CanPlac
 **The search** (`FindGoodLocation`). It starts at the given tile, or the cursor without one, kept to 1 and size - 2, on level 1 if none is given. Stay in room is on, and it's the start tile's room. From offset (0, 0) it tests each tile:
 
 1. Out of bounds: not good, and it counts. It stops once (width + height) x 4 tiles in a row are out of bounds. Going past -0x40 on either axis also stops it.
-2. Editable only: tile flag 0x20 is needed.
+2. Editable only: tile flag 0x20 must be **clear** (`0x1E47C0`: editable is `!(flags & 0x20)`, or every tile when the object at `0x50A6A8` has `+0x414` set). **Proven, PS2.** This used to say the flag was needed.
 3. Prefer empty: a tile with an object isn't good, unless the object is type 5, type 0xE, or a type 8 without entry point 15.
 4. A tile with a diagonal wall isn't good.
 5. Stay in room: the tile must be in the start's room.
@@ -1214,6 +1214,26 @@ else y += 1;
 ```
 
 With direction 0 or 4 the offset goes 0, +1, -1, +2, -2 and so on along y. With 2 or 6 it does that along x.
+
+**Mode 6, the random tile. Proven, PS2** (`0x2255A8` to `0x225880` in `TryFindGoodLocation`, read instruction by instruction). It doesn't use the search. It makes **exactly 10 tries**, and each try is:
+
+1. **x first:** `x = GetNextRandomNumber() % xsize`, where xsize is `cFixedWorld::GetXSize` (`gFixedWorld +0x10`). If xsize is 0, x is 0 and no number is drawn. **Then y:** the same with `GetYSize` (`+0x14`). Both use unsigned modulo, so each is 0 to size - 1. Unlike the search, there's no clamping to 1..size-2, so edge tiles can be picked. x and y are kept as signed bytes.
+2. The point is the middle of the tile, (x × 16 + 8, y × 16 + 8). The level is the start's: the relative object's with `+2` bit 0, otherwise 1.
+3. **With `+2` bit 2 (editable only):** the try fails if the tile's flag 0x20 is **set**. The flag is the byte `flags[x][y]` of the table at `gFixedWorld +0x20` (its `+0xC` is the row pointers). Unlike the search, the "edit anywhere" override at `0x50A6A8 +0x414` isn't consulted.
+4. **Unless `+2` bit 1 (prefer empty, the default):** the try fails if the object-ID grid (`gObjectModule +0x30`, s16 at `[y × 64 + x]`) holds any object there. There are none of the search's exceptions for types 5, 0xE and 8. Outside 0 to 0x3F on either axis it counts as empty. This grid isn't per level.
+5. `CanPlace(point, level, 0, 0)` (vtable slot 37). False fails the try.
+6. Otherwise `Place` (slot 38) with the same arguments, and the mode succeeds. With `+2` bit 3, the direction from temp 0 is written after the place (bit 0 cleared for anything but a Sim).
+
+There's no other test: no wall check, no room check and no roof check. A failed try leaves nothing behind. After 10 failed tries the result is false.
+
+**The random numbers. Proven, PS2.** `GetNextRandomNumber` (`0x262AF0`) is the one generator. The Random primitive draws from it through `SRand` (`limit ? GetNextRandomNumber() % limit : 0`, the same shape mode 6 inlines), as do the game's other callers (39 call sites in all, mode 6's two among them). They all share one 32-bit state at `0x5112E8`:
+
+```
+state = state * 0x41C64E6D + 0x3039            (mod 2^32)
+result = ((u64)old_state * 0x41C64E6D + 0x3039) >> 16, low 32 bits
+```
+
+So the number it returns is bits 16 to 47 of the 64-bit sum, not the new state. I checked this formula against a simulation of the instructions on 100,000 random states. Each try draws two numbers when both sizes are non-zero, so 10 failed tries move the state on by 20. `GetSRandSeed` (`0x262AD0`) and `SetSRandSeed` (`0x262AE0`) read and write the state. A recon stream saves it and restores it (`0x1BED6C` to `0x1BED88`). Likely: one other caller (`0x1EF52C`) seeds it from a call result when the simulator starts.
 
 ## Update (opcode 0x07)
 
