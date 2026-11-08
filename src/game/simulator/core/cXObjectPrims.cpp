@@ -2520,11 +2520,11 @@ inline void EnableBuyAndBuild(ObjectModule *module, cXObject *object)
 }
 
 // Primitive 1: GenericSimCall, a switch on the s16 at +0 with its operands in my temps.
-// Not matched, and only partly written. The cases are in the game's order, which is proven:
+// Not matched, but every call is written. The cases are in the game's order, which is proven:
 // GCC lays the bodies out as the source has them, and the jump table at 0x4BA900 sorted by
-// address gives that order. Calls not written yet fall through to "return 1", so the size is
-// far short of the game's 2,388 words and the 0x1D40-byte frame. docs/formats/bhav.md has what
-// each call does, and Wii's TryGenericSimCall names nearly every function they call.
+// address gives that order. 2,311 words against the game's 2,388, 1,828 of them lined up.
+// docs/formats/bhav.md has what each call does, and Wii's TryGenericSimCall names nearly every
+// function they call.
 long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
 {
     long result = 1;
@@ -2532,8 +2532,60 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
     case 0x00:
         gWeatherManager->SetWeatherState("hurricane", 2, false);
         break;
-    case 0x01:
+    case 0x01: {
+        // Swaps me and the stack object, both Sims. Each is placed on the object the other
+        // holds in object variable 2 (tile (-1, -1), level 1), takes the other's direction, and
+        // is offset by that object's first slot, turned by its direction. The offsets add up:
+        // the second Sim's includes the first's. Only my object is checked for being missing,
+        // as on Wii.
+        cXPerson *me = GetPerson();
+        OBJECT_ERROR_CHECK(me, 0x1c);
+        cXObject *object = GetObjectFromID(elem->mStackObject);
+        OBJECT_ERROR_CHECK(object, 0x15);
+        cXPerson *other = object->GetPerson();
+        OBJECT_ERROR_CHECK(other, 0x1c);
+        cXObject *mine = GetObjectFromID(mVars[2]);
+        OBJECT_ERROR_CHECK(mine, 0x15);
+        cXObject *theirs = GetObjectFromID(object->mVars[2]);
+        OBJECT_ERROR_CHECK(mine, 0x15);
+        s16 myDirection = me->mVars[1];
+        s16 theirDirection = other->mVars[1];
+        me->Pickup();
+        other->Pickup();
+        FTilePt tile;
+        tile.mX = -0x10;
+        tile.mY = -0x10;
+        if (me->CanPlace(tile, 1, theirs, 0))
+            me->Place(tile, 1, theirs, 0);
+        if (other->CanPlace(tile, 1, mine, 0))
+            other->Place(tile, 1, mine, 0);
+        me->mVars.WriteVar(1, theirDirection);
+        other->mVars.WriteVar(1, myDirection);
+        me->mAnimator->Slot6();
+        other->mAnimator->Slot6();
+        f32 x = 0.0f;
+        f32 y = x;
+        f32 direction = x;
+        ObjectSlot *slot = theirs->GetObjectSlot(0);
+        if (slot) {
+            f32 slotX = slot->GetXOffset();
+            f32 slotY = slot->GetYOffset();
+            CardinalRotateCoords((int)theirs->mVars[1], slotX, slotY);
+            x += slotX;
+            y += slotY;
+            me->mAnimator->Slot11Offset(x, y, direction);
+        }
+        slot = mine->GetObjectSlot(0);
+        if (slot) {
+            f32 slotX = slot->GetXOffset();
+            f32 slotY = slot->GetYOffset();
+            CardinalRotateCoords((int)mine->mVars[1], slotX, slotY);
+            x += slotX;
+            y += slotY;
+            other->mAnimator->Slot11Offset(x, y, direction);
+        }
         break;
+    }
     case 0x03: {
         // Only for the selected Sim: asks the game flow for state 0x20.
         cXPerson *person = GetObjectFromID(elem->mStackObject)->GetPerson();
