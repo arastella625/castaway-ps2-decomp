@@ -389,6 +389,8 @@ def add_material(builder, library, shader_hash, cache, layers=False):
         shader = library.shader(shader_hash)
         # The game draws opaque shaders at once and alpha ones later, so alpha wins an exact tie.
         material['extras'] = {'draw_rank': len(cache) + 1 if shader and shader.is_alpha else 0}
+        # Lit: COLOR_0 is a brightness that VU1 multiplies by its lights. Unlit: the colour itself.
+        material['extras']['lit'] = bool(shader and shader.lit)
         add_detail_pass(builder, library, material, shader)
     gltf.setdefault('materials', []).append(material)
     cache[shader_hash] = len(gltf['materials']) - 1

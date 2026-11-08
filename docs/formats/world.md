@@ -779,13 +779,57 @@ down, 100% by area, against 88 to 100% up on all 27 other lots. That is in the b
 order says the same: counted from each restart, 71% of it agrees with the normals, as 85 to 93% does
 on `lot_01`, 16 and 24. Levels place terrain with no transform, so nothing turns it over. `model.py`
 winds triangles to match the normals, so the export is faithful. VU1 doesn't cull, or this ground
-wouldn't draw. **Open:** how the sun lights it, since those normals face away.
+wouldn't draw. How they're lit is below: **likely** by the ambient alone.
 
-**Open:** the overall light level. VU1 multiplies this brightness by lights the port doesn't decode, so
-`terrain.gdshader` treats 127 as the texture's own colour and leaves the rest to Godot's sun. Pixels
-follow brightness / 127 in both renderers, measured on `lot_01`, so ground is darker than it was. It
-may well be too dark. `lot_24`'s plate at 127 now shows as a pale shape with a hard edge; whether the
-game's lights hide that is open.
+#### How ground is lit
+
+**Proven, VU1's lighting.** The whole routine is 34 bundles (overlay at `0xD18`):
+
+- It loads four light colours (VU1 quadwords 47 to 50), each times quadword 56 times 1/127, and an
+  ambient, quadword 46 times quadword 55 times 1/127.
+- It loads a 3 x 4 matrix of light directions (51 to 53) and a clamp (4).
+- Per vertex it takes four N.L at once, clamps each to 0 to 1 (`MAX` with 0, `MINI` with 1), and adds
+  ambient + each colour x its N.L. It multiplies that by the brightness byte, clamps to quadword 4,
+  and converts to an integer for the GS, which takes 128 as 1.0.
+
+There's no flip and no abs: a face turned from a light gets nothing from it, and every face gets
+the ambient.
+
+**Proven, the lights' source.** `world/LevelLightingSequence` holds three sequences, `DarkCave`,
+`Default` and `TempleInterior`. Each is a VECTOR of 11 `Level::LightingEntry`, 0x50 bytes, keyed by the
+hour (0, 4, 4.5, 5, 6, 7, 12, 17, 18, 19, 20). `tools/lighting.py` reads them, with controls.
+
+| Offset | Meaning |
+|---|---|
+| 0x00 | Hour |
+| 0x04, 0x08 | Ambient colour, intensity |
+| 0x10, 0x14, 0x18 | Fog colour and two floats, **likely** |
+| 0x1C, 0x20 | Sun elevation and yaw, degrees |
+| 0x24, 0x28 | Sun colour, intensity |
+| 0x2C to 0x38 | The same for the moon |
+| 0x3C, 0x40 | Sky light colour, intensity |
+| 0x44, 0x48 | Sky ambient colour, intensity |
+
+`ERLevel::InterpolateLevelLighting` blends the two entries round the hour linearly.
+`OutsideLightsUpdate` makes the sun's direction (cos e cos y, cos e sin y, sin e) on Wii and PS2 alike,
+with the level's own yaw offset added to y. Daytime elevations are below 0, so this is the way light
+travels. `CalcSkyLights` turns the sky light and sky ambient into one directional light along it, and
+an ambient. Wii's `EIStaticSubModel::Draw`, `ISimsObjectModel::DoLightingCalculation` and
+`EMidLotInstance` use that set. Wii's `UpdateLightingEquation` puts the GX light at -3.4 million times
+the direction, so towards the sun. `Default` at 12:00 is sun elevation -64, yaw 34; sky
+(1.0, 1.0, 0.6) x 1.0; sky ambient (0.72, 0.72, 1.0) x 0.72.
+
+**Likely, down-facing ground gets the ambient alone.** If PS2's light upload, which wasn't traced,
+uses the same sign as Wii, the sun can't reach `lot_02`, 28 and 29's ground, and it shows at the sky
+ambient x brightness. **Not proven** on PS2: the sign in quadwords 51 to 53, which light set fills
+them, the scale in 56 and the clamp in 4.
+
+**What the port does.** `terrain.gdshader` is unchanged: 127 is the texture's own colour, with
+Godot's sun. `beach.gd -- --game-light` uses `terrain_game_light.gdshader` instead. That applies the
+equation above with `Default` at 9:00, from the stored normal, in display values, with 1.0 = 128 and
+a cap of 255/128. The game-light renders of `lot_02` go nearly black where the ground faces down.
+Objects and the Sim stay on Godot's lights, which work in linear values and can't follow the GS's
+sums.
 
 **What this did to the patches: it didn't remove them.** Seven of lots 1 to 28 have ten metres or more of
 seam where sheets lie on each other (`lot_02`, 09, 15, 22, 24, 27, 28). All seven still do. Seam
