@@ -676,6 +676,46 @@ cXPerson::RoutingState cXPerson::Routing_Trapped(bool &done, TreeReturnCode &cod
     return kRoutingFailed;
 }
 
+// Arrived: the Sim is placed where it stands, and faces along the last step of the path unless
+// variable 9 is set. Person data 0x20 goes to 0x21 if the place works. A Sim that can't be
+// placed still succeeds unless it's idle (person data 0 is 0).
+cXPerson::RoutingState cXPerson::Routing_Succeeded(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    int placed;
+    if (mPersonData[0x20]) {
+        SetPersonData(0x21, mPersonData[0x20]);
+        placed = CanPlace(GetLocationRef(), mLevel, 0, 0);
+        if (!placed)
+            SetPersonData(0x21, 0);
+    } else {
+        placed = CanPlace(GetLocationRef(), mLevel, 0, 0);
+    }
+    if (placed) {
+        Place(GetLocationRef(), mLevel, 0, 0);
+        if (mPath.size() >= 2 && mVars[9] == 0) {
+            FTilePt from = mPath[mPath.size() - 2];
+            s16 dir = from.GetApproximateDirection(mPath[mPath.size() - 1]);
+            mVars.WriteVar(1, dir);
+            ForceLocation();
+        }
+        route->mResult = 0;
+        code = 1;
+        done = true;
+    } else {
+        if (mPersonData[0] == 0) {
+            route->mResult = 1;
+            done = false;
+            return kRoutingFailed;
+        }
+        route->mResult = 0;
+        done = true;
+        code = 1;
+    }
+    CleanUpAfterFinishingRoute(kRoutingSucceeded);
+    return kRoutingSucceeded;
+}
+
 // A failed route keeps its result, or gets 1, and the tree goes on with code 0.
 cXPerson::RoutingState cXPerson::Routing_Failed(bool &done, TreeReturnCode &code)
 {

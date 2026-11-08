@@ -252,6 +252,7 @@ public:
     RoutingState Routing_NeedFailureFeedback(bool &done, TreeReturnCode &code);
     RoutingState Routing_Failed(bool &done, TreeReturnCode &code);
     RoutingState Routing_FoundGoals(bool &done, TreeReturnCode &code);
+    RoutingState Routing_Succeeded(bool &done, TreeReturnCode &code);
     RoutingState Routing_Trapped(bool &done, TreeReturnCode &code);
     int AskOthersToMove(XRoute *route);
     RoutingState Routing_WaitingForPersonToMove(bool &done, TreeReturnCode &code);

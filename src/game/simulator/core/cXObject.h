@@ -41,6 +41,46 @@ public:
         int dy = other.mY - mY;
         return dx * dx + dy * dy;
     }
+
+    // Wii: GetApproximateDirection, the direction 0 to 7 from here to `to`, by eighths.
+    int GetApproximateDirection(const FTilePt &to) const
+    {
+        int dx = to.mX - mX;
+        int dy = to.mY - mY;
+        int ax = dx > -1 ? dx : -dx;
+        int ay = dy > -1 ? dy : -dy;
+        int dir;
+        if (ax * 2 < ay)
+            dir = 4;
+        else if (ay * 2 < ax)
+            dir = 2;
+        else
+            dir = 3;
+        if (dx < 0) {
+            switch (dir) {
+            case 2:
+                dir = 6;
+                break;
+            case 3:
+                dir = 5;
+                break;
+            }
+        }
+        if (dy < 0) {
+            switch (dir) {
+            case 4:
+                dir = 0;
+                break;
+            case 3:
+                dir = 1;
+                break;
+            case 5:
+                dir = 7;
+                break;
+            }
+        }
+        return dir;
+    }
 };
 
 enum TFGL_ACTIONS { };
@@ -260,7 +300,7 @@ public:
     virtual void Turn(int a);
     virtual void Pickup();
     virtual int CanPlace(const FTilePt &tile, int a, cXObject *object, int b);
-    virtual int Place(const FTilePt &tile, int a, cXObject *object, int b);
+    virtual void Place(const FTilePt &tile, int a, cXObject *object, int b);
     virtual int IsPartOfMe(cXObject *object);
     virtual int UserCanPlace(const FTilePt &tile, int a, cXObject *object, int b);
     virtual int UserPlace(const FTilePt &tile, int a, cXObject *object, int b);
