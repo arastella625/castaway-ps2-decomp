@@ -688,12 +688,21 @@ The generator is at `0x262AF0`: `state = state * 0x41C64E6D + 0x3039`, returning
 | Definition word | Meaning |
 |---|---|
 | `+0x14` s16 | Which multi-tile object in this file. 0 is a single tile |
-| `+0x16` s16 | -1 on the master. On a part, its place: y in the high byte, x in the low byte |
+| `+0x16` s16 | -1 on the master. On a part, its place: **x in the high byte (signed), y in the low byte**. Proven, see below. (This row used to have them the other way round.) |
 | `+0x1C` u32 | GUID. The master's GUID is just the master definition's GUID |
 
 1. A definition with `+0x14` of 0 is its own master.
 2. Otherwise it walks every selector for one with the same file (selector `+4`, the namespace ID), the same `+0x14`, and `+0x16` of -1.
 3. If none is found, it's its own master.
+
+**Which byte is x. Proven, PS2.** A part's tile in its object is x in the high byte of `+0x16` and y in the low byte, in the game's axes (x is the first word of a tile point, see "Which way is x" under Routing). The chain:
+
+1. **`ObjDefinition::GetMultiTileOffsets` (`0x253278`)** gives the high byte, sign-extended, as its first result and the low byte, unsigned, as its second.
+2. **`cXMTObject::Initialize` (`0x250168`)** stores those at `+0x144` and `+0x148`, and definition `+0x70` (the level) at `+0x14C`.
+3. **`AssignOffsets`**, which matches, subtracts the first part's `+0x144` and `+0x148` from each part's, and turns the result by the first part's direction into `+0x150` and `+0x154`.
+4. **`cXMTObject::Place` (`0x2000A0`)** builds a tile point from `+0x150` and `+0x154` through `0x175800`, which stores its first argument × 16 as x and its second × 16 as y. It then moves each part by it.
+
+So the high byte ends up in x. Wii's `ObjDefinition::GetSubIndex(a, b)`, `(a << 8) | (b & 0xFF)`, packs x first, y second. On a part whose object faces direction 0, the part's tile is the first part's plus (high byte, low byte) whole tiles; other directions turn that offset as `AssignOffsets` does.
 
 So there's no stored master GUID to decode. **On the disc:** 509 definitions are single tiles and 826 are in 131 multi-tile objects, and every one of the 131 has exactly one master. `+0x10` is the control, and gives 123 with one, 6 with none and 2 with two. `tools/bhav.py` reruns this, and `read_masters` returns the table from GUID to master GUID.
 
