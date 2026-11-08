@@ -68,8 +68,8 @@ PALM_CROWN_HEIGHT = 4.12  # treeanimate3 in isTreeSkeleton
 PALM_LEAVES = 9
 PALM_LEAF_LIFT = 20.0  # degrees above level
 BOUNDS_TOLERANCE = 0.001
-FADE_LIST = 2  # gamedata's third submodel list
-FADE_SUFFIX = ' fade'
+FLOOR_LIST = 2  # gamedata's third submodel list: the floor Sims stand on, never drawn
+FLOOR_SUFFIX = ' floor'
 MISSING_TEXTURE = 'missingshader'  # the purple 16x16 behind Maya's default materials
 ALPHA_ADD = 0x68  # the GS ALPHA register: source * FIX + destination
 
@@ -665,10 +665,10 @@ def read_lot_level(disc, lot):
 def split_terrain(terrain, data, level, shader_hashes):
     """Return (drawn ground, list 3). List 3 is the floor Sims stand on, and the game never draws it."""
     groups = mdl.submodels(data, terrain, shader_hashes)
-    ground, fading = [], []
+    ground, floor = [], []
     for reference, instance in enumerate(level.submodels, 1):
-        (fading if reference in level.lists[FADE_LIST] else ground).extend(groups[instance.submodel])
-    return ground, fading
+        (floor if reference in level.lists[FLOOR_LIST] else ground).extend(groups[instance.submodel])
+    return ground, floor
 
 
 def export_lot(disc, out_path, lot, posed=False):
@@ -683,19 +683,19 @@ def export_lot(disc, out_path, lot, posed=False):
     available = {e.name: (e, raw) for e, raw in mdl.each_model(disc, library.shaders)}
     terrain = mdl.parse_model(available[lot][1], library.shaders, lot)
     level = read_lot_level(disc, lot)
-    solid, fading = split_terrain(terrain, available[lot][1], level, library.shaders)
+    solid, floor = split_terrain(terrain, available[lot][1], level, library.shaders)
     # Objects go on the drawn ground. List 3 counts only where that has none.
-    heights = {**ground_heights(textured(fading, library)),
+    heights = {**ground_heights(textured(floor, library)),
                **ground_heights(textured(solid, library))}
     builder = gltf.GlbBuilder()
     cache = {}
     meshes = {}
     ground = add_mesh(builder, library, lot, solid, cache)
     nodes = [builder.add_node({'name': lot, 'mesh': ground})]
-    if textured(fading, library):
-        name = lot + FADE_SUFFIX
+    if textured(floor, library):
+        name = lot + FLOOR_SUFFIX
         nodes.append(builder.add_node({
-            'name': name, 'mesh': add_mesh(builder, library, name, fading, cache)}))
+            'name': name, 'mesh': add_mesh(builder, library, name, floor, cache)}))
 
     def mesh_for(name):
         if name not in meshes:

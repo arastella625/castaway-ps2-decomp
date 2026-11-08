@@ -237,7 +237,7 @@ The lists sort a lot's submodels into groups. References count from 1 in file or
 the stream order in `ERLevel::Read`: lists 2 and 3 are separate arrays, and an earlier version of this
 page mixed them up. The instance list goes in the array `Draw` and
 `DrawOuterLotInstancesWithShadow` walk. See "How ground is drawn" for list 3. `placed.py lot` writes it
-as a separate node, `lot_24 fade`, a name left from that mistake.
+as a separate node, `lot_24 floor`.
 
 ### Mid-lot objects
 
@@ -1001,7 +1001,13 @@ it. So `ranger` is torso, lowerBody and shoes `ranger` and the rest `none`. `def
   - **Parts.** A part's definition gives its place from the lead at `+0x16`: x in the low byte, y
     in the high. Turned clockwise by the lead's direction in our axes, as `OffsetCoordsInDirection`'s
     steps go, this lands on 217 of 219 parts. The other way lands on 85. The diving platform on
-    `lot_24` has two parts whose offsets, 0 and 4, don't fit; it's not known why.
+    `lot_24` has two parts whose offsets, 0 and 4, don't fit. Its lead's own offset is 3, not 0, and
+    its 8 definitions run 0 and 3 to 7 along x, plus 0x700 and -1, which is a longer platform than the
+    3 tiles placed. **Proven**, this doesn't matter to the game: `ObjDefinition::GetSubIndex` packs
+    `(y << 8) | x`, and its only caller is `ObjectFolder::GetSubTileSelector`, which builds new
+    objects. A loaded object keeps its saved tile positions, and `cXMTObject::AssignOffsets` works its
+    offsets out from them. **Likely** the definitions changed after `lot_24` was saved, as with
+    `lot_28`.
   - **Checks.** With this rule, 44 of 50 multi-tile models cover all their tiles' middles, and 239 of
     269 tiles in all. The old export's rule managed 4 and 110. The 6 left are portals whose tiles are
     where Sims walk, not the model: the secret passage and its exit, the quicksand pillar (**likely**
@@ -1020,6 +1026,15 @@ it. So `ranger` is torso, lowerBody and shoes `ranger` and the rest `none`. `def
   `spawner_object` have it saved as 1, which hides their `placeholder_01` cubes. `zz_move_a__tron`, the
   28 gnomes, sets it in its `load` tree, and a cheat tree clears it. Of all 694 tree sets, 3 do that
   in `load` or `init`, and it's the only one placed.
+
+  **Proven, a hidden object still blocks Sims.** `IsVisible`'s only caller is
+  `ISimsObjectModel::VisibilityTest`, which is drawing. `CollisionMap::DoesCollideObject` (Wii
+  `0x80213440`, PS2 `0x316410`, reached from `SAnimator2::CheckCollision` at `0x108BC8`) walks each
+  tile's objects. It skips one that `CanIntersectPeople` lets through, one not `IsInWorld`, a person
+  or a door. `CanIntersectPeople` reads only variable 8: with bit 0x04, bit 0x02 blocks; without it,
+  bit 0x10 lets Sims through. `SetData` is a plain write, so setting 0x22 has no side effect. The
+  gnome's `init` sets bit 0x800 of variable 8, which it already has, so its saved 0x4800 blocks. That
+  makes one hidden blocker on each of the 28 lots, and no other hidden object blocks.
 
   The row's word 7 is `*_action_queue`, a shader and texture, not a model. Word 8 is a rig when the
   model has one. `placed.py` shows the saved state. **Open:** trees can change variables 0 and 0x22
