@@ -30,6 +30,8 @@ public:
     // Wii: TriggerGameOver, inlined on PS2.
     void TriggerGameOver() { mGameOver = 1; }
     void RelationshipChangeOccured(int change);
+    int CountModelessDialogs();
+    void CleanupModelessDialogs();
 
     void AddAction(const Interaction *action, const BString2 &name, u32 icon, ERShader *shader,
                    u32 insertGUID) const;

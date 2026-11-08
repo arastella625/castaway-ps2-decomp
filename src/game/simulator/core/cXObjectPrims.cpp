@@ -2179,6 +2179,28 @@ public:
     int IsSequenceComplete(eSequenceType type);
 };
 
+// GenericSimCall 0x2A: the camera director, _globals +0x1D0.
+class CameraDirector {
+public:
+    u32 pad_0x0[0xac];
+    int mState; // 0x2b0
+
+    // Wii: IsInControl, inlined on PS2. States 0 and 8 aren't in control.
+    bool IsInControl() const
+    {
+        bool inControl = false;
+        if (mState)
+            inControl = mState != 8;
+        return inControl;
+    }
+};
+
+// GenericSimCall 0x32: _globals +0x1F8.
+class OptionsRecon {
+public:
+    int GetIsMusicGenreEnabled(int genre);
+};
+
 // Wii: GetEORGlobals, a pointer on PS2 at 0x50A6A8.
 extern EGlobal *gEORGlobals;
 
@@ -2352,15 +2374,71 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
     case 0x21:
         return ShowAllObjectDialogs(elem, primParam);
     case 0x22:
-    case 0x26:
+        break;
+    case 0x26: {
+        // t1 = 1 if object t0 is in the world. False if there's no object.
+        cXObject *object = GetObjectModule()->GetObjectFromIDInline(mTemps[0]);
+        if (!object) {
+            result = 0;
+            break;
+        }
+        if (object->IsInWorld())
+            mTemps[1] = 1;
+        else
+            mTemps[1] = 0;
+        result = 1;
+        break;
+    }
     case 0x28:
+        mTemps[0] = 0;
+        result = 1;
+        break;
     case 0x29:
+        // Only checks: t0 above 1 is error 0x14, and not being a Sim is error 0x4C.
+        OBJECT_ERROR_CHECK((u16)mTemps[0] < 2, 0x14);
+        OBJECT_ERROR_CHECK(GetPerson(), 0x4c);
+        result = 1;
+        break;
     case 0x2a:
-    case 0x2b:
+        mTemps[0] = !_globals.mCameraDirector->IsInControl();
+        result = 1;
+        break;
+    case 0x2b: {
+        int count = 0;
+        if (_gd.mHud)
+            count = _gd.mHud->CountModelessDialogs();
+        mTemps[0] = count;
+        result = 1;
+        break;
+    }
     case 0x2c:
+        result = 1;
+        if (_gd.mHud)
+            _gd.mHud->CleanupModelessDialogs();
+        break;
     case 0x2d:
-    case 0x30:
+        break;
+    case 0x30: {
+        // Aspiration points: neighbourhood variables 0xC and 0xD hold them as low and high
+        // halves of ten thousand. t0 is added, up to 999,999.
+        Neighborhood *neighbors = GetNeighborhood();
+        int total = neighbors->mVars[0xd] * 10000 + neighbors->mVars[0xc] + mTemps[0];
+        if (total > 999999)
+            total = 999999;
+        neighbors->mVars[0xc] = total % 10000;
+        neighbors->mVars[0xd] = total / 10000;
+        break;
+    }
     case 0x32:
+        result = 1;
+        if (_globals.mOptionsRecon) {
+            if (_globals.mOptionsRecon->GetIsMusicGenreEnabled(mTemps[7]))
+                mTemps[7] = 1;
+            else
+                mTemps[7] = 0;
+            result = 1;
+        }
+        break;
     case 0x33:
         break;
     case 0x34:

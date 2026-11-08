@@ -27,7 +27,11 @@ public:
     class EHouse *mHouse;      // 0x178
     u8 field_0x17c[0x2c];      // 0x17c
     ERQuickdata *casQuickdata; // 0x1a8  the Create-a-Sim quickdata once it is loaded
-    u8 field_0x1ac[0x54];      // 0x1ac
+    u8 field_0x1ac[0x24];      // 0x1ac
+    class CameraDirector *mCameraDirector; // 0x1d0  GenericSimCall 0x2A
+    u8 field_0x1d4[0x24];      // 0x1d4
+    class OptionsRecon *mOptionsRecon; // 0x1f8  GenericSimCall 0x32
+    u8 field_0x1fc[4];         // 0x1fc
     int mTransitionType;       // 0x200
     int mPreviousLot;          // 0x204
     u8 field_0x208[0x240];     // 0x208
