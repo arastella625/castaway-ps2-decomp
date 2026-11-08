@@ -65,7 +65,7 @@ void ClothingItem::DecrementCount(s16 a)
 {
 }
 
-int ClothingItem::GetToken()
+const InventoryTokens *ClothingItem::GetToken()
 {
     return 0;
 }

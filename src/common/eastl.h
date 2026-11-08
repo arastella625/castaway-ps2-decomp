@@ -177,11 +177,13 @@ public:
     }
 
     // One element: the rest move down through memcpy with a byte count, skipped when it was the
-    // last (GenericSimCall 0xB).
+    // last (GenericSimCall 0xB, InventoryItems::RemoveItem). Naming position + 1 once is what
+    // matches: written twice, GCC folds the byte count into mpEnd - 4 - position.
     T *erase(T *position)
     {
-        if (position + 1 < mpEnd)
-            memcpy(position, position + 1, (char *)mpEnd - (char *)(position + 1));
+        T *const next = position + 1;
+        if (next < mpEnd)
+            memcpy(position, next, (char *)mpEnd - (char *)next);
         --mpEnd;
         return position;
     }

@@ -30,7 +30,7 @@ public:
     void SetStatusText(s8 value);
     void IncrementCount(s16 a);
     void DecrementCount(s16 a);
-    int GetToken();
+    const InventoryTokens *GetToken();
     int GetIngredientToken();
     bool IsFood();
     bool IsFastFood();

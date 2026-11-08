@@ -7,10 +7,14 @@
 
 class ClothingItem;
 class Family;
+class ReconBuffer;
 class cXObject;
+struct InventoryTokens;
 
 // Wii: InventoryItem. Its vptr comes after the first word. The slots are named from the game's
-// ObjectItem and TokenItem vtables (0x4BB460 and 0x4BB570), which tools/verify_vtables.py checks.
+// ObjectItem, TokenItem and ClothingItem vtables (0x4BB460, 0x4BB570 and 0x4BB230), which
+// tools/verify_vtables.py checks. Slot 29 is the destructor: InventoryItems::RemoveItem deletes
+// through it.
 class InventoryItem {
 public:
     s16 mInstanceID; // 0x00  Wii: GetInstanceID, given by InventoryItems::SetInstanceID
@@ -32,6 +36,25 @@ public:
     virtual s8 GetStatusText();                       // 10
     virtual void SetStatusText(s8 text);              // 11
     virtual void IncrementCount(s16 count);           // 12
+    virtual void DecrementCount(s16 count);           // 13
+    virtual const InventoryTokens *GetToken();        // 14
+    virtual int GetIngredientToken();                 // 15
+    virtual void DoStream(ReconBuffer *buffer, int a); // 16
+    virtual void LoadItemInfo(cXObject *object, Family *family, s16 a); // 17
+    virtual int MakeObject(Family *family, s16 a);    // 18
+    virtual bool IsFood();                            // 19
+    virtual bool IsFastFood();                        // 20
+    virtual bool IsTool();                            // 21
+    virtual bool IsFastTool();                        // 22
+    virtual bool IsResource();                        // 23
+    virtual bool CanBePlanted();                      // 24
+    virtual bool IsHandObject();                      // 25
+    virtual bool IsClothing();                        // 26
+    virtual bool IsDye();                             // 27
+    virtual bool IsDyable();                          // 28
+    virtual ~InventoryItem();                         // 29
+    virtual void ClearAttributes();                   // 30
+    virtual void SetupOwnershipInfo(cXObject *object); // 31
 };
 
 // Wii: InventoryItems. Only what the decompiled code calls is declared so far.
@@ -71,6 +94,7 @@ public:
     }
     void AddTokenItem(s16 id, s16 count);
     void AddClothingItem(s16 id);
+    void RemoveItem(int index, s16 count);
     static const struct ClothingItemsRow *GetClothingItemsRow(s16 id);
     void GimmeAllFood(s16 count);
     void GimmeAllResources(s16 count);

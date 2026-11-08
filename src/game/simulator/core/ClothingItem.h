@@ -40,7 +40,7 @@ public:
     void SetStatusText(s8 a);
     void IncrementCount(s16 a);
     void DecrementCount(s16 a);
-    int GetToken();
+    const InventoryTokens *GetToken();
     int GetIngredientToken();
     void LoadItemInfo(cXObject *a, Family *b, s16 c);
     int MakeObject(Family *a, s16 b);
@@ -50,8 +50,8 @@ public:
     bool IsFastTool();
     bool IsResource();
     bool CanBePlanted();
-    bool IsSeed();
-    bool CanBecomeSeed();
+    virtual bool IsSeed();        // slot 32, ClothingItem's own
+    virtual bool CanBecomeSeed(); // slot 33
     bool IsHandObject();
     bool IsClothing();
     bool IsDye();

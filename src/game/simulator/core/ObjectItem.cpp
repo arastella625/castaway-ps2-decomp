@@ -48,7 +48,7 @@ void ObjectItem::DecrementCount(s16 a)
 {
 }
 
-int ObjectItem::GetToken()
+const InventoryTokens *ObjectItem::GetToken()
 {
     return 0;
 }

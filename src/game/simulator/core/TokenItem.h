@@ -17,7 +17,7 @@ public:
     s16 field_0x8; // 0x08  the token's ID
     s16 field_0xa; // 0x0a  the count
     u8 pad_0xc[0x4];
-    u32 field_0x10; // 0x10  0x14 bytes in all: InventoryItems::AddTokenItem allocates that
+    const InventoryTokens *mToken; // 0x10  its "InventoryTokens" row. 0x14 bytes in all: InventoryItems::AddTokenItem allocates that
 
     TokenItem(s16 id, s16 count);
 
@@ -32,7 +32,7 @@ public:
     void AddAtribute(s16 a);
     s8 GetStatusText();
     void SetStatusText(s8 a);
-    u32 GetToken();
+    const InventoryTokens *GetToken();
     void LoadItemInfo(cXObject *a, Family *b, s16 c);
     bool IsClothing();
     bool IsDyable();

@@ -61,6 +61,25 @@ void InventoryItems::AddClothingItem(s16 id)
     }
 }
 
+// Takes count off the item at index. When that would leave none, the item is deleted and taken
+// out, and if it was an object or an ownable the non-token count goes down.
+void InventoryItems::RemoveItem(int index, s16 count)
+{
+    if (index < (int)mItems.size()) {
+        if (mItems[index]->GetCount() - count <= 0) {
+            InventoryItem **slot = &mItems[index];
+            InventoryItem *item = *slot;
+            if (item->GetCategory() != 2 && item->GetCategory() != 3)
+                mNonTokenCount--;
+            delete item;
+            *slot = 0;
+            mItems.erase(slot);
+        } else {
+            mItems[index]->DecrementCount(count);
+        }
+    }
+}
+
 // An object by GUID. A GUID that names a token adds one of that token instead.
 int InventoryItems::AddObjectItem(int guid)
 {
