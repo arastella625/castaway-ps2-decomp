@@ -46,6 +46,15 @@ inline int fround(f32 value)
 // all agree with the game, so what follows reads the same as the game's code. What still differs:
 // - Scope 0x22: the game has a compare with 7 and a branch to the end, then v0 = 1 in a delay
 //   slot, though neither does anything. Wii has the same compare. Nothing tried here keeps it.
+//   Also tried (round 15), all dropped whole, so the REF_VALUE tail cross-jumps as before:
+//   "if (data == 7) break;", an empty inline call, and dead stores to isPerson, isNeighbor and
+//   object. Only a real side effect keeps the compare: re-storing *ref under data == 7 gives
+//   the game's compare (inverted) and +6 aligned words, but it isn't the game's code (the game's
+//   branch has no body), so it isn't used. The v0 = 1 is reorg filling the branch's delay slot
+//   from the end block, not source.
+// - The neighbour lookup: also tried (round 15) with FindNeighborByIDJoined, a separate
+//   neighbourhood local, zero set outside an inline getter, and one function-scope variable for
+//   all five lookups (worse, 2,827). None moves the copy.
 // - The neighbour lookup: the game loads into v0 and copies to the variable (lw, move) in scopes
 //   0x20, 0x26 and 0x2e, and sets zero straight into the variable. This loads straight into it.
 // - Scopes 0x34 to 0x37: the same tail as this but with v0 and v1 swapped, which stops them
