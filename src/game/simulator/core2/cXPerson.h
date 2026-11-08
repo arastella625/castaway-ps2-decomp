@@ -32,33 +32,49 @@ public:
     cXPerson *&Peek(u32 index) { return mItems[(mHead + index) % 24]; }
 };
 
-// Wii: XRoute, 0xA8 bytes on PS2. Only what the routing handlers read.
+// Wii: RouteGoal, one place a route may end, 16 bytes. Its fields aren't named yet.
+struct RouteGoal {
+    u32 field_0x0[4];
+};
+
+// Wii: XRoute, 0xA8 bytes on PS2. Made in GotoRoutingSlot and kept in the Sim's route list.
 class XRoute {
 public:
-    u32 pad_0x0[0x13];   // 0x00
+    eastl::vector<RouteGoal, eastl::allocator> mGoals; // 0x00
+    RoutingSlot mSlot;   // 0x10  a copy of the slot it routes to; Wii: GetRoutingSlot
     cXObject *mDest;     // 0x4c  Wii: GetDest
-    u32 pad_0x50[3];     // 0x50
+    cXObject *mStart;    // 0x50  the Sim, Wii: GetStart
+    int mCurrentGoal;    // 0x54  -1 none, Wii: HasCurrentGoal
+    int field_0x58;      // 0x58
     int mTrapCount;      // 0x5c  Wii: SetTrapCount
     int mWaitStartTicks; // 0x60  Wii: GetWaitStartTicks
     FTilePt mLastLocation; // 0x64  Wii: GetLastLocation, where the Sim was when last trapped
     cXPortal *mCurPortal; // 0x6c  Wii: GetCurPortal
     u32 pad_0x70[2];     // 0x70
     int mExitDirFlag;    // 0x78  Wii: GetExitDirFlag
-    u32 pad_0x7c[2];     // 0x7c
+    int mValid;          // 0x7c  Wii: GetValid
+    int field_0x80;      // 0x80
     cXObject *mMovingPerson; // 0x84  the Sim asked to move, Wii: GetMovingPerson
     int mMoveSuccess;    // 0x88  Wii: GetMoveSuccess
     int mResult;         // 0x8c  Wii: GetResult and SetResult
     s16 mBlockingObjectID; // 0x90  Wii: GetBlockingObjectID
     u16 pad_0x92;
-    u32 pad_0x94[2];     // 0x94
+    int field_0x94;      // 0x94
+    u32 pad_0x98;        // 0x98
+    s16 field_0x9c;      // 0x9c  person data 0x20 takes it on arrival
+    u16 pad_0x9e;
+    int field_0xa0;      // 0xa0  0x30 when made
+    u32 pad_0xa4;        // 0xa4
 
+    XRoute(cXObject *start, cXObject *dest, const RoutingSlot *slot);
+    void Construct(cXObject *start, cXObject *dest, const RoutingSlot *slot);
     RoutingSlot *GetRoutingSlot();
+    bool HasCurrentGoal();
+    RouteGoal *GetCurrentGoal();
     void BuildGoalList();
     int IsPersonSittingOnChairGoal(cXPerson *person);
     int GetResult() const { return mResult; }
     int GetExitDirFlag() const { return mExitDirFlag; }
-    s16 field_0x9c;      // 0x9c  person data 0x20 takes it on arrival
-    u8 pad_0x9e[0xa];    // 0x9e
 };
 
 // Wii: ActionQueue, a Queue<Interaction, 12>: a ring of twelve actions.
@@ -204,7 +220,8 @@ public:
     eastl::vector<FTilePt, eastl::allocator> mPath; // 0x59c  8-byte tile points
     u32 pad_0x5ac[9];         // 0x5ac
     eastl::vector<XRoute, eastl::allocator> mRoutes; // 0x5d0  the last is current
-    u32 pad_0x5e0[2];         // 0x5e0
+    int field_0x5e0;          // 0x5e0  XRoute::Construct clears it
+    u32 pad_0x5e4;            // 0x5e4
     int mInRoutingQueue;      // 0x5e8  Wii: a byte at +0x5DA
     u32 pad_0x5ec;            // 0x5ec
     PersonAnimator *mAnimator; // 0x5f0

@@ -1189,6 +1189,12 @@
 0x002BBC60 AddAction__C9H2DTargetPC11InteractionRC8BString2UiP8ERShaderUi
 0x004525B8 DelRef__9EResource
 
+# game/simulator/core2/XRoute.cpp
+0x001E4E20 __6XRouteP8cXObjectT1PC11RoutingSlot
+0x001E4EB0 Construct__6XRouteP8cXObjectT1PC11RoutingSlot
+0x001E4FF0 HasCurrentGoal__6XRoute
+0x001E5018 GetCurrentGoal__6XRoute
+
 # game/simulator/core2/cXPerson.cpp: the routing handlers
 0x001DC708 Routing_Failed__8cXPersonRbRl
 0x001AA980 Routing_WaitingForPortal__8cXPersonRbRl
