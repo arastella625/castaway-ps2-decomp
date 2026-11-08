@@ -18,6 +18,7 @@ public:
     u8 pad_0xd[0x17]; // 0x24 bytes in all: InventoryItems::AddObjectItem allocates that
 
     ObjectItem(int guid);
+    ObjectItem(cXObject *object);
 
     int GetID() const;
     u32 GetGuid() const;

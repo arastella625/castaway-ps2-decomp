@@ -43,6 +43,7 @@ public:
     void AddItem(InventoryItem *item);
     int AddOwnableItem(cXObject *object);
     int AddObjectItem(int guid);
+    int AddObjectItem(cXObject *object);
     void CheckForAddGoals(int guid, s16 a);
     static s16 GetTokenIDFromGUID(int guid);
     static void RunOnAddTree(Family *family, cXObject *object, s16 index);
