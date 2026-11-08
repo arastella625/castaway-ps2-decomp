@@ -287,6 +287,124 @@ long cXObject::TryCallNamedTree(StackElem *elem, XPrimParam *primParam)
 
 #endif
 
+// Primitive 0x2f: tell the plans that something happened to a Sim.
+class NotifyPlansParam {
+public:
+    s8 mNotification;  // 0x00  0 is error 0x6A
+    u8 mLocationOwner; // 0x01  the value is this operand: scope
+    s16 mLocationData; // 0x02  and data
+    u8 mFlags;         // 0x04  bit 0: the Sim is the object in temp 0, not me
+
+    bool GetUseSimFromTemp() const { return mFlags & 1; }
+};
+
+long cXObject::TryNotifyPlans(StackElem *elem, XPrimParam *primParam)
+{
+    NotifyPlansParam *param = (NotifyPlansParam *)primParam;
+    cXPerson *person;
+    if (param->GetUseSimFromTemp()) {
+        cXObject *object = GetObjectFromID(mTemps[0]);
+        if (object && object->IsPerson()) {
+            person = object->GetPerson();
+        } else {
+            OBJECT_ERROR_CHECK(false, 0x1c);
+        }
+    } else {
+        person = GetPerson();
+    }
+    if (!person)
+        return 1;
+    s16 value;
+    if (InterpValue(param->mLocationOwner, param->mLocationData, 0, 0, &value, 0) == -1) {
+        OBJECT_ERROR_CHECK(false, 9);
+    }
+    if (!param->mNotification) {
+        OBJECT_ERROR_CHECK(false, 0x6a);
+    }
+    PlanManager::GetInstance()->SendNotification(param->mNotification, value, person);
+    return 1;
+}
+
+// Primitive 0x14: run one of the stack object's functional trees (an entry point) as a
+// subroutine, with my temps 0 to 3 as its parameters.
+class CallFunctionalTreeParam {
+public:
+    s16 mFunction; // 0x00  0 to 0x10, see the switch; 0xD and anything else is false
+    u16 mFlags;    // 0x02  bit 0: change the icon
+
+    bool GetChangeIcon() const { return mFlags & 1; }
+};
+
+long cXObject::TryCallFunctionalTree(StackElem *elem, XPrimParam *primParam)
+{
+    CallFunctionalTreeParam *param = (CallFunctionalTreeParam *)primParam;
+    cXObject *object = GetObjectFromID(elem->mStackObject);
+    OBJECT_ERROR_CHECK(object, 0x15);
+    int entry;
+    switch (param->mFunction) {
+    case 0xc:
+        entry = 0x10;
+        break;
+    case 0x0:
+        entry = 0x12;
+        break;
+    case 0x1:
+        entry = 0x13;
+        break;
+    case 0x2:
+        entry = 0x14;
+        break;
+    case 0x3:
+        entry = 0x15;
+        break;
+    case 0x4:
+        entry = 0x16;
+        break;
+    case 0x5:
+        entry = 0x17;
+        break;
+    case 0x6:
+        entry = 0x18;
+        break;
+    case 0x7:
+        entry = 0x19;
+        break;
+    case 0x8:
+        entry = 0x1a;
+        break;
+    case 0x9:
+        entry = 0x1b;
+        break;
+    case 0xa:
+        entry = 0xe;
+        break;
+    case 0xb:
+        entry = 0x1c;
+        break;
+    case 0xe:
+        entry = 0x1d;
+        break;
+    case 0xf:
+        entry = 0x20;
+        break;
+    case 0x10:
+        entry = 0x21;
+        break;
+    default:
+        return 0;
+    }
+    s16 tree = object->mSelector->GetFnTable()->HasFunction(entry);
+    s16 params[8];
+    memset(params, 0, sizeof(params));
+    params[0] = mTemps[0];
+    params[1] = mTemps[1];
+    params[2] = mTemps[2];
+    params[3] = mTemps[3];
+    if (tree && GosubObjectTree(object, params, tree, param->GetChangeIcon()))
+        return 3;
+    return 0;
+}
+
 // Primitive 0xd: put an interaction on a Sim's queue.
 class PushActionParam {
 public:

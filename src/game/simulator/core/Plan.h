@@ -42,6 +42,7 @@ public:
     int IsPlanUnlocked(s16 id);
     void ToggleAllPlansInUI();
     Plan *GetPlanByTokenID(s16 token);
+    void SendNotification(s8 notification, s16 value, cXPerson *person);
     void ToggleIgnoreRequirements();
     void ForceAllPlansToUnlock();
 };
