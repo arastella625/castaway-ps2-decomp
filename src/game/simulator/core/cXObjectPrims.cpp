@@ -149,8 +149,12 @@ long cXObject::TryRandom(StackElem *elem, XPrimParam *primParam)
 }
 
 #ifdef NON_MATCHING
-// 410 of the 411 words line up. One branch to the bad mode error goes to the error's alignment
-// nop in the game and just past it here. The delay slot is the same, so it behaves the same.
+// 410 of the 411 words line up. The switch's two branches to the bad mode error both take the
+// error's `lui` into their delay slot. In the game the live one (mode above 2, at 0x226E00) then
+// goes to the alignment nop before the error and the dead one (mode below 0) just past it; here
+// both go past it. Same behaviour. Tried and no better: default first, default with break, an
+// if chain, switching on an int copy, case orders, case 3 into default, and four forms of the
+// `!object` check before the switch. This comes from the delay slot filler, not the source shape.
 // Primitive 0x1c: run a tree found by name.
 class CallNamedTreeParam {
 public:

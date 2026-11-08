@@ -996,6 +996,11 @@ inline void OnEdithSetFlagField1(int mask, bool wasSet, bool isSet)
 // 618 of the 632 words line up, and the size is right. What's left is alignment nops: after each
 // failed float test the game has no nop where this has one, and it has one at the end of the
 // if/else instead. The checks are nested in an if, which gives the branch-likely and registers.
+// In the game the float code's label sits straight after the error block's jump with no padding,
+// and the join after it is padded; here it's the other way round. Tried on case 0x0b with no
+// change: float first with the error in else, a plain check, else-if, the read in both arms,
+// the 1.0f in a local, a pointer copy, breaking out of the else, and reading through a u16 or a
+// copied pointer. Like TryCallNamedTree, this looks like the delay slot filler, not the source.
 // Primitive 2. Reads two operands and compares or changes the left one. Motives are floats
 // underneath, so where the left operand has no s16 to write through it uses the float.
 long cXObject::TryExpression(ExpressionParam *param)
