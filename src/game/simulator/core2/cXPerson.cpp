@@ -1,6 +1,8 @@
 #include "game/simulator/core2/cXPerson.h"
 
 #include "game/GameData.h"
+#include "game/simulator/core/Behavior.h"
+#include "game/simulator/core/Lot.h"
 
 #include "game/animation/SAnimator2.h"
 
@@ -493,6 +495,30 @@ cXPerson::RoutingState cXPerson::Routing_Walking(bool &done, TreeReturnCode &cod
         return kRoutingWalkingFailed;
     }
     return kRoutingWalkingFailed;
+}
+
+// For up to 30 ticks the Sim plays its "sg_route waiting animation" tree, then routes again.
+cXPerson::RoutingState cXPerson::Routing_Waiting(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    if (ShouldInterrupt() && mAnimator->IsInterruptable()) {
+        route->mResult = 4;
+        return kRoutingFailed;
+    }
+    int start = route->mWaitStartTicks;
+    if (!start)
+        start = GetSimulator()->mTicks;
+    if (GetSimulator()->mTicks - start < 30) {
+        s16 tree = mSelector->mBehavior->GetTreeIDByNameFast("sg_route waiting animation");
+        if (tree && GosubObjectTree(this, 0, tree, false)) {
+            code = 3;
+            done = true;
+            return kRoutingWaiting;
+        }
+    }
+    route->mWaitStartTicks = 0;
+    mAnimator->field_0x664 = 0;
+    return kRoutingInitial;
 }
 
 // A failed route keeps its result, or gets 1, and the tree goes on with code 0.

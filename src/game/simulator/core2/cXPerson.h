@@ -16,7 +16,9 @@ class XRoute {
 public:
     u32 pad_0x0[0x13];   // 0x00
     cXObject *mDest;     // 0x4c  Wii: GetDest
-    u32 pad_0x50[7];     // 0x50
+    u32 pad_0x50[4];     // 0x50
+    int mWaitStartTicks; // 0x60  Wii: GetWaitStartTicks
+    u32 pad_0x64[2];     // 0x64
     cXPortal *mCurPortal; // 0x6c  Wii: GetCurPortal
     u32 pad_0x70[7];     // 0x70
     int mResult;         // 0x8c  Wii: GetResult and SetResult
@@ -105,7 +107,7 @@ public:
 };
 
 // The Sim's animator, SAnimator2 in game/animation: only the slot ParticleEffect calls.
-class PersonAnimator {
+class PersonAnimatorVirtuals {
 public:
     virtual void Slot0();
     virtual void Slot1();
@@ -140,6 +142,14 @@ public:
     virtual void Slot30();
     virtual void Slot31();
     virtual int PlayEffect(u32 a, u32 b);
+};
+
+// GCC 2.95 puts the vtable pointer after a class's own data, so the data goes in a derived class
+// to keep the pointer at 0, where the game has it.
+class PersonAnimator : public PersonAnimatorVirtuals {
+public:
+    u8 pad_0x4[0x660];
+    u8 field_0x664; // 0x664  Routing_Waiting clears it (Wii +0x656)
 };
 
 // A Sim. The fields are the ones InterpValue reads.
@@ -207,6 +217,7 @@ public:
     void SetPersonData(int index, s16 value);
     RoutingState Routing_WaitingForPortal(bool &done, TreeReturnCode &code);
     RoutingState Routing_Walking(bool &done, TreeReturnCode &code);
+    RoutingState Routing_Waiting(bool &done, TreeReturnCode &code);
     RoutingState Routing_Failed(bool &done, TreeReturnCode &code);
     int RunImmediateAction(Interaction *action);
     int MoveOutOfWay(int priority);

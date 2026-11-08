@@ -41,7 +41,9 @@ class cSimulator {
 public:
     u32 pad_0x0[0xe];  // 0x00
     s16 mGlobals[0x30]; // 0x38  scope 6
-    u32 pad_0x98[4];   // 0x98
+    u32 pad_0x98;      // 0x98
+    int mTicks;        // 0x9c  Wii: GetTicks
+    u32 pad_0xa0[2];   // 0xa0
     class PassiveInfluenceSystem *mPassiveInfluence; // 0xa8
 
     int GetPlayerCheatsValue();
