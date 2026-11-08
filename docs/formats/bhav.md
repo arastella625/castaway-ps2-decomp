@@ -1170,13 +1170,36 @@ The primitive keeps its state in frame `+8`, the word this page calls waiting el
 2. State 0: turn on smooth routing and find the slot. A missing stack object is error 0x35, a parameter past the frame's count is error 8, a bad slot number or `+2` value is error 0x25.
 3. Any other state: no slot is looked up, and the route already under way carries on.
 
-`GotoRoutingSlot` then runs. State 0 or 0x15 starts a route:
+`GotoRoutingSlot` (`0x1AA008`) then runs. **Proven: it matches the game byte for byte.** State 0 or 0x15 starts a route:
 
-- A multi-tile target with a TS2 routing slot is checked first: a part whose definition has `+0x3A` above 0 means the route can go ahead.
-- No object, or one that isn't in the world, returns 0.
-- The route (`XRoute`, 0xA4 bytes) goes on the Sim's list at Wii `+0x5C4`, unless the Sim is already facing the target and is there, which returns 1 at once.
+1. A TS2 slot (flag bit 17) on a multi-tile target moves the target to the first part, along the part list, whose definition has `+0x3A` above 0.
+2. No target, or one that isn't in the world (either tile coordinate below 1), returns 0, false.
+3. A new route (`XRoute`, 0xA8 bytes on PS2) is made from the Sim, the target and a copy of the slot.
+4. A ghost's copy gets flag 0x800, ignore rooms.
+5. If the Sim already has a route that doesn't allow failure trees, the new one doesn't either.
+6. Otherwise, with no route under way, variable 0x11 at 0, the target being the Sim itself and the slot's facing -2: it turns to the target (`CalcShortDistance`) and returns 1 at once.
+7. The route goes on the end of the Sim's list (PS2 `+0x5D0`), which clears animator byte `+0x664` if it was the first. The state becomes 1.
 
-Each tick, a loop calls the handler for the state until one says it's done. Handlers return the next state, and set the tree's result. It starts as 2, wait.
+Then, every tick:
+
+1. With no route on the list it returns 0.
+2. A route whose target is gone is popped: state 0, return 2.
+3. A target that left the world gives state 0x13, or 0x14 if walking (state 3).
+4. A route marked invalid (`+0x7C` 0) in state 2 drops its portal, and in state 3 becomes state 0xF. Then it's valid again.
+5. The handler for the state runs, and returns the next state, until one sets done. A state number of 0x15 or more becomes 7.
+6. The tree's code is returned. If it isn't 2, person `+0x5E0` is cleared.
+
+**What the code means to the tree.** The primitive returns it unchanged, so these are `TryElement`'s values:
+
+| Code | Tree |
+|---|---|
+| 0 | False branch: the route failed. Person data 0x1C has the reason |
+| 1 | True branch: the Sim is at the slot |
+| 2 | Wait: the node runs again next tick, in the same state (frame `+8`) |
+| 3 | A handler pushed a tree (a waiting, ask-to-move, stand-up or failure-feedback animation). The pushed tree runs now. When it returns, frame `+8` keeps the node, so routing carries on |
+| -1 | An error stopped the tree |
+
+Handlers return the next state and set the code. It starts at 2.
 
 | State | Handler | What it does |
 |---|---|---|
@@ -1203,6 +1226,47 @@ The tree's code, the second handler argument, is a 64-bit `long` on PS2. Handler
 Person data 0x1C ends up holding the route's result: 0 worked, 1 failed, 4 interrupted. If the target leaves the world part way, the state changes to 0x13 or, while walking, 0x14.
 
 **For a port:** no pathfinding is needed for trees to run. Wait a tick or more, put the Sim on the slot, and return 1. Return 0 for a slot that can't be reached.
+
+### How a slot becomes goals
+
+`XRoute::ConstructGoals` (PS2 `0x1CDBE0`, Wii `800ED934`) turns the slot into goal tiles. Positions are `FTilePt`s, in sixteenths of a tile. **The rotation and the on-top case are proven on PS2**; the directional search is **likely**, read on Wii, with PS2's version found by its calls.
+
+**The frame.** The object's direction is its data 1, in eighths, or 0 if the slot is absolute. The origin is the object's location. With flag bit 16 it's the object's average location instead (for a multi-tile object, its anchor).
+
+**The rotation, `TransformToWorldCoords`. Proven, PS2 `0x1CA758`.** An offset (x, y) in the slot's frame becomes origin + the offset turned by the direction. Each sum is cut to an integer:
+
+| Direction | Added to the origin |
+|---|---|
+| 0 | (x, y) |
+| 2 | (−y, x) |
+| 4 | (−x, −y) |
+| 6 | (y, −x) |
+| Odd | The offset turned by the object's rotation matrix, through world coordinates |
+
+**On top of the object** (no direction bits in the flags' low byte). **Proven, PS2.**
+
+1. The goal is the rotation of the slot's own offset, `GetXOffset` and `GetYOffset`, which add the Sim type's extra (see the facing table above).
+2. The Sim must face the direction from the origin to that tile, or any direction if it's the origin's own tile.
+3. If the tile can be stood on, it's the only goal, with score 100. Otherwise the route's result comes from what blocked it.
+
+**Around the object** (likely, Wii):
+
+1. **The slot must make sense:** minimum 0 to 0x200, maximum 1 to 0x200, minimum ≤ optimal ≤ maximum, all in sixteenths of a tile. Otherwise there are no goals.
+2. **Levels:** the score bonus is multiplier 1 × 10 on the Sim's level. Otherwise it's the larger of multipliers 0 and 2, × 10.
+3. **Walls:** unless rooms are ignored (flag 0x800), a wall next to the object's tile blocks the directions it covers and the ones beside them.
+4. **The search:**
+   - The step is the slot's resolution, or 16 (a whole tile) when there's a level multiplier.
+   - For each allowed direction d (flag bits 0 to 7, turned by the object's direction), it walks outward one step at a time.
+   - It keeps points whose distance from the origin is between minimum and maximum.
+   - The Sim faces the object: direction (object direction + d + 4) mod 8.
+5. **The score:**
+   - 100 − round(|distance − optimal| × gradient), plus the level bonus.
+   - ± up to 10 at random with flag bit 13.
+   - 25 more in one case not yet named, and 20 more if the tile is where the Sim already stands.
+6. **A chair** on the tile, facing the right way and allowing that side (definition `+0x84`), is a goal to sit on, with its ID. If someone else is in it, that's recorded as the blocking object.
+7. **Each point** is checked like the on-top goal, and the usable ones are added. With random scoring, a door there rules the tile out.
+
+The route then walks to the best goal it can reach. **For a port:** the on-top case, with the rotation above, gives the exact tile. For the others, the point at the optimal distance in the best allowed direction, facing the object, is a good stand-in.
 
 ## PushAction (opcode 0x0D)
 
