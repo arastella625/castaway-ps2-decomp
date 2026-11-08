@@ -60,7 +60,9 @@ public:
     TreeTab *mTreeTab;     // 0x3c  Wii: a ConsoleAutoRefCount<ITreeTable>
     u8 pad_0x40[0x40];     // 0x40
     ObjectFolder *mFolder; // 0x80
-    u8 pad_0x84[0x38];     // 0x84
+    u8 pad_0x84[0x2c];     // 0x84
+    class CatalogResource *mCachedCatalogResource; // 0xb0  Wii: GetCachedSelectorCatalogResource
+    u8 pad_0xb4[8];        // 0xb4
     void *mSimDescription; // 0xbc
     u32 pad_0xc0[5];       // 0xc0
     ObjSelector *mNext;    // 0xd4  the next selector in ObjectFolder's hash bucket

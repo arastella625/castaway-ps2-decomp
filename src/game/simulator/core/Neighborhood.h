@@ -81,6 +81,10 @@ public:
     GoalAndUnlockData *GetGoalAndUnlockData() { return &mGoals; }
     Neighbor *FindNeighborByID(int id);
     int RemoveFromFamily(Neighbor *neighbor, bool a); // GenericSimCall 6: 0 when it worked
+    void AddToFamily(Neighbor *neighbor, Family *family); // 0x2055D8
+    Family *MakeNewFamily(bool freePlay, int number);    // 0x205250, our name
+    // Wii: MakeNewFreePlayFamily(int); on PS2 the call takes a 1 first.
+    Family *MakeNewFreePlayFamily(int number) { return MakeNewFamily(true, number); }
     void SetNeighborhoodVar(int index, s16 value) { mVars[index] = value; }
     int GetNumFamilies();
     Family *GetFamilyByIndex(int index);

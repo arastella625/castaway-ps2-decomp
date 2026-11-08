@@ -2349,6 +2349,20 @@ public:
     int AutonomousFoodSelection(int a, int b, int c); // 0x2A3A28
 };
 
+// GenericSimCall 0x37: Wii NghResFile::GetNumModifiableFamilies, a static read inline on PS2.
+class NghResFile {
+public:
+    static s16 sNumModifiableFamilies; // 0x4927C0, our name
+    static int GetNumModifiableFamilies() { return sNumModifiableFamilies; }
+};
+
+// GenericSimCall 0x39. Deleted through the virtual destructor in its first slot.
+class CatalogResource {
+public:
+    virtual ~CatalogResource();
+    static void DestroyInstance(CatalogResource *resource) { delete resource; }
+};
+
 // The family with this number, or null.
 inline Family *Neighborhood::GetFamilyInline(int number)
 {
@@ -2749,8 +2763,56 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         if (mTemps[7] == 1)
             return 0;
         return 0;
-    case 0x37:
-    case 0x39:
+    case 0x37: {
+        // Neighbour t0 joins the first family, numbered from 1, that doesn't exist or isn't in
+        // use, up to the number that may change; t1 = its number. False if every one is taken.
+        result = 0;
+        Neighbor *neighbor = GetNeighborhood()->FindNeighborByIDInline(mTemps[0]);
+        OBJECT_ERROR_CHECK(neighbor, 0x38);
+        s16 count = NghResFile::GetNumModifiableFamilies();
+        s16 number = 1;
+        while (number <= count) {
+            Family *family = GetNeighborhood()->GetFamilyInline(number);
+            if (!family || !family->slot7())
+                break;
+            number++;
+        }
+        if (number > count)
+            break;
+        Family *family = GetNeighborhood()->GetFamilyInline(number);
+        if (!family)
+            family = GetNeighborhood()->MakeNewFreePlayFamily(number);
+        GetNeighborhood()->AddToFamily(neighbor, family);
+        mTemps[1] = number;
+        result = 1;
+        break;
+    }
+    case 0x39: {
+        // Drops the catalog resources cached for the stack object and its master selector, and
+        // every object's pointer to either.
+        ObjectModule *module = gObjectModule;
+        cXObject *object = module->GetObjectFromIDInline(elem->mStackObject);
+        CatalogResource *objectResource = object->mCachedCatalogResource;
+        ObjSelector *master = object->mSelector->GetMasterSelector();
+        CatalogResource *selectorResource = master->mCachedCatalogResource;
+        int count = gObjectModule->GetNumObjects();
+        for (int i = 0; i < count; i++) {
+            cXObject *other = gObjectModule->GetObject(i);
+            if (other && other->mCachedCatalogResource) {
+                if (other->mCachedCatalogResource == selectorResource)
+                    other->mCachedCatalogResource = 0;
+                else if (other->mCachedCatalogResource == objectResource)
+                    other->mCachedCatalogResource = 0;
+            }
+        }
+        master->mCachedCatalogResource = 0;
+        if (selectorResource)
+            CatalogResource::DestroyInstance(selectorResource);
+        if (objectResource != selectorResource && objectResource)
+            CatalogResource::DestroyInstance(objectResource);
+        result = 1;
+        break;
+    }
     case 0x3a:
         break;
     case 0x12:

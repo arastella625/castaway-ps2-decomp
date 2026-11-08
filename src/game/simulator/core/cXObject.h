@@ -281,7 +281,7 @@ public:
     u8 field_0x12c;            // 0x12c
     u32 field_0x130;           // 0x130 the frame count when the object was made
     s32 mGraphicsTagged;       // 0x134
-    u32 field_0x138;           // 0x138
+    class CatalogResource *mCachedCatalogResource; // 0x138  Wii: GetCachedObjectCatalogResource
 
     // Virtual functions after TreeSim's, in the order of the Wii vtable.
     virtual ~cXObject();

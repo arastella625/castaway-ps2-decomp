@@ -16,7 +16,7 @@ public:
     virtual void slot4();
     virtual void slot5();
     virtual void slot6();
-    virtual void slot7();
+    virtual int slot7(); // GenericSimCall 0x37 passes over a family while this is non-zero
     virtual void slot8();
     virtual void slot9();
     virtual void slot10();
