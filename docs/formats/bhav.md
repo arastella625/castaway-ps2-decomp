@@ -859,6 +859,11 @@ The result is true unless an operation below says otherwise.
 - **The on-add tree** runs with the family, the object and the new item's place (the last one). An add by GUID has no object, so it doesn't run.
 - **The add goals** (`0x1F9AC0`, Wii `CheckForAddGoals`) get the GUID and 0. They run after the on-add tree.
 
+**Tokens and clothing. Proven, PS2** (`AddTokenItem` `0x1F9608` and `AddClothingItem` `0x1F9DB8`, both match). Neither counts toward the 0x20 limit.
+
+- **A token add** first sets the token's bit in the "ever collected" bits (token column 16), then adds the count to the token's item if the inventory has one, or makes a new item with that count. Either way the add goals get 0 and the token's ID.
+- **A clothing add** looks the ID up in the `ClothingItems` table (0x10-byte rows: ID at `+0`, body-part name at `+4`, clothing-set name at `+8`). An unknown ID adds nothing. Otherwise the set's man's piece and woman's piece **each** become an item, if the set has one for that sex. So one clothing add can add two items, and Count (op 3) goes up by two. Adding clothing ID 0x90 also unlocks goal-and-unlock entry 0x20B of kind 2. Clothing adds don't run the add goals.
+
 | Op | What it does |
 |---|---|
 | 0 | **Add**, by category. Object or ownable with bit 7: the object whose ID is `+2` (none is error 0x33), added as itself. Without bit 7: the GUID in `+4`. An object whose GUID is a token's adds one of that token instead (see the table above). True if the add worked. Token: ID `+2` with bit 7, else `+4`, count `+3`. Clothing: ID `+2` with bit 7, else `+4`. Tokens and clothing are always true |
