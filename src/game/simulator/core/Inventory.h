@@ -111,6 +111,22 @@ inline const InventoryTokens *InventoryItems::GetTokenFromID(s16 id)
     return 0;
 }
 
+// Wii: GetTokenIDFromGUID. The token whose row's first word is the GUID, or 0.
+inline s16 InventoryItems::GetTokenIDFromGUID(int guid)
+{
+    if (guid == 0)
+        return 0;
+    const ERQTable *table = GetObjectFolder()->mDatabase->GetTable("InventoryTokens");
+    if (table == 0)
+        return 0;
+    for (u32 i = 0; i < table->count; i++) {
+        const InventoryTokens *token = &((const InventoryTokens *)table->rows)[i];
+        if (*(const int *)&token->field_0x0 == guid)
+            return token->mID;
+    }
+    return 0;
+}
+
 inline InventoryItems *InventoryItems::GetTribeInventory()
 {
     cXPerson *person = _globals.mPlayerPerson;

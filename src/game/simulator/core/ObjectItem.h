@@ -2,6 +2,7 @@
 #define GAME_SIMULATOR_CORE_OBJECTITEM_H
 
 #include "common/types.h"
+#include "game/simulator/core/InventoryItems.h"
 
 class cXObject;
 
@@ -10,11 +11,13 @@ class cXObject;
 // and the full layout are not known yet. Return types are guesses, and the fields are only
 // the ones these functions touch. The names come from pkg/castaway_ps2_names.csv, mostly its
 // vtable pairing tiers; a one-instruction body cannot confirm that a name is right.
-class ObjectItem {
+class ObjectItem : public InventoryItem {
 public:
-    u8 pad_0x0[0x8];
-    u32 field_0x8; // 0x08
+    u32 field_0x8; // 0x08  the GUID
     s8 field_0xc; // 0x0c
+    u8 pad_0xd[0x17]; // 0x24 bytes in all: InventoryItems::AddObjectItem allocates that
+
+    ObjectItem(int guid);
 
     int GetID() const;
     u32 GetGuid() const;
