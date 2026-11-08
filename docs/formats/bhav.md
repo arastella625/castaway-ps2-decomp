@@ -443,7 +443,7 @@ The stack object is the frame's object ID. A call passes it on to the called tre
 | Grab | `+0` bit 0 parenting prop bone |
 | IdleAnimate | `+2` low byte decrement parameter, high byte sync object; `+5` flags; `+6` behaviour; `+7` literal loop count |
 | KillObject | `+2` bit 0 return immediately, bit 1 clear means clean up all |
-| PlaySound | `+4` bit 0 looped, bit 1 stack object is source, bit 7 sound in temp 0 |
+| PlaySound | **Proven, read line by line on PS2 (`0x234CF8`), not matched.** `+0` s16 the sound, or temp 0 if `+4` bit 7. Source: me if `+4` is 0xFF, else the stack object if bit 1, else me. Bit 0, looped, isn't read on PS2. The sound's `SoundInfo` is looked up in my tree's namespace, then the global one. Found, with a sound event ID (`+0x4C`) and the player ready, it queues a play of that event from the source at volume -400. **It returns 1 on every path, with no error**, found or not |
 | PushAction | See its own section |
 | Relationship | Flag byte `+4`: bit 0 clear means create, bit 1 use neighbours |
 | SetBalloon | `+0` bit 0 over stack object; `+2` index, group; `+6` type, then flags |
@@ -1480,6 +1480,8 @@ So an object with no cleanup tree runs init twice when it resets on load, on a s
 **`Cleanup(0)`. Proven on PS2 for the entry points.** With a cleanup tree (entry point 3), it runs that on me, or on each part of a multi-tile object, then clears variable 0x3E and bit 5 of variable 8, and puts main back on the stack. Without one, it saves my place, calls `Pickup`, then `Reset(true)` unless flag 0x40 is set, then `Place` if I was placed. `Pickup` runs entry point 10 and `Place` entry point 9, so those run during such a cleanup too.
 
 **Type attributes. Proven on the disc.** `GetTypeAttributes` asks `ObjectFolder` for a block by definition `+0xB8`, or by GUID if that's 0. `+0xB8` is 0 on all 1,335 definitions, so blocks are per GUID. They're shared by all objects of that type, and they aren't in `ObjM`.
+
+**With no block. Proven: `CountTypeAttributes` (`0x1DA3D0`) and `GetTypeAttributes` (`0x1DA408`) match byte for byte.** A definition with no block has a count of 0 and a null array. Scopes 0x24 and 0x25 check the index against the count first, so every read or write is error 0x40 and the null array is never touched. A new Sim from `template_person`, with no block, gets error 0x40 for any type attribute.
 
 ## Lot transitions
 

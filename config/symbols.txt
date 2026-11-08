@@ -1174,6 +1174,9 @@
 
 # game/simulator/core/ObjSelector.cpp and Interaction.cpp: AddAction's helpers
 0x0021F700 GetTreeTable__12ObjectFolderP11ObjSelector
+0x001DA3D0 CountTypeAttributes__11ObjSelector
+0x001DA408 GetTypeAttributes__11ObjSelector
+0x00254B98 GetTypeAttrBlock__12ObjectFolderi
 0x0025EB10 __as__8BString2RC8BString2
 0x00261738 __as__8BString2PCUs
 0x002617F8 __apl__8BString2PCUs
