@@ -1,5 +1,7 @@
 #include "game/simulator/core2/cXPerson.h"
 
+#include "game/GameData.h"
+
 #include "game/animation/SAnimator2.h"
 
 // Primitive 0x2d.
@@ -226,6 +228,44 @@ long cXPerson::TryIdleForInput(StackElem *elem, XPrimParam *primParam)
         return 2;
     }
     return executeInterruptOnIdlePrimitve(elem, counter, param->mAllow != 0);
+}
+
+class EResource {
+public:
+    void DelRef();
+};
+class ERShader : public EResource {};
+
+// Wii: GetShaderForObject. Returns the icon, and the shader through the pointer.
+u32 GetShaderForObject(cXObject *object, ERShader **shader);
+
+// Wii: ActionQueue::Insert, which calls Queue<Interaction, 12>::Insert and AddActionToHUD. PS2
+// inlines both, and Interaction::GetID.
+int ActionQueue::Insert(const Interaction &action, u32 index)
+{
+    if (!QueueInsert(action, index))
+        return 0;
+    if (At(index)->field_0x30 == 0)
+        At(index)->SetUniqueID();
+
+    GameData *gd = &_gd;
+    if (gd->mHud)
+        mHudOff = 0;
+    if (mHudOff)
+        return 1;
+    Interaction *queued = At(index);
+    if (!IsVisibleAction(*queued))
+        return 1;
+    ERShader *shader;
+    u32 icon = GetShaderForObject(queued->GetIconObject(), &shader);
+    if (!icon && !shader)
+        return 1;
+    u32 guid = FindVisualInsertGUID(index);
+    if (gd->mHud)
+        gd->mHud->AddAction(queued, queued->GetName(), icon, shader, guid);
+    if (shader)
+        shader->DelRef();
+    return 1;
 }
 
 extern Interaction *sImmediateAction;

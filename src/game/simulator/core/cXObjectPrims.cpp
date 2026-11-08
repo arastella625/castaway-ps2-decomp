@@ -1,5 +1,7 @@
 #include "game/simulator/core/cXObject.h"
 
+#include "game/GameData.h"
+
 #include "common/EGlobal.h"
 #include "common/EVec3.h"
 #include "game/animation/SAnimator2.h"
@@ -14,27 +16,6 @@
 #include "game/simulator/objectdata/XObjLang.h"
 
 #define OBJECT_ERROR_CHECK(condition, code) TREE_CHECK(this, condition, code, return -1)
-
-class Player {
-public:
-    Neighbor *GetPrimaryNeighbor();
-};
-
-class GameData {
-public:
-    u32 pad_0x0[0x15];
-    class HudTarget *mHud;    // 0x54  GenericSimCall 0x11
-    u32 pad_0x58[0x11];
-    struct LoadInfo *mLoadInfo; // 0x9c  GenericSimCall 9 clears its word +0x10
-    u32 pad_0xa0[2];
-    int mInitialSimSelection; // 0xa8
-    u32 pad_0xac[6];
-    int mBuildBuyMode;        // 0xc4  Wii: IsBuildBuyMode
-    Player mPlayer;           // 0xc8
-
-    Player *GetPlayer() { return &mPlayer; }
-};
-extern GameData _gd;
 
 namespace InteractorModule {
 class DirectInteractor {
@@ -2188,23 +2169,9 @@ long cXObject::TryLotTransition(StackElem *elem, XPrimParam *primParam)
 
 #ifdef NON_MATCHING
 // GenericSimCall 9: Wii LoadingScreenStateMachine::LoadFinishing, static on PS2.
-struct LoadInfo {
-    u32 pad_0x0[4];
-    int field_0x10; // 0x10
-};
 class LoadingScreenStateMachine {
 public:
     static void LoadFinishing();
-};
-// GenericSimCall 0x11: Wii _gd +0x48 then +0xAC.
-class ActionMenu {
-public:
-    void SetupHarvestCount(int count);
-};
-class HudTarget {
-public:
-    u32 pad_0x0[0x24];
-    ActionMenu *mActionMenu; // 0x90
 };
 // Wii: GetEORGlobals, a pointer on PS2 at 0x50A6A8.
 extern EGlobal *gEORGlobals;

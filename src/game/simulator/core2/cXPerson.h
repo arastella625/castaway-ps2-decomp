@@ -48,7 +48,26 @@ public:
         }
         return shown;
     }
+    u8 mHudOff;               // 0x308  cleared whenever the HUD exists
+    u8 pad_0x309[3];
+
+    // Wii: Queue<Interaction, 12>::Insert. Later actions move back one place.
+    bool QueueInsert(const Interaction &action, u32 index)
+    {
+        if (Count() < 12) {
+            u32 i = mTail;
+            while (mHead + index < i) {
+                mActions[i % 12] = mActions[(i - 1) % 12];
+                i--;
+            }
+            mActions[i % 12] = action;
+            mTail++;
+            return true;
+        }
+        return false;
+    }
     int Insert(const Interaction &action, u32 index);
+    u32 FindVisualInsertGUID(u32 index) const;
     bool Peek(u32 index, Interaction &action) const
     {
         if (index >= mTail - mHead)
@@ -115,7 +134,7 @@ public:
     eastl::vector<MotiveInc, eastl::allocator> mMotiveIncs; // 0x200
     u32 pad_0x210[3];         // 0x210
     ActionQueue mActionQueue; // 0x21c
-    u32 pad_0x524[5];         // 0x524
+    u32 pad_0x528[4];         // 0x528
     u32 field_0x538;          // 0x538  IsIdle clears bit 0 of it
     u32 pad_0x53c[3];         // 0x53c
     s16 mPersonData[0x24];    // 0x548  scopes 0x12, 0x13 and 0x30 to 0x33

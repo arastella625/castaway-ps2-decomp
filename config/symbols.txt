@@ -1180,6 +1180,12 @@
 0x00261F98 length__C8BString2
 0x00492578 _11Interaction$sLastUniqueID
 
+# game/simulator/core2/cXPerson.cpp: ActionQueue::Insert
+0x001A6418 FindVisualInsertGUID__C11ActionQueueUi
+0x003260E8 GetShaderForObject__FP8cXObjectPP8ERShader
+0x002BBC60 AddAction__C9H2DTargetPC11InteractionRC8BString2UiP8ERShaderUi
+0x004525B8 DelRef__9EResource
+
 # game/simulator/core2/cXPerson.cpp: AddAction
 0x001A6788 Insert__11ActionQueueRC11InteractionUi
 0x0024D5B8 GetEntry__C11Interaction
