@@ -6,10 +6,17 @@
 #include "game/cas/CasSimDescription.h"
 
 class ClothingItem;
+class Family;
+class cXObject;
+
 // Wii: InventoryItem. Its vptr comes after the first word.
 class InventoryItem {
 public:
-    u32 field_0x0;
+    s16 mInstanceID; // 0x00  Wii: GetInstanceID, given by InventoryItems::SetInstanceID
+    u16 pad_0x2;
+
+    s16 GetInstanceID() const { return mInstanceID; }
+    void SetInstanceID(s16 id) { mInstanceID = id; }
 
     virtual s16 GetID();
     virtual void Slot1();
@@ -20,9 +27,10 @@ public:
 // Wii: InventoryItems. Only what the decompiled code calls is declared so far.
 class InventoryItems {
 public:
-    u32 field_0x0;                                         // 0x00
+    u8 mNonTokenCount;                                     // 0x00  at most 0x20
+    u8 pad_0x1[3];
     eastl::vector<InventoryItem *, eastl::allocator> mItems; // 0x04
-    u32 field_0x14;                                        // 0x14
+    Family *mFamily;                                       // 0x14
     s32 *mCollectedBits;                                   // 0x18
     int mCollectedWords;                                   // 0x1c
 
@@ -33,6 +41,19 @@ public:
 
     ClothingItem *GetClothingItem(s16 neighborID, Character::eBodyPart part);
     void AddItem(InventoryItem *item);
+    int AddOwnableItem(cXObject *object);
+    static void RunOnAddTree(Family *family, cXObject *object, s16 index);
+    static s16 s_nNextInstanceID;
+
+    // Wii: CanHoldMoreNonTokens and SetInstanceID, inlined on PS2.
+    bool CanHoldMoreNonTokens() const { return mNonTokenCount < 0x20; }
+    static void SetInstanceID(InventoryItem *item)
+    {
+        if (item && item->GetInstanceID() == 0) {
+            item->SetInstanceID(s_nNextInstanceID);
+            s_nNextInstanceID++;
+        }
+    }
     void AddToken(s16 id, s16 count);
     void GimmeAllFood(s16 count);
     void GimmeAllResources(s16 count);
