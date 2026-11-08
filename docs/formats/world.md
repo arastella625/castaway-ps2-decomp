@@ -831,6 +831,43 @@ a cap of 255/128. The game-light renders of `lot_02` go nearly black where the g
 Objects and the Sim stay on Godot's lights, which work in linear values and can't follow the GS's
 sums.
 
+#### What shows where list 3 was the only ground
+
+**Proven, nothing else is there.** Projecting every drawn submodel and every scenery object onto
+the 1 m grid:
+
+- `lot_24` has 110 m2 where only list 3 has ground, none walkable, at 13 to 20 m. Below it, 106 m2
+  has only `outer_ocean_light`, 13 to 20 m down.
+- `lot_15` has 284 m2, 162 walkable: seabed at about -10 m. Above it are `outer_ocean`,
+  `oceanSparkle` and `lot15_transition` near sea level, and nothing below.
+- The `skydome` model is a whole sphere, -619 to +619 m, so its lower half is under everything.
+
+**Proven, the sea is light added over the sky.** A shader's first pass ALPHA register, decoded as
+(A - B) x C + D:
+
+| Register | Formula | Models |
+|---|---|---|
+| 0x68 | Cs x FIX + Cd | `ocean`, `outer_ocean`, `outer_ocean_light` (FIX 14, then 19), `ripples` (96), `feetPortalGlow`, the `waves` sheets |
+| 0x44 | (Cs - Cd) x As + Cd | the `transition` sheets, `oceanEdge`, `caveWater`, bush billboards and others |
+| 0x4A | (0 - 0) x As + Cd | `oceanSparkle`'s first pass, `fogPlane` |
+
+So where list 3 isn't drawn, the game shows the skydome's lower half with faint caustics over it.
+Through `lot_24`'s moss-edge holes, that's the sea seen from 15 m up. Over `lot_15`'s seabed, it's
+the shallow sand of `lot15_transition`, mixed by its alpha, then the sea.
+
+`placed.py lot` writes each blending material's first pass as `extras.gs_blend` (`alpha`, `fix`).
+The port draws 0x68 additively at FIX / 128. It draws 0x44 as alpha blending where its old name
+rule made it additive; everything else is as before.
+
+**Proven, the clear colour.** `ELiveMode::Draw` clears the screen to 0.9 x the light grid's
+ambient + 0.1 x its directional light (`ERLevel::GetSunLight`, constant `0x3F666666`). That the grid's
+outdoor lights are the sky set above is **likely**. Nothing here shows it: the skydome covers every
+direction.
+
+**Open:** whether the game's camera ever looks into these spots. `ENCamera` and `BSplineVolume` in
+the level files aren't decoded. A pass's second texture isn't drawn by the port, so
+`outer_ocean`'s second caustics layer (FIX 19) is missing.
+
 **What this did to the patches: it didn't remove them.** Seven of lots 1 to 28 have ten metres or more of
 seam where sheets lie on each other (`lot_02`, 09, 15, 22, 24, 27, 28). All seven still do. Seam
 contrast, as a share of local brightness, rose on six of them (`lot_24` from 17% to 28%, `lot_02` from
