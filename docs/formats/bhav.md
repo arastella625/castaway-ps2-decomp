@@ -1268,6 +1268,40 @@ Person data 0x1C ends up holding the route's result: 0 worked, 1 failed, 4 inter
 
 The route then walks to the best goal it can reach. **For a port:** the on-top case, with the rotation above, gives the exact tile. For the others, the point at the optimal distance in the best allowed direction, facing the object, is a good stand-in.
 
+### Which way is x, and how directions turn
+
+**Proven, PS2.** `TransformToWorldCoords` (`0x1CA758`) and `cXMTObject::AssignOffsets` (`0x1FFC90`) match the game byte for byte. `OffsetCoordsInDirection` is inlined in `ConstructGoals` (`0x1CE898`) and was read there, the same as Wii's.
+
+**The axes.** Everything here is in the game's own tile axes. x is the first word of an `FTilePt`: an object's location at `+0xC4`, which `IsInWorld` tests along with y at `+0xC8`. Both are in sixteenths of a tile. **A routing slot's first offset is that x**:
+
+- Descriptor `+0x04` is `RoutingSlot +0x04`.
+- `GetXOffset` returns it, with the Sim type's extra added.
+- `ConstructGoals` passes that as x to `TransformToWorldCoords`, which adds it to the origin's first word.
+- The second offset (`+0x08`) is y in the same way. The third (`+0x0C`) isn't used for the tile.
+
+So if a port's data has x and y swapped from these axes, it has to swap a slot's offsets and object locations the same way before applying any of the rules below.
+
+**Directions** are in eighths, and all three functions agree on which way they turn:
+
+| Direction | `OffsetCoordsInDirection`: one step | `TransformToWorldCoords`: offset (x, y) becomes | `AssignOffsets`: part offset (x, y) becomes |
+|---|---|---|---|
+| 0 | y − 1 | (x, y) | (x, y) |
+| 2 | x + 1 | (−y, x) | (−y, x) |
+| 4 | y + 1 | (−x, −y) | (−x, −y) |
+| 6 | x − 1 | (y, −x) | (y, −x) |
+| Odd | Both: 1, 3, 5, 7 are (+1, −1), (+1, +1), (−1, +1), (−1, −1) | The object's rotation matrix, through world coordinates | (0, 0) |
+
+**Checking it:** turning direction 0's step, (0, −1), by direction 2 gives (+1, 0), which is direction 2's step. Turning it by 4 gives (0, +1) and by 6 gives (−1, 0). So "direction d" means the same thing in all three: it faces −y at 0 and +x at 2.
+
+- **`TransformToWorldCoords`**, in full: the offset is turned as above, then **x = origin x + x and y = origin y + y**, each cut to an integer. For directions 2 and 6, the old x is cut to an integer before it's moved to the other axis.
+- **`AssignOffsets`:**
+  1. The first part (`+0x140`, or the object itself) gives the base: position words `+0x144` and `+0x148`, plus a third at `+0x14C`, and the first part's data 1 as the direction.
+  2. For each part along `+0x13C`, it stores (part − base) at `+0x150`, `+0x154` and `+0x158`.
+  3. Then it turns the first two by that direction, **the same way as `TransformToWorldCoords`, not the reverse**.
+  4. Odd directions store (0, 0).
+
+  Each part's own data 1 is also read in the loop, and not used.
+
 ## PushAction (opcode 0x0D)
 
 **Proven** for the primitive: `TryPushAction` (`0x228788`) matches the game byte for byte. `AddAction` is **likely**, from the Wii build. 334 uses.
