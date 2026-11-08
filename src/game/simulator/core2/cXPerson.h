@@ -22,6 +22,7 @@ public:
     int mResult;         // 0x8c  Wii: GetResult and SetResult
     u32 pad_0x90[3];     // 0x90
     s16 field_0x9c;      // 0x9c  person data 0x20 takes it on arrival
+    u8 pad_0x9e[0xa];    // 0x9e
 };
 
 // Wii: ActionQueue, a Queue<Interaction, 12>: a ring of twelve actions.
@@ -119,7 +120,7 @@ public:
     virtual void Slot10();
     virtual void Slot11Offset(f32 x, f32 y, f32 direction);
     virtual void Slot12();
-    virtual void Slot13();
+    virtual int FollowOneStep(); // Wii SAnimator2 slot 13
     virtual void Slot14();
     virtual void Slot15();
     virtual int IsInterruptable(); // Wii SAnimator2 slot 16
@@ -155,7 +156,11 @@ public:
     u32 pad_0x53c[3];         // 0x53c
     s16 mPersonData[0x24];    // 0x548  scopes 0x12, 0x13 and 0x30 to 0x33
     Neighbor *mNeighbor;      // 0x590
-    u32 pad_0x594[0x17];      // 0x594
+    u32 pad_0x594[2];         // 0x594
+    eastl::vector<FTilePt, eastl::allocator> mPath; // 0x59c  8-byte tile points
+    u32 pad_0x5ac[9];         // 0x5ac
+    eastl::vector<XRoute, eastl::allocator> mRoutes; // 0x5d0  the last is current
+    u32 pad_0x5e0[4];         // 0x5e0
     PersonAnimator *mAnimator; // 0x5f0
     s16 mIdleLoopCount;       // 0x5f4
 
@@ -173,18 +178,35 @@ public:
     void SetCurrentActionText(const BString2 &text);
     int AddAction(Interaction *action);
 
-    // The routing state machine: each handler returns the next state.
+    // The routing state machine: each handler returns the next state. bhav.md has the table.
     enum RoutingState {
-        kRoutingWalking = 1,
-        kRoutingWaitingForPortal = 2,
-        kRoutingFailed = 7,
-        kRoutingNeedFailureFeedback = 0x10
+        kRoutingInitial = 1,
+        kRoutingWaitingForPortal,
+        kRoutingWalking,
+        kRoutingWaitingForSit,
+        kRoutingWaitingForStand,
+        kRoutingTrapped,
+        kRoutingFailed,
+        kRoutingSucceeded,
+        kRoutingWalkingSucceeded,
+        kRoutingWalkingFailed,
+        kRoutingWalkTerminated,
+        kRoutingFoundPath,
+        kRoutingWaiting,
+        kRoutingWaitingForPersonToMove,
+        kRoutingRouteInvalidatedWhileWalking,
+        kRoutingNeedFailureFeedback,
+        kRoutingWaitingForFailureFeedback,
+        kRoutingFoundGoals,
+        kRoutingObjectDeleted,
+        kRoutingObjectDeletedWhileWalking
     };
     XRoute *GetCurrentRoute();
     void CleanUpAfterFinishingRoute(RoutingState state);
     int TryRoomRouting(XRoute *route);
     void SetPersonData(int index, s16 value);
     RoutingState Routing_WaitingForPortal(bool &done, TreeReturnCode &code);
+    RoutingState Routing_Walking(bool &done, TreeReturnCode &code);
     RoutingState Routing_Failed(bool &done, TreeReturnCode &code);
     int RunImmediateAction(Interaction *action);
     int MoveOutOfWay(int priority);

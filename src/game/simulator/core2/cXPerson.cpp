@@ -467,7 +467,32 @@ cXPerson::RoutingState cXPerson::Routing_WaitingForPortal(bool &done, TreeReturn
         return kRoutingNeedFailureFeedback;
     }
     SetPersonData(0x20, route->field_0x9c);
-    return kRoutingWalking;
+    return kRoutingInitial;
+}
+
+// One step of the walk. The animator's answer is also the tree's code.
+cXPerson::RoutingState cXPerson::Routing_Walking(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    if (ShouldInterrupt() && mAnimator->IsInterruptable()) {
+        route->mResult = 4;
+        return kRoutingWalkTerminated;
+    }
+    if (mRoutes.size() == 0)
+        return kRoutingWalkTerminated;
+    if (mPath.size() == 0)
+        return kRoutingWalkTerminated;
+    code = mAnimator->FollowOneStep();
+    switch (code) {
+    case 2:
+        done = true;
+        return kRoutingWalking;
+    case 1:
+        return kRoutingWalkingSucceeded;
+    case 0:
+        return kRoutingWalkingFailed;
+    }
+    return kRoutingWalkingFailed;
 }
 
 // A failed route keeps its result, or gets 1, and the tree goes on with code 0.
