@@ -96,6 +96,16 @@ public:
     }
 
     // The game has this as a function and also inlines it in InterpValue.
+    // TryRelationship2's form of the lookup: two separate tests line up better there than one.
+    Neighbor *FindNeighborByIDJoined(int id)
+    {
+        if (id <= 0)
+            return 0;
+        if (mNeighbors.size() < (unsigned int)id)
+            return 0;
+        Neighbor *result = mNeighbors[id - 1];
+        return result;
+    }
     Neighbor *FindNeighborByIDInline(int id)
     {
         if (id <= 0 || mNeighbors.size() < (unsigned int)id)

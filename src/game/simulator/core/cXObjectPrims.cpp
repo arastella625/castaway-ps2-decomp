@@ -408,8 +408,12 @@ cXObject *cXObject::GetInteractionLeader()
 }
 
 #ifdef NON_MATCHING
-// The logic is complete, from the Wii build, and 563 of the game's 732 words line up on a first
-// pass. It's 25 words short: the neighbour lookups need checking case by case against the game.
+// Not matched: 632 of the game's 732 words line up (with s1 and s4 swapped), and ours is 713.
+// Most of the rest is one pattern: the game loads each looked-up Neighbor into $v0 and copies it
+// into the saved register, and here the load goes straight there. About fifteen bodies for the
+// lookup were tried (early returns, one result variable, ?:, a reference, Wii's GetID check);
+// a single result variable brings the copies back but adds 22 words elsewhere. The game also
+// keeps the high half of pNeighborhood in $fp for the whole function, and `from` on the stack.
 // Wii: an object's or neighbour's relationships. Only the slots Relationship2 calls.
 class RelMatrix {
 public:
@@ -420,7 +424,7 @@ public:
     virtual void SetCount(s16 key, int count);
     virtual void Slot5();
     virtual void Slot6();
-    virtual s16 Get(s16 key, int field);
+    virtual int Get(s16 key, int field);
     virtual void Set(s16 key, int field, s16 value);
 };
 
@@ -478,7 +482,7 @@ long cXObject::TryRelationship2(StackElem *elem, XPrimParam *primParam)
         case 0:
             owner = this;
             if (param->GetUseNeighbors())
-                neighbor = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+                neighbor = neighborhood->FindNeighborByIDJoined(elem->mStackObject);
             else
                 other = GetObjectFromID(elem->mStackObject);
             break;
@@ -487,13 +491,13 @@ long cXObject::TryRelationship2(StackElem *elem, XPrimParam *primParam)
                 OBJECT_ERROR_CHECK(false, 0x5b);
             }
             owner = GetObjectFromID(elem->mStackObject);
-            neighbor = neighborhood->FindNeighborByIDInline(mID);
+            neighbor = neighborhood->FindNeighborByIDJoined(mID);
             break;
         case 2:
             OBJECT_ERROR_CHECK(param->mLocal < elem->mNumLocals, 0x34);
             owner = GetObjectFromID(elem->mStackObject);
             if (param->GetUseNeighbors())
-                neighbor = neighborhood->FindNeighborByIDInline(elem->GetLocals()[param->mLocal]);
+                neighbor = neighborhood->FindNeighborByIDJoined(elem->GetLocals()[param->mLocal]);
             else
                 other = GetObjectFromID(elem->GetLocals()[param->mLocal]);
             break;
@@ -501,7 +505,7 @@ long cXObject::TryRelationship2(StackElem *elem, XPrimParam *primParam)
             OBJECT_ERROR_CHECK(param->mLocal < elem->mNumLocals, 0x34);
             owner = GetObjectFromID(elem->GetLocals()[param->mLocal]);
             if (param->GetUseNeighbors())
-                neighbor = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+                neighbor = neighborhood->FindNeighborByIDJoined(elem->mStackObject);
             else
                 other = GetObjectFromID(elem->mStackObject);
             break;
@@ -518,40 +522,42 @@ long cXObject::TryRelationship2(StackElem *elem, XPrimParam *primParam)
         matrix = owner->mRelMatrix;
         key = neighbor->GetID();
     } else if (param->GetUseNeighbors()) {
+        Neighbor *source = 0;
         Neighbor *to = 0;
         switch (param->mWho) {
         case 0: {
             cXPerson *person = GetPerson();
             OBJECT_ERROR_CHECK(person, 0x1c);
-            from = neighborhood->FindNeighborByIDInline(person->GetNeighborID());
-            to = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+            source = neighborhood->FindNeighborByIDJoined(person->GetNeighborID());
+            to = neighborhood->FindNeighborByIDJoined(elem->mStackObject);
             break;
         }
         case 1: {
             cXPerson *person = GetPerson();
             OBJECT_ERROR_CHECK(person, 0x1c);
-            from = neighborhood->FindNeighborByIDInline(elem->mStackObject);
-            to = neighborhood->FindNeighborByIDInline(person->GetNeighborID());
+            source = neighborhood->FindNeighborByIDJoined(elem->mStackObject);
+            to = neighborhood->FindNeighborByIDJoined(person->GetNeighborID());
             break;
         }
         case 2:
             OBJECT_ERROR_CHECK(param->mLocal < elem->mNumLocals, 0x34);
-            from = neighborhood->FindNeighborByIDInline(elem->mStackObject);
-            to = neighborhood->FindNeighborByIDInline(elem->GetLocals()[param->mLocal]);
+            source = neighborhood->FindNeighborByIDJoined(elem->mStackObject);
+            to = neighborhood->FindNeighborByIDJoined(elem->GetLocals()[param->mLocal]);
             break;
         case 3:
             OBJECT_ERROR_CHECK(param->mLocal < elem->mNumLocals, 0x34);
-            from = neighborhood->FindNeighborByIDInline(elem->GetLocals()[param->mLocal]);
-            to = neighborhood->FindNeighborByIDInline(elem->mStackObject);
+            source = neighborhood->FindNeighborByIDJoined(elem->GetLocals()[param->mLocal]);
+            to = neighborhood->FindNeighborByIDJoined(elem->mStackObject);
             break;
         }
-        if (!(from && to)) {
+        if (!(source && to)) {
             OBJECT_ERROR_CHECK(false, 0x15);
         }
         OBJECT_ERROR_CHECK(param->mField != 2, 0x56);
-        matrix = from->mRelations;
+        matrix = source->mRelations;
         key = to->GetID();
-        RelationshipAccessed(mModule, from, to, param->GetAssign());
+        RelationshipAccessed(mModule, source, to, param->GetAssign());
+        from = source;
     } else {
         cXObject *first = 0;
         cXObject *second = 0;
@@ -581,11 +587,12 @@ long cXObject::TryRelationship2(StackElem *elem, XPrimParam *primParam)
         matrix = first->mRelMatrix;
         key = second->mID;
         if (first->GetType() == 2 && second->GetType() == 2) {
-            from = neighborhood->FindNeighborByIDInline(first->GetPerson()->GetNeighborID());
-            matrix = from->mRelations;
+            Neighbor *source = neighborhood->FindNeighborByIDJoined(first->GetPerson()->GetNeighborID());
+            from = source;
+            matrix = source->mRelations;
             key = second->GetPerson()->GetNeighborID();
             OBJECT_ERROR_CHECK(param->mField != 2, 0x56);
-            RelationshipAccessed(mModule, from, neighborhood->FindNeighborByIDInline(key), param->GetAssign());
+            RelationshipAccessed(mModule, source, neighborhood->FindNeighborByIDJoined(key), param->GetAssign());
         }
     }
 
@@ -610,9 +617,11 @@ long cXObject::TryRelationship2(StackElem *elem, XPrimParam *primParam)
         }
         return 1;
     }
-    OBJECT_ERROR_CHECK(ref, 0x13);
-    InterpWriteValue(param->mScope, param->mData, &ref, matrix->Get(key, param->mField));
-    return 1;
+    if (ref) {
+        InterpWriteValue(param->mScope, param->mData, &ref, matrix->Get(key, param->mField));
+        return 1;
+    }
+    OBJECT_ERROR_CHECK(false, 0x13);
 }
 
 #endif
