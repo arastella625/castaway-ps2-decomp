@@ -1,5 +1,6 @@
 #include "game/simulator/core/InventoryItems.h"
 
+#include "game/cas/CasUtils.h"
 #include "game/simulator/core/Inventory.h"
 #include "game/simulator/core/ObjSelector.h"
 #include "game/simulator/core/cXObject.h"
@@ -35,6 +36,28 @@ void InventoryItems::AddTokenItem(s16 id, s16 count)
         SetInstanceID(item);
         mItems.push_back(item);
         CheckForAddGoals(0, id);
+    }
+}
+
+// One clothing ID can be a man's and a woman's piece: each one the clothing set has gets its own
+// item. Clothing 0x90 also unlocks goal-and-unlock entry 0x20B of kind 2.
+void InventoryItems::AddClothingItem(s16 id)
+{
+    const ClothingItemsRow *row = GetClothingItemsRow(id);
+    if (row) {
+        Character::eBodyPart part = CasUtils::GetBodyPartByName(row->mBodyPartName);
+        if (CasUtils::GetClothingSetIndexByName(true, part, row->mClothingSetName)) {
+            ClothingItem *item = new ClothingItem(id, true);
+            SetInstanceID(item);
+            mItems.push_back(item);
+        }
+        if (CasUtils::GetClothingSetIndexByName(false, part, row->mClothingSetName)) {
+            ClothingItem *item = new ClothingItem(id, false);
+            SetInstanceID(item);
+            mItems.push_back(item);
+        }
+        if (id == 0x90)
+            GetNeighborhood()->GetGoalAndUnlockData()->Unlock(2, 0x20B);
     }
 }
 

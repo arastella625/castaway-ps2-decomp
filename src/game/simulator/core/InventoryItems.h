@@ -70,6 +70,8 @@ public:
         }
     }
     void AddTokenItem(s16 id, s16 count);
+    void AddClothingItem(s16 id);
+    static const struct ClothingItemsRow *GetClothingItemsRow(s16 id);
     void GimmeAllFood(s16 count);
     void GimmeAllResources(s16 count);
     void GimmeAllTools();

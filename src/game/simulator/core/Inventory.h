@@ -5,6 +5,7 @@
 #include "common/ERQuickdata.h"
 #include "common/eastl.h"
 #include "common/types.h"
+#include "game/simulator/core/ClothingItem.h"
 #include "game/simulator/core/InventoryItems.h"
 #include "game/simulator/core/Neighborhood.h"
 #include "game/simulator/core2/cXPerson.h"
@@ -107,6 +108,21 @@ inline const InventoryTokens *InventoryItems::GetTokenFromID(s16 id)
         const InventoryTokens *token = &((const InventoryTokens *)table->rows)[i];
         if (token->mID == id)
             return token;
+    }
+    return 0;
+}
+
+// The row of the "ClothingItems" table with this ID, or null. Inlined on PS2; the name is ours.
+inline const ClothingItemsRow *InventoryItems::GetClothingItemsRow(s16 id)
+{
+    if (id == 0)
+        return 0;
+    const ERQTable *table = GetObjectFolder()->mDatabase->GetTable("ClothingItems");
+    if (table == 0)
+        return 0;
+    for (u32 i = 0; i < table->count; i++) {
+        if (((const ClothingItemsRow *)table->rows)[i].mID == id)
+            return &((const ClothingItemsRow *)table->rows)[i];
     }
     return 0;
 }
