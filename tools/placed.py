@@ -40,6 +40,13 @@ MISMATCHED_LOT = 'lot_28'  # see docs/formats/world.md
 DEF_GUID = 0x1C
 DEF_TYPE = 0x12
 DEF_TILES = 0x14  # non-zero on the tiles of a multi-tile object
+DEF_SUB_TILE = 0x16  # a part's place from its lead, unturned: x in the low byte, y in the high
+DEF_ANCHOR = 0x3A  # set on the tile ISimsMultiTileObjectModel::SetObjOrient stands the model on
+# ApplyMatrix turns a model by its direction, then EMat4::SwapXY swaps x and y. read_object swaps
+# positions already, so models are left to mirror and turn the other way: glTF's turn about Y
+# runs x towards -z, as the game's turn about Z runs x towards y.
+MODEL_MIRROR = [1.0, 1.0, -1.0]
+BOX_SLACK = 0.05  # metres a tile's middle may be outside a model's box and still count as covered
 TYPE_PORTAL = 8
 TYPE_REMOVED = 9  # DoStream swaps these for a placeholder and kills it
 RELATIONS_NEW_FORM = -1  # RelMatrixImpl::DoStream: first word of the form every house uses
@@ -61,10 +68,10 @@ PALM_CROWN_HEIGHT = 4.12  # treeanimate3 in isTreeSkeleton
 PALM_LEAVES = 9
 PALM_LEAF_LIFT = 20.0  # degrees above level
 BOUNDS_TOLERANCE = 0.001
-FADE_LIST = 2  # gamedata's third submodel list
-FADE_SUFFIX = ' fade'
+FLOOR_LIST = 2  # gamedata's third submodel list: the floor Sims stand on, never drawn
+FLOOR_SUFFIX = ' floor'
 MISSING_TEXTURE = 'missingshader'  # the purple 16x16 behind Maya's default materials
-ALPHA_ADD = 0x68  # the GS ALPHA register: source * FIX + destination
+ALPHA_ADD = mdl.ALPHA_ADD
 
 
 class BitReader:
@@ -330,19 +337,138 @@ def anim_def(anims, graphic):
     return anims[index if 0 <= index < len(anims) else 0]
 
 
+def is_hidden(placed, table):
+    entry = table.get(placed.guid)
+    return bool(placed.variables.get(HIDDEN_KEY)) or (entry is not None and entry[0] in HIDES_ON_LOAD)
+
+
 def object_model(placed, table, available):
     """The model an object shows for its saved graphic, if any. Trees may change both later."""
     entry = table.get(placed.guid)
-    if entry is None or not entry[1] or placed.variables.get(HIDDEN_KEY)             or entry[0] in HIDES_ON_LOAD:
+    if entry is None or not entry[1] or is_hidden(placed, table):
         return None
     name = anim_def(entry[1], placed.variables.get(GRAPHIC_KEY, 0))[1]
     return name if name in available else None
+
+
+def undrawn(objects, table, available):
+    """Visible objects on the lot that nothing draws. A multi-tile object counts as drawn when any
+    of its tiles has a model: one definition per object has a ResData row, usually the lead's."""
+    drawn = {p.leader or p.object_id for p in objects if object_model(p, table, available)}
+    return [p for p in objects if p.on_lot and not is_hidden(p, table)
+            and (p.leader or p.object_id) not in drawn]
 
 
 def object_pose(placed, table):
     """Return (animation, rig) for an object's saved graphic, either or both None."""
     entry = table[placed.guid]
     return anim_def(entry[1], placed.variables.get(GRAPHIC_KEY, 0))[2], entry[2]
+
+
+def anchor_guids(disc):
+    """GUIDs of the definitions that mark a multi-tile object's anchor tile."""
+    data, table = gd.find_table(gd.load_quickdata(disc), 'SimsObjects/ObjDefinition')
+    rows = (table.rows + i * table.stride for i in range(table.count))
+    return {data.word(p + DEF_GUID) for p in rows if struct.unpack_from('<h', data.image, p + DEF_ANCHOR)[0] > 0}
+
+
+def model_anchor(item, objects, anchors):
+    """Where the game stands an object's model, in metres. ISimsObjectModel::SetObjOrient uses its
+    tile. ISimsMultiTileObjectModel's uses a tile its definition marks, else the middle of the box
+    round all the object's tiles, so the model isn't on the tile that owns it."""
+    group = item.leader or item.object_id
+    tiles = [o for o in objects if (o.leader or o.object_id) == group]
+    marked = [o for o in tiles if o.guid in anchors]
+    if len(tiles) == 1 or marked:
+        return (marked or [item])[-1].metres
+    xs, ys = zip(*(o.metres for o in tiles))
+    return (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+
+
+def model_rotation(direction):
+    """glTF rotation for a placed model, with MODEL_MIRROR as its scale. The game turns by
+    direction eighths; after the swap that's the same angle the other way, a quarter turn on."""
+    half = (math.pi / 2 - direction * EIGHTH_TURN) / 2
+    return [0.0, math.sin(half), 0.0, math.cos(half)]
+
+
+def turned_part(lead_direction, sub_tile):
+    """A part's place from its lead, in tiles: its definition's offset turned by the lead's
+    direction, clockwise as the routing code's direction steps go."""
+    x, y = struct.unpack('<2b', struct.pack('<H', sub_tile))
+    for _ in range((lead_direction // 2) % 4):
+        x, y = y, -x
+    return x, y
+
+
+def model_point(point, anchor, direction, game_rule=True):
+    """Where a point on the lot falls in a placed model's own x, y. The control, game_rule=False,
+    is the old export's rule: the model turned the other way, unmirrored."""
+    dx, dy = point[0] - anchor[0], point[1] - anchor[1]
+    turn = -(math.pi / 2 - direction * EIGHTH_TURN) if game_rule else -direction * EIGHTH_TURN
+    c, s = math.cos(turn), math.sin(turn)
+    x, y = c * dx - s * dy, s * dx + c * dy
+    return (x, -y) if game_rule else (x, y)
+
+
+def check_facing(disc, houses, table):
+    """Multi-tile objects test the turning rule: parts must land where their definition says, and
+    a model should cover its tiles. Portals' tiles are where Sims walk, so a few won't be covered."""
+    data, definitions = gd.find_table(gd.load_quickdata(disc), 'SimsObjects/ObjDefinition')
+    rows = {data.word(definitions.rows + i * definitions.stride + DEF_GUID):
+            definitions.rows + i * definitions.stride for i in range(definitions.count)}
+    anchors = anchor_guids(disc)
+    library = gltf.Library(disc)
+    available = {e.name: (e, raw) for e, raw in mdl.each_model(disc, library.shaders)}
+    boxes = {}
+    parts = {True: 0, False: 0}
+    covered = collections.Counter()
+    tiles_seen = objects_seen = 0
+    for objects in houses:
+        by_id = {o.object_id: o for o in objects}
+        for item in objects:
+            if not item.leader:
+                continue
+            lead = by_id[item.leader]
+            sub_tile = struct.unpack_from('<H', data.image, rows[item.guid] + DEF_SUB_TILE)[0]
+            at = tuple(round(a - b) for a, b in zip(item.metres, lead.metres))
+            parts[True] += turned_part(lead.direction, sub_tile) == at
+            parts[False] += turned_part((8 - lead.direction) % 8, sub_tile) == at
+        groups = collections.defaultdict(list)
+        for item in objects:
+            if item.on_lot and not is_hidden(item, table):
+                groups[item.leader or item.object_id].append(item)
+        for tiles in groups.values():
+            drawn = [(o, object_model(o, table, available)) for o in tiles]
+            drawn = [(o, name) for o, name in drawn if name]
+            if len(tiles) < 2 or not drawn:
+                continue
+            item, name = drawn[0]
+            if name not in boxes:
+                points = [(p[0] * m.scale, p[1] * m.scale)
+                          for m in mdl.parse_model(available[name][1], library.shaders, name)
+                          for b in m.batches for p in b.positions]
+                boxes[name] = [f(p[i] for p in points) for f in (min, max) for i in (0, 1)]
+            x0, y0, x1, y1 = boxes[name]
+            objects_seen += 1
+            tiles_seen += len(tiles)
+            for rule, anchor in (('game', model_anchor(item, objects, anchors)), ('old', item.metres)):
+                inside = [x0 - BOX_SLACK <= x <= x1 + BOX_SLACK and y0 - BOX_SLACK <= y <= y1 + BOX_SLACK
+                          for x, y in (model_point(t.metres, anchor, item.direction, rule == 'game')
+                                       for t in tiles)]
+                covered[(rule, 'tiles')] += sum(inside)
+                covered[(rule, 'objects')] += all(inside)
+    total = sum(1 for objects in houses for o in objects if o.leader)
+    gd.report('parts where their offset turns', parts[True], total,
+              'the diving platform on lot_24 has two odd offsets')
+    print('  control: turned the other way, %d of %d parts land' % (parts[False], total))
+    passed = parts[True] >= total - 2 and parts[False] < parts[True]
+    for rule in ('game', 'old'):
+        print('%-34s %7d of %7d objects, %d of %d tiles' % (
+            'multi-tile models over their tiles' if rule == 'game' else '  control: the old export\'s rule',
+            covered[(rule, 'objects')], objects_seen, covered[(rule, 'tiles')], tiles_seen))
+    passed &= covered[('game', 'tiles')] > covered[('old', 'tiles')]
+    return passed
 
 
 def lot_fit(objects, level):
@@ -403,6 +529,10 @@ def check(disc):
     for key, value in sorted(totals.items()):
         print('%-26s %6d' % (key, value))
     passed = gd.report('houses end on a zero mark', len(houses), len(streams))
+    missing = [p for objects in houses for p in undrawn(objects, table, models)]
+    on_lot = sum(p.on_lot and not is_hidden(p, table) for objects in houses for p in objects)
+    passed &= gd.report('visible objects something draws', on_lot - len(missing), on_lot,
+                        ' '.join(sorted({p.name or hex(p.guid) for p in missing})))
 
     types, data = streams[0]
     print('controls:')
@@ -411,6 +541,9 @@ def check(disc):
     passed &= gd.expect_failure('a stream cut short', lambda: read_objm(data[:-8], types, shapes))
     passed &= gd.expect_failure('an empty type list', lambda: read_objm(data, [], shapes))
     passed &= gd.expect_failure('every object read as single-tile', lambda: read_objm(data, types, {}))
+    unreachable = sum(len(undrawn(objects, table, set())) for objects in houses)
+    print('  control: with no models on the disc, %d visible objects are undrawn' % unreachable)
+    passed &= unreachable > 0
 
     archive = arc.find_archive(disc, 'LEVELS')
     levels = {e.name: gd.read_level(disc.read(archive.lba, e.offset, e.size), e.name)
@@ -422,6 +555,7 @@ def check(disc):
     best = max(scores, key=scores.get)
     passed &= best == FIRST_LOT_OFFSET
     passed &= check_submodels(disc, levels)
+    passed &= check_facing(disc, houses, table)
     print('failures: %d' % (not passed))
     return 0 if passed else 1
 
@@ -531,10 +665,10 @@ def read_lot_level(disc, lot):
 def split_terrain(terrain, data, level, shader_hashes):
     """Return (drawn ground, list 3). List 3 is the floor Sims stand on, and the game never draws it."""
     groups = mdl.submodels(data, terrain, shader_hashes)
-    ground, fading = [], []
+    ground, floor = [], []
     for reference, instance in enumerate(level.submodels, 1):
-        (fading if reference in level.lists[FADE_LIST] else ground).extend(groups[instance.submodel])
-    return ground, fading
+        (floor if reference in level.lists[FLOOR_LIST] else ground).extend(groups[instance.submodel])
+    return ground, floor
 
 
 def export_lot(disc, out_path, lot, posed=False):
@@ -545,22 +679,23 @@ def export_lot(disc, out_path, lot, posed=False):
         print('warning: this house looks like an older lot_27, so objects will be misplaced')
     library = gltf.Library(disc)
     table = model_table(disc)
+    anchors = anchor_guids(disc)
     available = {e.name: (e, raw) for e, raw in mdl.each_model(disc, library.shaders)}
     terrain = mdl.parse_model(available[lot][1], library.shaders, lot)
     level = read_lot_level(disc, lot)
-    solid, fading = split_terrain(terrain, available[lot][1], level, library.shaders)
+    solid, floor = split_terrain(terrain, available[lot][1], level, library.shaders)
     # Objects go on the drawn ground. List 3 counts only where that has none.
-    heights = {**ground_heights(textured(fading, library)),
+    heights = {**ground_heights(textured(floor, library)),
                **ground_heights(textured(solid, library))}
     builder = gltf.GlbBuilder()
     cache = {}
     meshes = {}
     ground = add_mesh(builder, library, lot, solid, cache)
     nodes = [builder.add_node({'name': lot, 'mesh': ground})]
-    if textured(fading, library):
-        name = lot + FADE_SUFFIX
+    if textured(floor, library):
+        name = lot + FLOOR_SUFFIX
         nodes.append(builder.add_node({
-            'name': name, 'mesh': add_mesh(builder, library, name, fading, cache)}))
+            'name': name, 'mesh': add_mesh(builder, library, name, floor, cache)}))
 
     def mesh_for(name):
         if name not in meshes:
@@ -608,12 +743,11 @@ def export_lot(disc, out_path, lot, posed=False):
         mesh = posed_mesh_for(name, placed) if name else None
         if mesh is None:
             continue
-        x, y = placed.metres
+        x, y = model_anchor(placed, objects, anchors)
         z = heights.get((math.floor(x), math.floor(y)), 0.0)
-        half = placed.direction * EIGHTH_TURN / 2
         node = {'name': 'placed %s %d' % (placed.name, placed.object_id), 'mesh': mesh,
                 'translation': list(gltf.to_y_up((x, y, z))),
-                'rotation': [0.0, math.sin(half), 0.0, math.cos(half)]}
+                'rotation': model_rotation(placed.direction), 'scale': MODEL_MIRROR}
         if name.startswith(PALM_TRUNK):
             node['children'] = palm_crown(builder, mesh_for(PALM_LEAF))
         nodes.append(builder.add_node(node))

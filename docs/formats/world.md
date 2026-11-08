@@ -237,7 +237,7 @@ The lists sort a lot's submodels into groups. References count from 1 in file or
 the stream order in `ERLevel::Read`: lists 2 and 3 are separate arrays, and an earlier version of this
 page mixed them up. The instance list goes in the array `Draw` and
 `DrawOuterLotInstancesWithShadow` walk. See "How ground is drawn" for list 3. `placed.py lot` writes it
-as a separate node, `lot_24 fade`, a name left from that mistake.
+as a separate node, `lot_24 floor`.
 
 ### Mid-lot objects
 
@@ -407,8 +407,8 @@ Positions are in sixteenths of a tile, and a tile is a metre. Controllers such a
 sit at -16, -16, off the lot: 365 objects do, leaving 2,246 on lots.
 
 Variable 1 is the direction, in eighths of a turn, from the code. It's 0 on 1,287 objects and 2, 4 or
-6 on 1,322, so placed objects face the four compass directions. Which way that turns is not shown by
-anything on the disc so far. Variable 0x1D is the room: -5 on the 365 objects off the lot, 0 elsewhere.
+6 on 1,322, so placed objects face the four compass directions. "Turning placed models" below has
+which way that turns. Variable 0x1D is the room: -5 on the 365 objects off the lot, 0 elsewhere.
 
 **House N is `lot_(N+1)`, counting the first house as 0**, and x and y are not swapped. HouseData's
 row 0 is a placeholder, which fits. Objects land on set cells of their lot's grids at a mean of
@@ -779,13 +779,121 @@ down, 100% by area, against 88 to 100% up on all 27 other lots. That is in the b
 order says the same: counted from each restart, 71% of it agrees with the normals, as 85 to 93% does
 on `lot_01`, 16 and 24. Levels place terrain with no transform, so nothing turns it over. `model.py`
 winds triangles to match the normals, so the export is faithful. VU1 doesn't cull, or this ground
-wouldn't draw. **Open:** how the sun lights it, since those normals face away.
+wouldn't draw. How they're lit is below: **likely** by the ambient alone.
 
-**Open:** the overall light level. VU1 multiplies this brightness by lights the port doesn't decode, so
-`terrain.gdshader` treats 127 as the texture's own colour and leaves the rest to Godot's sun. Pixels
-follow brightness / 127 in both renderers, measured on `lot_01`, so ground is darker than it was. It
-may well be too dark. `lot_24`'s plate at 127 now shows as a pale shape with a hard edge; whether the
-game's lights hide that is open.
+#### How ground is lit
+
+**Proven, VU1's lighting.** The whole routine is 34 bundles (overlay at `0xD18`):
+
+- It loads four light colours (VU1 quadwords 47 to 50), each times quadword 56 times 1/127, and an
+  ambient, quadword 46 times quadword 55 times 1/127.
+- It loads a 3 x 4 matrix of light directions (51 to 53) and a clamp (4).
+- Per vertex it takes four N.L at once, clamps each to 0 to 1 (`MAX` with 0, `MINI` with 1), and adds
+  ambient + each colour x its N.L. It multiplies that by the brightness byte, clamps to quadword 4,
+  and converts to an integer for the GS, which takes 128 as 1.0.
+
+There's no flip and no abs: a face turned from a light gets nothing from it, and every face gets
+the ambient.
+
+**Proven, the lights' source.** `world/LevelLightingSequence` holds three sequences, `DarkCave`,
+`Default` and `TempleInterior`. Each is a VECTOR of 11 `Level::LightingEntry`, 0x50 bytes, keyed by the
+hour (0, 4, 4.5, 5, 6, 7, 12, 17, 18, 19, 20). `tools/lighting.py` reads them, with controls.
+
+| Offset | Meaning |
+|---|---|
+| 0x00 | Hour |
+| 0x04, 0x08 | Ambient colour, intensity |
+| 0x10, 0x14, 0x18 | Fog colour and two floats, **likely** |
+| 0x1C, 0x20 | Sun elevation and yaw, degrees |
+| 0x24, 0x28 | Sun colour, intensity |
+| 0x2C to 0x38 | The same for the moon |
+| 0x3C, 0x40 | Sky light colour, intensity |
+| 0x44, 0x48 | Sky ambient colour, intensity |
+
+`ERLevel::InterpolateLevelLighting` blends the two entries round the hour linearly.
+`OutsideLightsUpdate` makes the sun's direction (cos e cos y, cos e sin y, sin e) on Wii and PS2 alike,
+with the level's own yaw offset added to y. Daytime elevations are below 0, so this is the way light
+travels. `CalcSkyLights` turns the sky light and sky ambient into one directional light along it, and
+an ambient. Wii's `EIStaticSubModel::Draw`, `ISimsObjectModel::DoLightingCalculation` and
+`EMidLotInstance` use that set. Wii's `UpdateLightingEquation` puts the GX light at -3.4 million times
+the direction, so towards the sun. `Default` at 12:00 is sun elevation -64, yaw 34; sky
+(1.0, 1.0, 0.6) x 1.0; sky ambient (0.72, 0.72, 1.0) x 0.72.
+
+**Proven, PS2 hands VU1 the way towards each light.** The renderer's light upload (EE `0x41F0B0`,
+in the renderer vtable at `0x4040B4`) sends 8 quadwords: the light set's ambient, then the four
+directions, transposed into x, y and z rows with every component negated (`neg.s`), then the four
+colours. VU1's main program (overlay 3, `0x438` to `0x4B8`) copies them to quadwords 46, 51 to 53
+and 47 to 50, which is exactly where the lighting routine reads them. So, with the light set storing
+the way light travels, VU1 dots each normal with the way to the sun.
+
+**Proven, so down-facing ground gets the ambient alone.** On `lot_02`, 28 and 29 the sun's N.L is
+negative, clamped to 0, and the ground shows at ambient x brightness.
+
+**Proven, the scale.** The upload at `0x41EE38` (next in the vtable) fills quadwords 55 and 56 with
+two colours x 128.0 (`0x43000000`), w = 128. So light 1.0 at brightness 127 is 128, the GS's 1.0.
+**Likely** both colours are 1 outdoors: they look like per-object or per-room multipliers, and the
+callers go through the vtable. **Open:** the clamp in quadword 4, which no microcode writes and no
+static data holds.
+
+**What the port does.** `terrain.gdshader` is unchanged: 127 is the texture's own colour, with
+Godot's sun. `beach.gd -- --game-light` uses `terrain_game_light.gdshader` instead. That applies the
+equation above with `Default` at 9:00, from the stored normal, in display values, with 1.0 = 128 and
+a cap of 255/128. It also lights scenery, placed objects and the skydome this way, since they carry
+the same brightness and lit flag and Wii's `ISimsObjectModel::DoLightingCalculation` reads the same
+light set. The game-light renders of `lot_02` go nearly black where the ground faces down. The Sim
+stays on Godot's lights.
+
+**Proven, the skydome is lit.** Its shader `skydome_gradient` is opaque (no blend flag) and lit, so
+VU1 lights it like ground. The default port draws it unlit; `--game-light` lights it.
+
+**Proven, the sea's second pass is its colour.** `ocean`, `outer_ocean` and `outer_ocean_light` add
+their caustics (FIX 14) and then `water_ocean` (FIX 19), both on the mesh's own UVs. `placed.py lot`
+writes an additive second pass in `emissiveTexture` (factor 0) with `extras.gs_blend2`, and the port
+draws it as a second additive pass.
+
+**Proven, `fogPlane` is drawn wrong, not fixed.** On lots 11, 12, 18 and 22, `lot_fog` and `lot_mist`
+have a first pass that writes no colour (0x4A), then Cs x Ad + Cd (0x58) with a second texture on UV
+source 5, which isn't decoded. The port draws the first pass's alpha texture as a solid cut-out,
+which shows white shapes. Adding it by its own alpha blew out to white, so that's not committed.
+`oceanSparkle` has the same two registers with one texture, so the name rule's additive drawing
+matches it (**likely**, if pass 0 writes the frame's alpha).
+
+#### What shows where list 3 was the only ground
+
+**Proven, nothing else is there.** Projecting every drawn submodel and every scenery object onto
+the 1 m grid:
+
+- `lot_24` has 110 m2 where only list 3 has ground, none walkable, at 13 to 20 m. Below it, 106 m2
+  has only `outer_ocean_light`, 13 to 20 m down.
+- `lot_15` has 284 m2, 162 walkable: seabed at about -10 m. Above it are `outer_ocean`,
+  `oceanSparkle` and `lot15_transition` near sea level, and nothing below.
+- The `skydome` model is a whole sphere, -619 to +619 m, so its lower half is under everything.
+
+**Proven, the sea is light added over the sky.** A shader's first pass ALPHA register, decoded as
+(A - B) x C + D:
+
+| Register | Formula | Models |
+|---|---|---|
+| 0x68 | Cs x FIX + Cd | `ocean`, `outer_ocean`, `outer_ocean_light` (FIX 14, then 19), `ripples` (96), `feetPortalGlow`, the `waves` sheets |
+| 0x44 | (Cs - Cd) x As + Cd | the `transition` sheets, `oceanEdge`, `caveWater`, bush billboards and others |
+| 0x4A | (0 - 0) x As + Cd | `oceanSparkle`'s first pass, `fogPlane` |
+
+So where list 3 isn't drawn, the game shows the skydome's lower half with faint caustics over it.
+Through `lot_24`'s moss-edge holes, that's the sea seen from 15 m up. Over `lot_15`'s seabed, it's
+the shallow sand of `lot15_transition`, mixed by its alpha, then the sea.
+
+`placed.py lot` writes each blending material's first pass as `extras.gs_blend` (`alpha`, `fix`).
+The port draws 0x68 additively at FIX / 128. It draws 0x44 as alpha blending where its old name
+rule made it additive; everything else is as before.
+
+**Proven, the clear colour.** `ELiveMode::Draw` clears the screen to 0.9 x the light grid's
+ambient + 0.1 x its directional light (`ERLevel::GetSunLight`, constant `0x3F666666`). That the grid's
+outdoor lights are the sky set above is **likely**. Nothing here shows it: the skydome covers every
+direction.
+
+**Open:** whether the game's camera ever looks into these spots. `ENCamera` and `BSplineVolume` in
+the level files aren't decoded. A pass's second texture isn't drawn by the port, so
+`outer_ocean`'s second caustics layer (FIX 19) is missing.
 
 **What this did to the patches: it didn't remove them.** Seven of lots 1 to 28 have ten metres or more of
 seam where sheets lie on each other (`lot_02`, 09, 15, 22, 24, 27, 28). All seven still do. Seam
@@ -976,12 +1084,65 @@ it. So `ranger` is torso, lowerBody and shoes `ranger` and the rest `none`. `def
   `source_tree_banana` is `isBananaTreeTrunkFruitFull`, `FruitSome` and `isBananaTreeTrunk` for graphics
   0, 1 and 2. 1,993 of 2,000 entries name a model or rig. Word 1 finds 1, word 2 finds 24, and strides
   of 0x1C and 0x24 find 657 and 665. 719 definitions have no row. Of a multi-tile object's definitions,
-  only the lead has one, so one model is drawn for the whole object.
+  one has a row, so one model is drawn for the whole object. It's usually the lead's, but not
+  always: on the quicksand pillar (`lot_12`) and the steam vent (`lot_19`) another tile owns it, and
+  that tile is the one drawn. `placed.py check` asserts every visible object on a lot is drawn by
+  itself or by a tile of its object.
+
+- **Turning placed models. Proven**, from Wii code, with the data agreeing:
+
+  - **Model class.** `ISimsObjectModel`'s factory picks it from the first ObjAnimDef. Byte 5 set
+    makes a wall object, byte 6 a counter-top, and the model `Boxwood_Hedge` a shrub. Otherwise a
+    single-tile object gets `ISimsObjectModel` and a multi-tile one `ISimsMultiTileObjectModel`.
+    No placed object is a wall, counter-top or shrub, so those two are all the lots need.
+  - **The matrix.** Both `SetObjOrient`s call `ApplyMatrix` with an angle of direction × π/4. It
+    builds scale, then `PostRotateZ`, then `PostTranslate`, then `EMat4::SwapXY`, which swaps the
+    x and y columns. `RotateZ` turns x towards y, with row vectors.
+  - **Where the model stands.** A single-tile model stands on its tile. A multi-tile one stands on
+    the tile whose definition has a non-zero half-word at `+0x3A`: 34 definitions, one per object,
+    such as hitching posts, rope bridges and `lot26Rock`. With none, it stands in the middle of
+    the box round all the object's tiles (`EIObjTileBoundRect::GetCenter`).
+  - **What that means for the export.** `read_object` swaps positions already, as the house's x is
+    the terrain's y. The model must also be mirrored across x = y and turned the other way. In our
+    axes, that's the model's y negated, then a turn by 90° − direction × 45°. Neither the old
+    turn's direction nor a turn without the mirror covers the tiles.
+  - **Parts.** A part's definition gives its place from the lead at `+0x16`: x in the low byte, y
+    in the high. Turned clockwise by the lead's direction in our axes, as `OffsetCoordsInDirection`'s
+    steps go, this lands on 217 of 219 parts. The other way lands on 85. The diving platform on
+    `lot_24` has two parts whose offsets, 0 and 4, don't fit. Its lead's own offset is 3, not 0, and
+    its 8 definitions run 0 and 3 to 7 along x, plus 0x700 and -1, which is a longer platform than the
+    3 tiles placed. **Proven**, this doesn't matter to the game: `ObjDefinition::GetSubIndex` packs
+    `(y << 8) | x`, and its only caller is `ObjectFolder::GetSubTileSelector`, which builds new
+    objects. A loaded object keeps its saved tile positions, and `cXMTObject::AssignOffsets` works its
+    offsets out from them. **Likely** the definitions changed after `lot_24` was saved, as with
+    `lot_28`.
+  - **Checks.** With this rule, 44 of 50 multi-tile models cover all their tiles' middles, and 239 of
+    269 tiles in all. The old export's rule managed 4 and 110. The 6 left are portals whose tiles are
+    where Sims walk, not the model: the secret passage and its exit, the quicksand pillar (**likely**
+    its tiles are where it falls), the steam vent, and the beach-cliff ruins. `placed.py check`
+    runs both counts. Close-up renders agree: the rope bridge on `lot_11` spans its gorge, which it
+    didn't before.
+  - **Open:** dynamic multi-tile objects stand on their own tile (`IsDynamic`); none is placed.
+
+  **Proven, an older reading missed 110 tall objects.** It found the ResData row by the `ResFile`
+  name and took the first model among the row's words from 7 on. For banana, koa, okoume and date
+  palm (91 objects) that's the right row, but its later words hold only `*_action_queue` and a rig,
+  because the model is in the ObjAnimDef vector at word 0. Clam Rock's definition (19 objects)
+  points at the row `source_marine_clams`, so no row has its own name.
 
   `ISimsObjectModel::IsVisible` fails when variable 0x22 is non-zero. All 278 `portal_basic` and 37
   `spawner_object` have it saved as 1, which hides their `placeholder_01` cubes. `zz_move_a__tron`, the
   28 gnomes, sets it in its `load` tree, and a cheat tree clears it. Of all 694 tree sets, 3 do that
   in `load` or `init`, and it's the only one placed.
+
+  **Proven, a hidden object still blocks Sims.** `IsVisible`'s only caller is
+  `ISimsObjectModel::VisibilityTest`, which is drawing. `CollisionMap::DoesCollideObject` (Wii
+  `0x80213440`, PS2 `0x316410`, reached from `SAnimator2::CheckCollision` at `0x108BC8`) walks each
+  tile's objects. It skips one that `CanIntersectPeople` lets through, one not `IsInWorld`, a person
+  or a door. `CanIntersectPeople` reads only variable 8: with bit 0x04, bit 0x02 blocks; without it,
+  bit 0x10 lets Sims through. `SetData` is a plain write, so setting 0x22 has no side effect. The
+  gnome's `init` sets bit 0x800 of variable 8, which it already has, so its saved 0x4800 blocks. That
+  makes one hidden blocker on each of the 28 lots, and no other hidden object blocks.
 
   The row's word 7 is `*_action_queue`, a shader and texture, not a model. Word 8 is a rig when the
   model has one. `placed.py` shows the saved state. **Open:** trees can change variables 0 and 0x22
