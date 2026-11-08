@@ -596,6 +596,50 @@ So a tree animates in a loop: the false branch handles an event, then comes back
 
 On an object that isn't a Sim, `cXObject::TryAnimate` (`0x234558`) is all there is: behaviour 7 uses me, 8 the stack object, and anything else is error 5. It resolves a skill for passive influence and plays nothing. It matches the game.
 
+## AnimateObject (opcode 0x37)
+
+**Proven for the primitive: read line by line on PS2 (`0x231C40`, 244 words) and the same as Wii step for step. Not matched.** What the object model does with it, `ISimsObjectModel::TryAnimateObject` (PS2 `0x332840`), is **likely**: read on Wii only. 250 uses. It animates an object that isn't a Sim, through the object's model.
+
+| Operand | Meaning |
+|---|---|
+| `+0` bit 0 | The stack object animates, not me. Missing is error 0x15 |
+| `+0` bit 1 | Ignore animation events |
+| `+0` bit 2 | Preload only |
+| `+0` bit 3 | Set a sync object, with preload only |
+| `+0` bit 4 | `+4` is an index into the object's animation table |
+| `+0` bit 5 | Run immediately |
+| `+1` u8 | The local that events go to |
+| `+2`, `+3` | Otherwise the animation is an operand: scope `+2`, data `+3` |
+| `+4` u16 | The table index, or temp 0 if it's 0 |
+| `+6` u8 | The sync object, an operand |
+
+1. The object's model is its `ISimsObjectModel`. An object without one is error 0x15.
+2. **The animation:**
+   - With `+0` bit 4, it's entry `+4` (or temp 0) of the model's animation table, and object data 0x23 = that index. An entry that doesn't exist is error 0x42.
+   - Otherwise it's the operand at `+2`/`+3` (an `InterpValue` error stops the tree), and data 0x23 = 0.
+3. **Object data 0x38 holds the animation flags.**
+   - Bit 1 = run immediately.
+   - Bit 0 = table animation.
+   - Unless it runs immediately, and only if bit 3 isn't set yet, bits 2 and 3 are set as well.
+4. **Preload only:**
+   - With bit 3, the sync object is resolved from `+6` and stored at object `+0x124` (`+0x12C` = 1, `+0x128` = 0). The stack object itself, or none, clears all three.
+   - Without bit 3, my `+0x124` is cleared.
+   - Then the model preloads the animation, and its result is the primitive's.
+5. **Otherwise:** the model's `TryAnimateObject(animation, event target)`, and its result is the primitive's. The event target is local `+1`, or none with `+0` bit 1.
+
+**The model's part, likely, from Wii:**
+
+1. If a load is pending for another animation, it's dropped. If it's pending for this one and not loaded yet: return 2.
+2. The first time, object data 0 = the animation (unless it's a table animation), and the model marks it started.
+3. **Events:** with an event target, a queued event goes into the local and it **returns 0**, the false branch, clearing flag bit 3. With none queued the local gets -1. Without a target, a queued event is just dropped.
+4. **Waiting:** unless it runs immediately, it waits while the animation plays.
+   - A loaded animation shorter than the time so far is done.
+   - Otherwise it **returns 2**, wait.
+   - An animation that isn't loaded starts loading and returns 2.
+5. **Done:** clear started and flag bit 3, **return 1**, the true branch.
+
+**For a port:** return 1 at once for "run immediately", or after the animation's length otherwise. Write -1 into the event local, since no events are delivered. Error 0x15 for a missing stack object or a missing model, and 0x42 for a table index the object doesn't have.
+
 ## Idle (opcode 0)
 
 **Proven:** `cXObject::TryIdle` byte-matches. 3 uses on the disc.
