@@ -85,14 +85,9 @@ public:
     int RemoveFromFamily(Neighbor *neighbor, bool a); // GenericSimCall 6: 0 when it worked
     int AddToFamily(Neighbor *neighbor, Family *family); // 0x2055D8, 0 when it worked
     Family *MakeNewFamily(bool freePlay, int number);    // 0x205250, our name
-    // Wii: MakeNewFreePlayFamily(int), inlined on PS2 (GenericSimCall 4 and 0x37): nothing if
-    // the number is taken, otherwise 0x205250 with a 1 first.
-    Family *MakeNewFreePlayFamily(int number)
-    {
-        if (GetFamilyInline(number))
-            return 0;
-        return MakeNewFamily(true, number);
-    }
+    // Wii: MakeNewFreePlayFamily(int), inlined on PS2 (GenericSimCall 4 and 0x37). Defined after
+    // GetFamilyInline's body, or GCC 2.95 calls an out-of-line copy of that instead of inlining.
+    inline Family *MakeNewFreePlayFamily(int number);
     void SetNeighborhoodVar(int index, s16 value) { mVars[index] = value; }
     int GetNumFamilies();
     Family *GetFamilyByIndex(int index);

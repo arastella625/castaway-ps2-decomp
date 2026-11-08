@@ -2427,6 +2427,14 @@ inline Family *Neighborhood::GetFamilyInline(int number)
     return 0;
 }
 
+// Nothing if the number is taken, otherwise 0x205250 with a 1 first.
+inline Family *Neighborhood::MakeNewFreePlayFamily(int number)
+{
+    if (GetFamilyInline(number))
+        return 0;
+    return MakeNewFamily(true, number);
+}
+
 // GenericSimCall 3: Wii StateMachineFlow::SetFlowRequest, inlined on PS2 as a store to 0x492908.
 class StateMachineFlow {
 public:
@@ -2522,7 +2530,7 @@ inline void EnableBuyAndBuild(ObjectModule *module, cXObject *object)
 // Primitive 1: GenericSimCall, a switch on the s16 at +0 with its operands in my temps.
 // Not matched, but every call is written. The cases are in the game's order, which is proven:
 // GCC lays the bodies out as the source has them, and the jump table at 0x4BA900 sorted by
-// address gives that order. 2,311 words against the game's 2,388, 1,828 of them lined up.
+// address gives that order. 2,341 words against the game's 2,388, 1,904 of them lined up.
 // docs/formats/bhav.md has what each call does, and Wii's TryGenericSimCall names nearly every
 // function they call.
 long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
