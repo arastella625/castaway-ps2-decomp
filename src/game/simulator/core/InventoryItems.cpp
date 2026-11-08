@@ -5,6 +5,7 @@
 #include "game/simulator/core/cXObject.h"
 #include "game/simulator/core/ObjectItem.h"
 #include "game/simulator/core/OwnableItem.h"
+#include "game/simulator/core/TokenItem.h"
 
 // Sets the token's bit in the collected bits. Like HasTokenEverBeenCollected, it lets the word
 // one past the end through.
@@ -16,12 +17,33 @@ void InventoryItems::MarkTokenAsBeingCollected(s16 id)
         mCollectedBits[word] |= 1 << bit;
 }
 
+// Marks the token collected, then adds count to the token's item, or makes one. The add goals
+// get the token's ID either way.
+void InventoryItems::AddTokenItem(s16 id, s16 count)
+{
+    MarkTokenAsBeingCollected(id);
+    for (InventoryItem **i = mItems.begin(); i != mItems.end(); ++i) {
+        InventoryItem *item = *i;
+        if (item->GetKind() == 2 && item->GetID() == id) {
+            item->IncrementCount(count);
+            CheckForAddGoals(0, id);
+            return;
+        }
+    }
+    TokenItem *item = new TokenItem(id, count);
+    if (item) {
+        SetInstanceID(item);
+        mItems.push_back(item);
+        CheckForAddGoals(0, id);
+    }
+}
+
 // An object by GUID. A GUID that names a token adds one of that token instead.
 int InventoryItems::AddObjectItem(int guid)
 {
     s16 token = GetTokenIDFromGUID(guid);
     if (token) {
-        AddToken(token, 1);
+        AddTokenItem(token, 1);
         return 1;
     }
     if (CanHoldMoreNonTokens()) {
@@ -47,7 +69,7 @@ int InventoryItems::AddObjectItem(cXObject *object)
 {
     s16 token = GetTokenIDFromGUID(GetObjectGUID(object));
     if (token) {
-        AddToken(token, 1);
+        AddTokenItem(token, 1);
         return 1;
     }
     if (CanHoldMoreNonTokens()) {

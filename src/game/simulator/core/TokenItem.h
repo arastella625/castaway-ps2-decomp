@@ -2,6 +2,7 @@
 #define GAME_SIMULATOR_CORE_TOKENITEM_H
 
 #include "common/types.h"
+#include "game/simulator/core/InventoryItems.h"
 
 class Family;
 class cXObject;
@@ -11,13 +12,14 @@ class cXObject;
 // and the full layout are not known yet. Return types are guesses, and the fields are only
 // the ones these functions touch. The names come from pkg/castaway_ps2_names.csv, mostly its
 // vtable pairing tiers; a one-instruction body cannot confirm that a name is right.
-class TokenItem {
+class TokenItem : public InventoryItem {
 public:
-    u8 pad_0x0[0x8];
-    s16 field_0x8; // 0x08
-    s16 field_0xa; // 0x0a
+    s16 field_0x8; // 0x08  the token's ID
+    s16 field_0xa; // 0x0a  the count
     u8 pad_0xc[0x4];
-    u32 field_0x10; // 0x10
+    u32 field_0x10; // 0x10  0x14 bytes in all: InventoryItems::AddTokenItem allocates that
+
+    TokenItem(s16 id, s16 count);
 
     s16 GetID() const;
     s16 GetCount() const;

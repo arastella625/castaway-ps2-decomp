@@ -22,6 +22,15 @@ public:
     virtual void Slot1();
     virtual void Slot2();
     virtual s8 GetKind();
+    virtual void Slot4();
+    virtual void Slot5();
+    virtual void Slot6();
+    virtual void Slot7();
+    virtual void Slot8();
+    virtual void Slot9();
+    virtual void Slot10();
+    virtual void Slot11();
+    virtual void IncrementCount(s16 count); // slot 12, at +0x68
 };
 
 // Wii: InventoryItems. Only what the decompiled code calls is declared so far.
@@ -59,7 +68,7 @@ public:
             s_nNextInstanceID++;
         }
     }
-    void AddToken(s16 id, s16 count);
+    void AddTokenItem(s16 id, s16 count);
     void GimmeAllFood(s16 count);
     void GimmeAllResources(s16 count);
     void GimmeAllTools();
