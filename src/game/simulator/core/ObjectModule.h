@@ -18,7 +18,10 @@ public:
     cXObject *mFirst;          // 0x0028  the object list, linked through cXObject::mNext
     u32 pad_0x2c;              // 0x002c
     s16 mTileObjects[0x40][0x40]; // 0x0030
-    u32 pad_0x2030[8];         // 0x2030
+    // GenericSimCall 0xA and 0xB add and remove objects here. Buy and build are off while
+    // anything is on it.
+    eastl::vector<cXObject *, eastl::allocator> mModeBlockers; // 0x2030
+    u32 pad_0x2040[4];         // 0x2040
     eastl::vector<cXPerson *, eastl::allocator> mPeople; // 0x2050
     u32 pad_0x2060[4];         // 0x2060
     RoutingSlot *mGlobalRoutingSlots;    // 0x2070

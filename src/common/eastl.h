@@ -91,6 +91,16 @@ public:
         return first;
     }
 
+    // One element: the rest move down through memcpy with a byte count, skipped when it was the
+    // last (GenericSimCall 0xB).
+    T *erase(T *position)
+    {
+        if (position + 1 < mpEnd)
+            memcpy(position, position + 1, (char *)mpEnd - (char *)(position + 1));
+        --mpEnd;
+        return position;
+    }
+
     void clear() { erase(mpBegin, mpEnd); }
 };
 

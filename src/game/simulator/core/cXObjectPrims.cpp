@@ -2200,3 +2200,137 @@ long cXObject::TryLotTransition(StackElem *elem, XPrimParam *primParam)
     return -1;
 }
 #endif
+
+#ifdef NON_MATCHING
+// Primitive 1: GenericSimCall, a switch on the s16 at +0 with its operands in my temps.
+// Not matched, and only partly written: this round is a start. The cases are in the game's
+// order, which is proven: GCC lays the bodies out as the source has them, and the jump table at
+// 0x4BA900 sorted by address gives 0, 1, 3, 2, 4, 5, 6, 8, 9, 0x25, 0xA ... 0x24, 0x27. Written
+// so far: 0xA, 0xB, 0xD, 0xE, 0x15, 0x18, 0x19, 0x34, 0x35, 0x36, 0x38 and the shared exits.
+// The others fall through to "return 1" until they're written, so the size is far short of the
+// game's 2,388 words and the 0x1D40-byte frame. docs/formats/bhav.md has what each one does.
+long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
+{
+    long result = 1;
+    switch (*(s16 *)primParam) {
+    case 0x00:
+    case 0x01:
+    case 0x03:
+    case 0x02:
+    case 0x04:
+    case 0x05:
+    case 0x06:
+    case 0x08:
+    case 0x09:
+    case 0x25:
+        break;
+    case 0x0a:
+        // Buy and build stay off while I'm on this list.
+        mModule->mModeBlockers.push_back(this);
+        break;
+    case 0x0b: {
+        eastl::vector<cXObject *, eastl::allocator> &blockers = mModule->mModeBlockers;
+        for (cXObject **it = blockers.begin(); it != blockers.end(); ++it) {
+            if (*it == this) {
+                blockers.erase(it);
+                break;
+            }
+        }
+        break;
+    }
+    case 0x0d: {
+        // ObjectModule::CleanupPeople, inlined: every other person forgets the stack object.
+        cXObject *object = GetObjectFromID(elem->mStackObject);
+        if (!object) {
+            OBJECT_ERROR_CHECK(false, 0xa);
+        }
+        eastl::vector<cXPerson *, eastl::allocator> &people = mModule->mPeople;
+        for (cXPerson **it = people.begin(); it != people.end(); ++it) {
+            if ((cXObject *)*it != object)
+                (*it)->Cleanup(object);
+        }
+        break;
+    }
+    case 0x0e:
+        GetSimulator()->mGlobals[0x1f] = mTemps[0];
+        break;
+    case 0x0f:
+    case 0x10:
+        break;
+    case 0x15:
+        GetSimulator()->mGlobals[0x27] = mTemps[0];
+        break;
+    case 0x18:
+        GetSimulator()->mGlobals[0x29] = mTemps[0] == 0;
+        break;
+    case 0x19:
+        GetSimulator()->mGlobals[0x28] = mTemps[0];
+        break;
+    case 0x1a:
+    case 0x1f:
+    case 0x21:
+    case 0x22:
+    case 0x26:
+    case 0x28:
+    case 0x29:
+    case 0x2a:
+    case 0x2b:
+    case 0x2c:
+    case 0x2d:
+    case 0x30:
+    case 0x32:
+    case 0x33:
+        break;
+    case 0x34:
+        mTemps[2] = 0;
+        break;
+    case 0x35: {
+        // Not used by any tree: t0 = the stack object's GUID modulo 0xF08A.
+        cXObject *object = GetObjectModule()->GetObjectFromIDInline(elem->mStackObject);
+        OBJECT_ERROR_CHECK(object, 0x33);
+        mTemps[0] = object->mSelector->GetGUID() % 0xf08a;
+        break;
+    }
+    case 0x36:
+        // Every value of t7 returns 0.
+        if (mTemps[7] == 0)
+            return 0;
+        if (mTemps[7] == 1)
+            return 0;
+        return 0;
+    case 0x37:
+    case 0x39:
+    case 0x3a:
+    case 0x12:
+    case 0x3b:
+    case 0x3e:
+    case 0x3f:
+    case 0x3c:
+    case 0x3d:
+    case 0x40:
+    case 0x41:
+    case 0x42:
+        break;
+    case 0x38:
+        result = 0;
+        break;
+    case 0x11:
+    case 0x07:
+    case 0x13:
+    case 0x17:
+    case 0x14:
+    case 0x0c:
+    case 0x24:
+    case 0x27:
+        break;
+    case 0x16:
+    case 0x2e:
+    case 0x2f:
+    case 0x31:
+        break;
+    default:
+        OBJECT_ERROR_CHECK(false, 0x2a);
+    }
+    return result;
+}
+#endif

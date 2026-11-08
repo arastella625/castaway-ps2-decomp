@@ -1229,6 +1229,8 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 
 **Proven for the numbering**: every call was compared with the PS2 function (`0x22D518`), and all 67 entries of its switch on `+0` do the same job as on Wii. No number differs. Calls 9 to 0x12, 0x16, 0x18, 0x1F, 0x25, 0x29, 0x2C, 0x2D, 0x31, 0x34, 0x36 and 0x38 were read line by line on PS2. The rest are compared by what they call, so their details are **likely**. 290 uses. Past 0x42, and at 0x1B to 0x1E, 0x20 and 0x23, is error 0x2A.
 
+**Proven, the source order:** the jump table at `0x4BA900` sorted by address gives the order the cases were written in, since GCC lays them out in source order: 0, 1, 3, 2, 4, 5, 6, 8, 9, 0x25, 0xA, 0xB, 0xD, 0xE, 0xF, 0x10, 0x15, 0x18, 0x19, 0x1A, 0x1F, 0x21, 0x22, 0x26, 0x28 to 0x2D, 0x30, 0x32 to 0x37, 0x39, 0x3A, 0x12, 0x3B, 0x3E, 0x3F, 0x3C, 0x3D, 0x40, 0x41, 0x42, 0x38, 0x11, 7, 0x13, 0x17, 0x14, 0xC, 0x24, 0x27, then the error cases and the shared `return 1` of 0x16, 0x2E, 0x2F and 0x31. `TryGenericSimCall` in `cXObjectPrims.cpp` is started in that order, under `NON_MATCHING`.
+
 `+0` s16 is the call. Everything else comes from temps, written t0 to t7 here. Unless it says otherwise, a call returns 1. Calls not listed aren't used by any tree on the disc.
 
 | Call | Uses | What it does |
@@ -1243,16 +1245,18 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 9 | 24 | Finishes loading: clears `_gd +0x9C`'s word `+0x10`, then `LoadFinishing` |
 | 0xA, 0xB | 4, 5 | Adds me to, or removes me from, ObjectModule's list at `+0x2030`. Buy and build are off while anything is on it |
 | 0xC | 1 | Tribe gets all tools |
-| 0xD | 2 | `CleanupPeople` on the stack object. Missing is error 0xA |
+| 0xD | 2 | `CleanupPeople` on the stack object, inlined: every person but the stack object gets `Cleanup(stack object)`, vtable `+0xE0`. Missing is error 0xA |
 | 0xE | 3 | Global 0x1F = t0. Globals are s16s from simulator `+0x38` |
 | 0xF | 52 | Needs me to be a Sim, or error 0x1C. Person data 0x20 = t0, 0x21 = 0. With t0 of 0, also `ComputeRect` from my location |
 | 0x10 | 6 | Game sequences, by t0: 0 starts sequence 2, 1 sequence 3, -1 and -2 wait for them, 2 is game over. Waiting returns 4 |
 | 0x11 | 8 | Sets the harvest count to t0 |
 | 0x12 | 12 | True if in build or buy mode |
 | 0x13, 0x14 | 1, 1 | Tribe gets all food, all resources, amount t0 |
+| 0x15 | 0 | Global 0x27 = t0. **Proven, PS2.** No tree uses it |
 | 0x16, 0x31 | 7, 10 | Nothing: returns 1 |
 | 0x17 | 2 | Unlocks everything |
 | 0x18 | 2 | Global 0x29 = 1 if t0 is 0, else 0 |
+| 0x19 | 0 | Global 0x28 = t0. **Proven, PS2.** No tree uses it |
 | 0x1A | 1 | Changes the selected Sim |
 | 0x1F | 6 | Selects Sim t0. True if it's now selected. Not a Sim, or missing, is false |
 | 0x21 | 1 | Shows all object dialogs |
@@ -1265,6 +1269,7 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 0x2C | 17 | Closes modeless dialogs |
 | 0x2D | 30 | Controller rumble, for the player's Sim only. `+4` u16 is the effect, 0 is none, and t0 is an object, or -1 for none |
 | 0x34 | 1 | t2 = 0 |
+| 0x35 | 0 | t0 = the stack object's GUID modulo 0xF08A. Missing is error 0x33. **Proven, PS2.** No tree uses it |
 | 0x36 | 4 | Returns 0 whatever t7 holds |
 | 0x37 | 1 | Moves neighbour t0 into the first free family, and t1 = its number. Missing is -1 |
 | 0x38 | 1 | Returns 0 |
