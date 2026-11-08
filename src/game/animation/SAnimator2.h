@@ -121,14 +121,25 @@ public:
 // Runs a Sim's animations. The field offsets are PS2's.
 class SAnimator2 : public SAnimatorVirtuals {
 public:
+    // Wii: SAnimator2::eWalkRunStyle. 0 walk, 1 and 2 run, 3 and 4 use the clip's speed, 6 a
+    // sidestep, 8 and 9 free move. The names of the values aren't known.
+    enum eWalkRunStyle {
+    };
+
     u32 pad_0x4[0x24];   // 0x004
     ESim *mESim;         // 0x094
-    u32 pad_0x98[0x68];  // 0x098
+    u32 pad_0x98[0x2a];  // 0x098
+    // Speeds measured from the walk and run clips by setMovementVelocityFromAnimation
+    // (0x1060B8), in sixteenths of a tile per second: walk, run, the two alternates of those,
+    // one unknown, then styles 3 and 4. docs/formats/locomotion.md.
+    f32 mClipVelocity[7]; // 0x140
+    u32 pad_0x15c[0x37]; // 0x15c
     int mAnimating;      // 0x238
     u32 pad_0x23c[0x11c]; // 0x23c
     u32 mAnimFlags;      // 0x6ac
 
     virtual long TryAnimate(StackElem *elem, const AnimateNewParam *param);
+    f32 GetTrackScaleVelocityFactor(); // vtable slot 52 on PS2
 
     int PendingAnimationLoaded(long &result, const AnimateNewParam *param);
     void EnableSmoothRoute();
