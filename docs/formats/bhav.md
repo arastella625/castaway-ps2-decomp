@@ -844,11 +844,24 @@ So this is how entry points 14, 16, 18 to 29, 32 and 33 are reached, which "Entr
 
 The result is true unless an operation below says otherwise.
 
-**A family holds at most 0x20 items that aren't tokens. Proven, PS2** (`InventoryItems::AddOwnableItem`, `0x1F9CB8`, matches). The count is the byte at the inventory's `+0`. An object or ownable add when it's full adds nothing and is false. A successful add gives the item an instance ID from a global counter, if it has none, and runs the family's on-add tree with the new item's place.
+**A family holds at most 0x20 items that aren't tokens. Proven, PS2** (`InventoryItems::AddOwnableItem`, `0x1F9CB8`, matches). The count is the byte at the inventory's `+0`. An object or ownable add when it's full adds nothing and is false. A successful add gives the item an instance ID from a global counter, if it has none.
+
+**What each add does. Proven, PS2** (`AddObjectItem` by GUID `0x1F9798` and by object `0x1F9908`, and `AddOwnableItem` by object `0x1F9CB8`, all three match; the ownable-by-GUID add is inlined in `0x23A9D0`):
+
+| Add | Token GUID becomes a token | On-add tree | Add goals |
+|---|---|---|---|
+| Object by GUID (`+4`) | yes | no | yes |
+| Object by object (bit 7) | yes | yes | yes |
+| Ownable by GUID (`+4`) | no | no | no |
+| Ownable by object (bit 7) | no | yes | no |
+
+- **A token GUID:** before the limit is checked, the object's GUID is looked up in the first word of each `InventoryTokens` row. If a row matches, one of that row's token (ID at `+0xC`) is added instead, and the add is true even when the inventory is full. GUID 0 is never a token.
+- **The on-add tree** runs with the family, the object and the new item's place (the last one). An add by GUID has no object, so it doesn't run.
+- **The add goals** (`0x1F9AC0`, Wii `CheckForAddGoals`) get the GUID and 0. They run after the on-add tree.
 
 | Op | What it does |
 |---|---|
-| 0 | **Add**, by category. Object or ownable with bit 7: the object whose ID is `+2` (none is error 0x33), added as itself. Without bit 7: the GUID in `+4`. True if the add worked. Token: ID `+2` with bit 7, else `+4`, count `+3`. Clothing: ID `+2` with bit 7, else `+4`. Tokens and clothing are always true |
+| 0 | **Add**, by category. Object or ownable with bit 7: the object whose ID is `+2` (none is error 0x33), added as itself. Without bit 7: the GUID in `+4`. An object whose GUID is a token's adds one of that token instead (see the table above). True if the add worked. Token: ID `+2` with bit 7, else `+4`, count `+3`. Clothing: ID `+2` with bit 7, else `+4`. Tokens and clothing are always true |
 | 1 | **Remove**, by category. With bit 7, the item at place `+2`: one of it, or `+3` of a token. Otherwise: an object by GUID `+4`, or with bit 5 the object whose ID is `+2`, found by GUID (see below); an ownable by owner `+3` and GUID `+4`; a token by ID `+4`, count `+3`; clothing by ID `+4`. True if something was removed |
 | 2 | **Find**: the place of the object with GUID `+4`, the ownable with owner `+3` and GUID `+4`, the token with ID `+4`, or the clothing with ID `+4`. It's written to `+2`, -1 if there's none, and the result is true only if found |
 | 3 | **Count**: `+2` = the number of items |
