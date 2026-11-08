@@ -976,7 +976,16 @@ it. So `ranger` is torso, lowerBody and shoes `ranger` and the rest `none`. `def
   `source_tree_banana` is `isBananaTreeTrunkFruitFull`, `FruitSome` and `isBananaTreeTrunk` for graphics
   0, 1 and 2. 1,993 of 2,000 entries name a model or rig. Word 1 finds 1, word 2 finds 24, and strides
   of 0x1C and 0x24 find 657 and 665. 719 definitions have no row. Of a multi-tile object's definitions,
-  only the lead has one, so one model is drawn for the whole object.
+  one has a row, so one model is drawn for the whole object. It's usually the lead's, but not
+  always: on the quicksand pillar (`lot_12`) and the steam vent (`lot_19`) another tile owns it, and
+  that tile is the one drawn. `placed.py check` asserts every visible object on a lot is drawn by
+  itself or by a tile of its object.
+
+  **Proven, an older reading missed 110 tall objects.** It found the ResData row by the `ResFile`
+  name and took the first model among the row's words from 7 on. For banana, koa, okoume and date
+  palm (91 objects) that's the right row, but its later words hold only `*_action_queue` and a rig,
+  because the model is in the ObjAnimDef vector at word 0. Clam Rock's definition (19 objects)
+  points at the row `source_marine_clams`, so no row has its own name.
 
   `ISimsObjectModel::IsVisible` fails when variable 0x22 is non-zero. All 278 `portal_basic` and 37
   `spawner_object` have it saved as 1, which hides their `placeholder_01` cubes. `zz_move_a__tron`, the

@@ -330,13 +330,26 @@ def anim_def(anims, graphic):
     return anims[index if 0 <= index < len(anims) else 0]
 
 
+def is_hidden(placed, table):
+    entry = table.get(placed.guid)
+    return bool(placed.variables.get(HIDDEN_KEY)) or (entry is not None and entry[0] in HIDES_ON_LOAD)
+
+
 def object_model(placed, table, available):
     """The model an object shows for its saved graphic, if any. Trees may change both later."""
     entry = table.get(placed.guid)
-    if entry is None or not entry[1] or placed.variables.get(HIDDEN_KEY)             or entry[0] in HIDES_ON_LOAD:
+    if entry is None or not entry[1] or is_hidden(placed, table):
         return None
     name = anim_def(entry[1], placed.variables.get(GRAPHIC_KEY, 0))[1]
     return name if name in available else None
+
+
+def undrawn(objects, table, available):
+    """Visible objects on the lot that nothing draws. A multi-tile object counts as drawn when any
+    of its tiles has a model: one definition per object has a ResData row, usually the lead's."""
+    drawn = {p.leader or p.object_id for p in objects if object_model(p, table, available)}
+    return [p for p in objects if p.on_lot and not is_hidden(p, table)
+            and (p.leader or p.object_id) not in drawn]
 
 
 def object_pose(placed, table):
@@ -403,6 +416,10 @@ def check(disc):
     for key, value in sorted(totals.items()):
         print('%-26s %6d' % (key, value))
     passed = gd.report('houses end on a zero mark', len(houses), len(streams))
+    missing = [p for objects in houses for p in undrawn(objects, table, models)]
+    on_lot = sum(p.on_lot and not is_hidden(p, table) for objects in houses for p in objects)
+    passed &= gd.report('visible objects something draws', on_lot - len(missing), on_lot,
+                        ' '.join(sorted({p.name or hex(p.guid) for p in missing})))
 
     types, data = streams[0]
     print('controls:')
@@ -411,6 +428,9 @@ def check(disc):
     passed &= gd.expect_failure('a stream cut short', lambda: read_objm(data[:-8], types, shapes))
     passed &= gd.expect_failure('an empty type list', lambda: read_objm(data, [], shapes))
     passed &= gd.expect_failure('every object read as single-tile', lambda: read_objm(data, types, {}))
+    unreachable = sum(len(undrawn(objects, table, set())) for objects in houses)
+    print('  control: with no models on the disc, %d visible objects are undrawn' % unreachable)
+    passed &= unreachable > 0
 
     archive = arc.find_archive(disc, 'LEVELS')
     levels = {e.name: gd.read_level(disc.read(archive.lba, e.offset, e.size), e.name)
