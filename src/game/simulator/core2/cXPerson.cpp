@@ -521,6 +521,30 @@ cXPerson::RoutingState cXPerson::Routing_Waiting(bool &done, TreeReturnCode &cod
     return kRoutingInitial;
 }
 
+// The route failed. If the slot allows it, the target's "gl_route failure feedback" tree runs
+// with the result and the blocking object as its parameters.
+cXPerson::RoutingState cXPerson::Routing_NeedFailureFeedback(bool &done, TreeReturnCode &code)
+{
+    XRoute *route = GetCurrentRoute();
+    if (route->mResult == 0)
+        route->mResult = 1;
+    SetPersonData(0x1c, route->mResult);
+    if ((route->GetRoutingSlot()->mFlags >> 14) & 1) {
+        s16 tree = route->mDest->mSelector->mBehavior->GetTreeIDByNameFast("gl_route failure feedback");
+        s16 params[4] = {route->GetResult(), route->mBlockingObjectID, 0, 0};
+        if (tree && GosubObjectTree(route->mDest, params, tree, false)) {
+            SetPersonData(0x20, 0);
+            code = 3;
+            done = true;
+            return kRoutingWaitingForFailureFeedback;
+        }
+    } else if (!mAnimator->EndFollow()) {
+        done = true;
+    }
+    mAnimator->field_0x664 = 0;
+    return kRoutingFailed;
+}
+
 // A failed route keeps its result, or gets 1, and the tree goes on with code 0.
 cXPerson::RoutingState cXPerson::Routing_Failed(bool &done, TreeReturnCode &code)
 {

@@ -22,7 +22,12 @@ public:
     cXPortal *mCurPortal; // 0x6c  Wii: GetCurPortal
     u32 pad_0x70[7];     // 0x70
     int mResult;         // 0x8c  Wii: GetResult and SetResult
-    u32 pad_0x90[3];     // 0x90
+    s16 mBlockingObjectID; // 0x90  Wii: GetBlockingObjectID
+    u16 pad_0x92;
+    u32 pad_0x94[2];     // 0x94
+
+    RoutingSlot *GetRoutingSlot();
+    int GetResult() const { return mResult; }
     s16 field_0x9c;      // 0x9c  person data 0x20 takes it on arrival
     u8 pad_0x9e[0xa];    // 0x9e
 };
@@ -123,7 +128,7 @@ public:
     virtual void Slot11Offset(f32 x, f32 y, f32 direction);
     virtual void Slot12();
     virtual int FollowOneStep(); // Wii SAnimator2 slot 13
-    virtual void Slot14();
+    virtual int EndFollow(); // Wii SAnimator2 slot 14
     virtual void Slot15();
     virtual int IsInterruptable(); // Wii SAnimator2 slot 16
     virtual void Slot17();
@@ -218,6 +223,7 @@ public:
     RoutingState Routing_WaitingForPortal(bool &done, TreeReturnCode &code);
     RoutingState Routing_Walking(bool &done, TreeReturnCode &code);
     RoutingState Routing_Waiting(bool &done, TreeReturnCode &code);
+    RoutingState Routing_NeedFailureFeedback(bool &done, TreeReturnCode &code);
     RoutingState Routing_Failed(bool &done, TreeReturnCode &code);
     int RunImmediateAction(Interaction *action);
     int MoveOutOfWay(int priority);
