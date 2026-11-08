@@ -1561,7 +1561,7 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 0 | 0 | Starts the `hurricane` weather state (`SetWeatherState("hurricane", 2, false)`). **Proven, PS2.** No tree uses it |
 | 2 | 2 | Stack object is the icon of my current action, if the action has an ID. Missing is error 0xA, me not a Sim error 0x1C. **Proven, PS2** |
 | 3 | 1 | If the stack object is the selected Sim, asks the game flow for 0x20, otherwise error 0x14. Not a Sim is error 0x1C. **Proven, PS2** |
-| 4 | 8 | Moves the neighbour in the stack object into family t1, or the selected family if t1 is 0 or less. Makes the family if needed. Copies the last name |
+| 4 | 8 | Moves the neighbour in the stack object into family t1, or the selected family if t1 is 0 or less. Makes family t1 if it doesn't exist. Person data 0x2D gets the old family (0x28). If removing it from its old family or adding it fails, false. Then, if neighbour t0 exists and the moved Sim is of type 0, it takes t0's last name (selector and sim description). No neighbour is error 0x38. **Proven, PS2** |
 | 5 | 1 | Merges family t0 into the selected family: t0's funds are added to the funds, then the selected family's inventory takes t0's (`MergeInventories`). False if either family is missing. **Proven, PS2** |
 | 6 | 6 | Removes the neighbour in the stack object from its family. No neighbour is error 0x38. False if that fails. **Proven, PS2** |
 | 7 | 1 | Goal and unlock data call |
@@ -1596,12 +1596,13 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 0x2B | 0 | t0 = the number of modeless dialogs open. **Proven, PS2.** No tree uses it |
 | 0x30 | 0 | Adds t0 to the aspiration points, which are neighbourhood variables 0xC (below 10,000) and 0xD (tens of thousands), up to 999,999. **Proven, PS2.** No tree uses it |
 | 0x32 | 0 | t7 = 1 if music genre t7 is enabled in the options (`_globals +0x1F8`), else 0. **Proven, PS2.** No tree uses it |
+| 0x33 | 0 | **Blocks routing over a rectangle:** tile flag 0x10 is set (t0 non-zero) or cleared (t0 0) on t1 by t2 tiles from the stack object's tile, t1 along its direction (object variable 1: 0 is +x, 2 is +y, 4 is -x, 6 is -y) and t2 to its side. t1 or t2 not above 0 is error 0x14, no stack object 0x33. A bounds test first: the object's tile above 0 on both axes, and the far corner within 0 to the world's size, or error 0x5E. **Quirk:** for directions 2 and 6 that test swaps the corner's x and y, so it can pass or fail wrongly; the tiles changed are the right ones. Other directions change only the object's own tile. **Proven, PS2.** No tree uses it |
 | 0x34 | 1 | t2 = 0 |
 | 0x35 | 0 | t0 = the stack object's GUID modulo 0xF08A. Missing is error 0x33. **Proven, PS2.** No tree uses it |
 | 0x36 | 4 | Returns 0 whatever t7 holds |
-| 0x37 | 1 | Moves neighbour t0 into the first free family, and t1 = its number. Missing is -1 |
+| 0x37 | 1 | Moves neighbour t0 into the first free family, and t1 = its number. Free: numbers from 1 up to the number of modifiable families (`NghResFile`), the first that doesn't exist (it's made) or whose family slot 7 is 0. None free: false, and t1 is left alone (this row used to say -1). No neighbour is error 0x38. **Proven, PS2** |
 | 0x38 | 1 | Returns 0 |
-| 0x39 | 9 | Clears cached catalog resources of the stack object |
+| 0x39 | 9 | Clears cached catalog resources: the stack object's (`+0x138`) and its master selector's (`+0xB0`). Every object pointing at either loses the pointer, then both are deleted (once, if they're the same). There's no test for a missing stack object. **Proven, PS2** |
 | 0x3A | 4 | Adds or removes the wall between objects t0 and t1. t2 of 1 adds |
 | 0x3B, 0x3E, 0x3F | 1 each | Plans: toggles all in the UI, ignores requirements, forces unlock |
 | 0x3C | 12 | t1 = the first word of the stack object's plan (`GetPlanByGUID`; scope 0x43's field 0), or 0 with no plan. Whether that word means "unlocked" isn't shown by this code. A multi-tile object tries its master's GUID, then its interaction leader's, then each part's in order. Missing is error 0x17. **Proven, PS2** |
