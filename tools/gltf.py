@@ -31,7 +31,6 @@ FLOAT, UNSIGNED_SHORT, UNSIGNED_INT = 5126, 5123, 5125
 ARRAY_BUFFER, ELEMENT_ARRAY_BUFFER = 34962, 34963
 ALPHA_CUTOFF = 0.5
 OPAQUE_ALPHA = 128
-FRAMES_PER_SECOND = 30
 
 
 def to_y_up(vector):
@@ -299,7 +298,7 @@ def add_animation(builder, animation, character):
     channels = bone_channels(animation)
     frames = list(range(animation.frames))
     poses = [local_pose(character, posed_bones(character, channels, f)) for f in frames]
-    times = [(f / FRAMES_PER_SECOND,) for f in frames]
+    times = [(f / animation.rate,) for f in frames]  # ERAnim +0x70: many clips are 60 a second
     time_accessor = builder.add_accessor(times, 'SCALAR', FLOAT, 'f', None, True)
     samplers, targets = [], []
     joints = builder.gltf['skins'][0]['joints']

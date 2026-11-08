@@ -304,7 +304,7 @@ Conventions:
   transforms come from the rest pose, as the parent's inverse times the bone.
 - **Static parts** of a rigged model, with no palette or weights, stay with joint 0.
 - **Animations:** `tools/gltf.py animate` samples every whole frame into linear glTF channels, at
-  30 frames per second. An animation is only added if its node count fits the rig.
+  the clip's own stored rate (below). An animation is only added if its node count fits the rig.
 - **Models with no known rig** export without a skeleton, so `mm_monkey` comes out static.
 
 Open:
@@ -488,9 +488,14 @@ Some large jumps between frames are real: `a2o_sofa_make_mover_turn_left_reject`
 snaps in one frame. No neighbouring keys have opposite signs, so `tools/gltf.py` needs no special
 handling beyond keeping its own samples on one side.
 
-The game runs animations at 30 frames per second. In a running game, 380 floats in memory rose
-steadily at that rate, such as 69.89 to 171.89 in about 3.4 seconds. That assumes the emulator was
-at full speed.
+**Proven, each clip has its own frame rate.** The first float after the stream bits is the clip's
+frames a second. `ERAnim::LoadFromFile` reads it into `+0x70`, then `+0x74` and `+0x78`, and
+`SAnimator2::getAnimDuration` gives a clip's length as (N - 1) / that rate. 2,109 clips are at 30,
+971 at 60 (the adult walk, run and idles among them), and 15 at odd rates (0.01 to 15). So
+`af_walk_base`, 68 frames at 60, lasts 1.117 s, not 2.233 s.
+
+**Corrected.** This page said every clip runs at 30 frames a second. The 380 floats seen rising at
+30 a second in a running game were 30-a-second clips; the export had timed every clip that way.
 
 ### Rigs by prefix
 
@@ -506,7 +511,7 @@ at full speed.
 
 Open:
 - The scale channel, which isn't applied, and the visibility, morph and special channels.
-- The six floats in the header, and the settings after the stream bits.
+- The six floats in the header (all 1.0 on the clips checked), and the settings after the rate.
 - What notes and events do, and how the game blends animations together.
 - `EVisInfoDecomp`.
 
