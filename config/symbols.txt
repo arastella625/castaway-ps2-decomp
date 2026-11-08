@@ -1172,6 +1172,11 @@
 0x00227200 ParseUIString__8cXObjectR8BString2P9StackElemPsPP11ObjSelectorb
 0x001DD7C0 SetCurrentActionText__8cXPersonRC8BString2
 
+# game/simulator/core/ObjSelector.cpp and Interaction.cpp: AddAction's helpers
+0x0021F700 GetTreeTable__12ObjectFolderP11ObjSelector
+0x0025EB10 __as__8BString2RC8BString2
+0x00492578 _11Interaction$sLastUniqueID
+
 # game/simulator/core2/cXPerson.cpp: AddAction
 0x001A6788 Insert__11ActionQueueRC11InteractionUi
 0x0024D5B8 GetEntry__C11Interaction

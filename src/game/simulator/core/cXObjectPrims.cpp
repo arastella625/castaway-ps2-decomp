@@ -275,28 +275,6 @@ long cXObject::TryCallNamedTree(StackElem *elem, XPrimParam *primParam)
 
 #endif
 
-// Wii: the object's TTAB. Only the slot PushAction calls.
-class TreeTab {
-public:
-    virtual void Slot0();
-    virtual void Slot1();
-    virtual void Slot2();
-    virtual void Slot3();
-    virtual void Slot4();
-    virtual void Slot5();
-    virtual void Slot6();
-    virtual void Slot7();
-    virtual void Slot8();
-    virtual void Slot9();
-    virtual void Slot10();
-    virtual void Slot11();
-    virtual void Slot12();
-    virtual void Slot13();
-    virtual void Slot14();
-    virtual void Slot15();
-    virtual void *GetEntry(int index);
-};
-
 // Primitive 0xd: put an interaction on a Sim's queue.
 class PushActionParam {
 public:

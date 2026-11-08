@@ -16,6 +16,7 @@ public:
     BString2();
     BString2(const BString2 &other);
     ~BString2();
+    BString2 &operator=(const BString2 &other);
     void assign(const u16 *text);
     const u16 *c_str() const;
 };
@@ -86,6 +87,7 @@ public:
     bool GetRunAsSub() const { return (mFlags >> 15) & 1; }
     int GetPriority() const { return field_0x28; }
     TreeTableEntry *GetEntry() const;
+    static int sLastUniqueID;
     void SetUniqueID();
     const BString2 &GetName() const;
     void SetName(const BString2 &name);

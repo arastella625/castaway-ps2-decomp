@@ -25,6 +25,30 @@ public:
 
 // An object's type: the namespace IDs that a tree's ID range selects, its definition, and its
 // function table. Only the fields the decompiled code reads.
+// Wii: the object's TTAB. Only the slot PushAction and Interaction::GetEntry call.
+class TreeTab {
+public:
+    virtual void Slot0();
+    virtual void Slot1();
+    virtual void Slot2();
+    virtual void Slot3();
+    virtual void Slot4();
+    virtual void Slot5();
+    virtual void Slot6();
+    virtual void Slot7();
+    virtual void Slot8();
+    virtual void Slot9();
+    virtual void Slot10();
+    virtual void Slot11();
+    virtual void Slot12();
+    virtual void Slot13();
+    virtual void Slot14();
+    virtual void Slot15();
+    virtual void *GetEntry(int index);
+};
+
+class ObjectFolder;
+
 class ObjSelector {
 public:
     u32 field_0x0;         // 0x00
@@ -33,7 +57,10 @@ public:
     class Behavior *mBehavior; // 0x0c
     u8 pad_0x10[0x28];     // 0x10
     s16 *mDefinition;      // 0x38
-    u8 pad_0x3c[0x80];     // 0x3c
+    TreeTab *mTreeTab;     // 0x3c  Wii: a ConsoleAutoRefCount<ITreeTable>
+    u8 pad_0x40[0x40];     // 0x40
+    ObjectFolder *mFolder; // 0x80
+    u8 pad_0x84[0x38];     // 0x84
     void *mSimDescription; // 0xbc
     u32 pad_0xc0[5];       // 0xc0
     ObjSelector *mNext;    // 0xd4  the next selector in ObjectFolder's hash bucket
