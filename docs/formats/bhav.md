@@ -594,6 +594,19 @@ The primitive runs again each tick until it returns something other than 2. In o
 
 So a tree animates in a loop: the false branch handles an event, then comes back to the same node, and the true branch means it finished. With no events to deliver, one play is many ticks of 2 and then a 1. A port without real animation can return 1 at once, or after the animation's length, and trees that wait for events will just see none. The event target is `+2`'s local or parameter 0, and a tree with neither is error 8. End events are negative in the animator (`+0x194`), and with `+5` bit 1 set they're stored as `-1 - value`.
 
+**Which clip Animate's number means. Proven, read on PS2** (`resolveSkillForPrimitive`, `0x1038D8`, and what it calls). Operand `+4`, read as a signed byte, picks the table:
+
+| `+4` | Table |
+|---|---|
+| 0 | A list of the **controlling object**: the object of the Sim's newest action (`cXPerson::GetControllingObject`, `0x1DD8E8`), or the Sim itself with none. With `+5` bit 2 the list is the stack object's, and the number is `GetParams()[+0]` |
+| 1, 2 | Two fixed lists on the global holder at `0x492410` (`+0x14`, `+0x18`). Not read further |
+| 3 | A list by Sim body code on the same holder (`+0x1C` plus 4 x code, `0x1E15A8`) |
+| Others | No clip, and the primitive returns 1 |
+
+The lists are the `ResFile` row's `+4` vector. Its entries are 8 bytes: a vector of pointers to `AnimRefName` rows, each of which points at an `AnimRef` row, whose word is the clip's name hash, and an s16 set ID. For kind 0 the set is `0x81` plus the Sim's body code (`ESim +0xC4`; 0 for an adult), looked up on the object's own row and then its semi-global row (`0x19EFD8`, `0x19F0A8`); for kind 3 it is the global row's `0x9C` plus the code. A code of 4 falls back to 3, and an empty entry in the first list falls through to the next. So `Interaction - Eat` on a coconut plays `resources_sg`'s list `0x81`: 3 `a2o-peelfruit`, 9 `a2o-eatfruit-small`, 0xA to 0xC the large-fruit clips; and `Reach - Grab`'s `Animate` with `+4` of 3 and parameter 0 set to 10 plays `a2o_reach_floorht` from the global list `0x9C`. A clip the Sim's kind can't play (none found) is error 0x42.
+
+**Events are the clip's notes.** An `ANIM` file ends in notes, each a time in milliseconds, a kind and a string (`docs/ASSET_FORMATS.md`). Kind 6 notes are what the tree gets: the string is the event number. `a2o_reach_floorht` has 101, 104 to 108, then 102 at 1,200 ms and 103 at 2,250 ms, and `Reach - Grab` does its `Grab` when the event in its local equals 102, the number it chose for a floor-height reach. `a2o-eatfruit-small` sends 501 at 900 ms, the bite. The 80-byte event records after the notes are empty on every clip on the disc. Kind 1 notes are footsteps (`step`, `scuf`) and kind 5 sounds.
+
 On an object that isn't a Sim, `cXObject::TryAnimate` (`0x234558`) is all there is: behaviour 7 uses me, 8 the stack object, and anything else is error 5. It resolves a skill for passive influence and plays nothing. It matches the game.
 
 ## AnimateObject (opcode 0x37)
@@ -1612,6 +1625,63 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 0x41 | 3 | **Proven, PS2 and Wii; corrects an earlier reading.** True if there's a player tribe inventory and t0 is an ID in the `InventoryTokens` table. It doesn't check that the tribe has the token. No player Sim is false |
 | 0x42 | 7 | t1 = a goal value for t0. False if there's none |
 
+## Grab (opcode 4)
+
+**Read on PS2** (`cXObject::TryGrab`, `0x230ED0`), likely. 31 uses. The stack object goes into my hand. No stack object is false. The object is asked two virtuals, `+0x130` and `+0x138` on its vtable, with my location and me as arguments: the first can refuse, false, and the second does the pick-up. Neither body has been read; the port lets any object go that nothing else holds, and puts it in slot 0 with its container variable set to me. With a model (`+0x14`), the object's render flags get bits `0xC0` set, or `0x100` as well when `+0` bit 0 is set, and everything it contains gets the same, walking the container chain. Always true after that.
+
+## Tree tables and the action queue
+
+**Proven for the layouts: read from the PS2 getters, which are one instruction each**, and the tables on the disc decode to names like "Eat" and "Harvest Coconuts" with sensible tree IDs. The rest is read on PS2 and likely.
+
+A `ResFile` row's `+0x24` vector holds its **tree tables**, the interactions a pie menu offers for objects of the row. Each record is 12 bytes:
+
+| Offset | Meaning |
+|---|---|
+| `+0` | Vector of entries, 0x24 bytes each |
+| `+4` s16 | Motive ad count |
+| `+6` s16 | Table ID. `ObjDefinition` word 13 (`+0x1A`) names the one an object uses; 725 of the 868 definitions with a table agree, and the rest, mostly 0, get the row's first |
+| `+8` s16 | Prefix check tree, run before any entry's own unless the entry ignores it |
+
+Each entry (`TreeTableEntryQuickData`, `0x25CFD0` on):
+
+| Offset | Meaning |
+|---|---|
+| `+0` s16 | Check tree |
+| `+2` s16 | Action tree |
+| `+4` | 16 ads of 8 bytes: personality variable, minimum, range (`GetPersonalityVarRef`, `GetMinRef`, `GetRangeRef`) |
+| `+8` f32 | Custom attenuation |
+| `+0xC` u16 | Attenuation |
+| `+0x10` u32 | Flags, below |
+| `+0x12` s16 | Bit 0: allow on self |
+| `+0x14` s16 | Index: what `PushAction` and the queue name an interaction by (`GetEntryByIndex`), not its position; 242 entries sit out of position |
+| `+0x16` s16 | Autonomy threshold; 100 or more means manual only |
+| `+0x18` s16 | Join index |
+| `+0x1A` s16 | Order index, the menu order |
+| `+0x1C` | Name, a `BString2`: a pointer to UTF-16 text. A name starting with `!` is debug-only too |
+| `+0x20` u32 | Activation: subtile in bits 0 to 3 and 4 to 7, extents in four 6-bit fields from bit 8 |
+
+Flag bits: 0 available to visitors, 1 can join, 2 immediate, 3 allow consecutive, 4 ghosts, 5 large dogs, **6 not for adults**, 7 debug only, 8 auto first select, 9 visiting players, 10 ignore prefix tree, 11 must run, 12 custom activation, 13 cats, 14 small dogs, 15 demo, 17 dynamic ads, 18 chimps, 19 boars. 900 of the 1,565 entries on the disc are `0x201`.
+
+`ObjSelector::GetTreeTab` (`0x1DA440`) caches the object's table at selector `+0x3C`, made by `ObjectFolder::GetTreeTable` (`0x21F700`). On First Beach a coconut offers Eat, Identify and Put in Inventory (check trees `0x200D`, `0x200E`, `0x200B` and action trees `0x200C`, `0x200A`, `0x2008` in `resources_sg`); a palm offers three harvests and Identify.
+
+**The queue.** `PushAction` and the pie menu put an `Interaction` on the Sim's ring of 12 at `+0x21C` (`AddAction`, above). `Interaction +0x34` holds its flags: bit 1 continuation, 5 push to head, 10 must run, 15 run as a sub-action. `+0x28` is its priority and `+0x38` its action tree. Sim `+0x538` says the first entry is running, `+0x564` is the running priority, and `+0x586` non-zero stops every interrupt.
+
+**How a queued action starts. Read on PS2, likely.** The Sim's main tree idles in `Wait For Notify` (global `0x119`), on `IdleForInput`. Each tick that primitive first asks `cXPerson::ShouldInterrupt` (`0x1AEAD0`): yes when the next action waiting, after the running one if any, has a higher priority than the running priority or is a continuation; when any of the motives at Sim `+0x194`, `+0x19C` or `+0x1A4` is below -99; and otherwise only for a head that runs as a sub-action. Then `executeInterruptOnIdlePrimitve` (`0x1AEFD0`):
+
+1. Sets bit 6 (value 0x40) of my variable 8, which `Wait For Notify` tests and clears as "notified".
+2. Nothing queued: returns 1. Back on the same node after an action that wasn't a continuation, the frame's word `+8` is still set: returns 1, so the tree moves on and the main loop looks again.
+3. A head that doesn't run as a sub-action needs the primitive's `+2` operand, or it returns 1; with an action already running it is error 0x51.
+4. A head whose object is gone leaves the queue, and the primitive returns 2.
+5. `0x19F548` prepares it: my variable 0x32 goes to 0; the object's variable 8 bit 9 or an entry flag against the Sim's kind refuses it; then the table's prefix check tree, unless the entry ignores it, and the entry's check tree run on me with the object as the stack object. Interaction flag bit 9 passes whatever they said. A failure is `ActionSkipped` (`0x1DD310`), the queue drops the head, and the primitive returns 2.
+6. `cXObject::GosubObjectTree` (`0x255D30`) clears my idle status and pushes the action tree, from the object's own behaviour, onto my stack with the object as the new frame's stack object.
+7. `+0x538` is set, the countdown operand goes to 0, the frame's `+8` is set, variable 8 bit 6 again, and the primitive returns 3: the node reruns straight into the action.
+
+**How it ends.** `cXPerson::StackJustPopped` (`0x1B0978`) keeps a list at `+0x528` of 12-byte records, each an object and the stack size its action's tree was pushed at. A pop that takes the stack below that depth removes the record and takes 1 off the object's variable 0x3E, and with no record left `0x1DD210` finishes the action: the head leaves the queue, and `+0x538` stays set only for a head that ran as a sub-action, never with an empty queue.
+
+**GosubFoundAction (opcode 0x1E)**, Sim-only, 5 uses, all in the autonomy trees after `FindBestAction`. **Read on PS2** (`0x1A85E0`), likely: no stack object is error 0x15; the stack object's table entry whose index is my variable 0x14 is the action, no table is false and no entry error 0x16; its action tree goes on my stack as `GosubObjectTree` does, a new `Interaction` of priority 2 goes to the head of the queue marked running, and the primitive returns 3. A push that fails is -1.
+
+**For a port:** `scripts/bhav/x_object.gd` in the Godot project has all of this, and `tests/interaction_test.gd` there runs Eat on a First Beach coconut through the Sim's own main tree: idle, interrupt, route, the grab on the reach clip's event, the bites, and `KillObject`.
+
 ## What a placed object starts with
 
 `ObjM` is the saved state of a running lot, so a placed object arrives with almost everything a tree reads. `docs/formats/world.md` has the layout, and `tools/placed.py` reads it. **Proven** on all 2,611 objects: each ends exactly on its stream mark, and `placed.py check` has the controls. An earlier reader was misaligned from the attribute lists on, which is why the variables and attributes seemed to be missing.
@@ -1709,6 +1779,7 @@ The tables are `ObjDefinition`, 196 bytes or 98 s16 words, which is why scope 0x
 | Offset | Holds |
 |---|---|
 | `+0` | Pointers to `ObjDefinition` rows |
+| `+4` | Lists of animation names, 8-byte entries: a vector of pointers to `AnimRefName` rows, and an s16 set ID. See "Which clip Animate's number means" |
 | `+0x10` | String sets, 12-byte entries: vector of strings, tag `STR#`, ID in the low 16 bits |
 | `+0x1C` | Catalogue text |
 | `+0x20` | Constant tables |
