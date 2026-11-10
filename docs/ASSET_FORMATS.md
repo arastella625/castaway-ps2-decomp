@@ -512,7 +512,10 @@ frames a second. `ERAnim::LoadFromFile` reads it into `+0x70`, then `+0x74` and 
 Open:
 - The scale channel, which isn't applied, and the visibility, morph and special channels.
 - The six floats in the header (all 1.0 on the clips checked), and the settings after the rate.
-- What notes and events do, and how the game blends animations together.
+- How the game blends animations together. Notes are known: each is a time in milliseconds, a kind
+  and a string. Kind 1 is a footstep (`step`, `scuf`), 5 a sound to play, and 6 an event for the
+  running behaviour tree, whose string is the number (`docs/formats/bhav.md`, Animate). The 80-byte
+  events after them are empty on every clip. Kinds 2, 7, 10 and 14 to 22 are open.
 - `EVisInfoDecomp`.
 
 ## Shaders (SHDR)
