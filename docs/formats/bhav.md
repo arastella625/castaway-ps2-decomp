@@ -924,6 +924,95 @@ The change is the value times 1/1800, so it's per tick.
 
 **On a Sim**, an influence bit means the non-Sim path. Without one, it's the Sim's own list at `+0x200`, 12 bytes an entry: motive, change, limit. Clear all empties it. It holds 16, and a full list quietly drops the new one. All paths without an error are **true**.
 
+## Picking up: CanPlace into a hand
+
+**Read on Wii, with PS2's error codes in the same order** (`cXObject::TestPlace`, PS2 `0x2104C8`, about 890 instructions). Likely. `Grab`'s two calls are `CanPlace(location, level, container, slot)` and `Place` with the same arguments, the container being me. `CanPlace` (`0x253938`) is `CanPlaceSingleTile` (`0x253958`): it builds a `PlacementSpec` and calls `TestPlace`.
+
+**The `PlacementSpec`** (`0x255978`): `+0` a valid byte (1), `+4` the tile, `+0xC` the container, `+0x10` the slot (-1 without a container), `+0x14` the level. With a container whose slot isn't a TS2 slot, the tile becomes the container's own location.
+
+**`TestPlace`** returns false at the first test that fails, with the reason in Wii's `gPlacementError`. Before the container tests it checks the tile: in bounds, tile flags and walls, grass for objects that need it or can't have it (0x13, 0x14), indoors or outdoors (9, 0xA), and without a container, `TestIntersection` (entry point 5). **With a container**, in order:
+
+| Test | Fails with |
+|---|---|
+| The container has the slot | 0xD |
+| The slot is empty, or holds this object | 0xB |
+| No other slot of the container at the same height holds another object at the same offsets | 0xB |
+| This object's variable 0x1B is no more than the container's variable 0x1C (size against room) | 0xE |
+| This object isn't the container or anything that holds it | 0xB |
+
+Then 0x18 and the end. So for the port: **a Sim can pick an object up when its hand slot exists and is empty, and the object's variable 0x1B fits the Sim's variable 0x1C**; the tile tests use the Sim's own tile, which a standing Sim passes.
+
+## Motives over time
+
+**Proven, PS2**, with Wii for the names. Each tick `cXPerson::Simulate` (PS2 `0x1AD954` on) runs `SimMotives` (`0x1ADD48`), adds one to person data 8 (it wraps to 0 at 0x8000), and then applies the `SetMotiveDelta` list.
+
+**`SimMotives`** does nothing unless my variable 0x22 is 0 and I'm in the world. Then:
+
+1. Person data 0xA set: `Motives::Cleanup` only. Otherwise `Motives::Sim` (`0x1FEA60`), which ends with `Cleanup`.
+2. Unless I'm a chimp or a boar, and when the goal-and-unlock data allows it, each entry 8 to 0xF of kind 4 that's set pins a motive at 0 every tick: 8 motive 5, 9 motive 6, 0xA motive 7, 0xB motive 9, 0xC motive 8, 0xD motive 15, 0xE motive 14, 0xF motive 13.
+3. `CalcHappy` (`0x1ADF30`).
+
+**`Motives::Sim`.** The `Motives` object is at Sim `+0x13C`; its `+0x44 + 4k` is motive k (Sim `+0x180`), and its first 16 floats are the decay rates. Each tick, with `R(i)` = rate i / 720:
+
+| Motive | Change per tick |
+|---|---|
+| 5 | `R(s + 3)` |
+| 6 | `R(s + 1)` × (1 + rain level + wind level). Likely, Wii: no rain under a roof, and rain gear scales it down |
+| 7 | `R(s)`. In family 1 (neighbour person data 0x28 is 1), at -90 or below it's a tenth of that (`/7200`). In any other family it never goes below -75 |
+| 8 | `R(s + 4)` |
+| 9 | `R(s + 2)` |
+| 13 | Set to the current room's environment score (`RoomManager::GetRoomEnvironmentScore`), unless the room is 0xFFFB |
+| 14 | `R(s + 5)` |
+| 15 | `R(s + 6)` |
+| 0 | Likely, Wii: above a threshold it loses the "aspiration decrement" share each tick |
+
+`s` is 0 normally and **8 while motive 11 is below 0**: a second set of rates, where motive 5 rises fast (+540), so motive 5 behaves like energy and a negative motive 11 like sleep. **`Cleanup` clamps every motive to -100..100.**
+
+**The rates** (`Motives::InitDecayRates`, `0x1FEF80`), set from data in the executable:
+
+> rate[i] = base[row][i] + Active[row][i] × pd2 / 1000 + Playful[row][i] × pd4 / 1000 + Outgoing[row][i] × pd5 / 1000 + Neat[row][i] × pd6 / 1000
+
+where pdN is the neighbour's person data N and the trait names are Wii's (`sMotiveDecayBase`, `sMotiveDecayActiveMod`, ...). The row is by Sim type: 0, 1, 5 and others row 0; 2 row 1; 3 and 4 row 2. The tables are at `0x4B9690` (base), `0x4B9750`, `0x4B9810`, `0x4B98D0` and `0x4B9990`, each three rows of 16 floats. Row 0, which the castaways use:
+
+| Rate | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 8 | 9 | 10 | 11 | 12 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Motive | 7 | 6 | 9 | 5 | 8 | 14 | 15 | 7 | 6 | 9 | 5 | 8 |
+| Base | -184 | -75 | -75 | -64 | -50 | -75 | -75 | -30 | -75 | -150 | 540 | -50 |
+| Active × pd2/1000 | -50 | | | +50 | | | | -20 | | | | |
+| Playful × pd4/1000 | | | | | | | -100 | | | | | |
+| Outgoing × pd5/1000 | | | | | | -100 | | | | | | |
+| Neat × pd6/1000 | | | | | -75 | | | | | | | |
+
+Rates 0 to 6 are the normal set, 8 to 12 the set while motive 11 is below 0 (13 and 14 are 0). So an average-personality castaway (traits 500) loses motive 7 at (-184 - 25) / 720 = 0.29 a tick.
+
+**The `SetMotiveDelta` list** is applied after `SimMotives`, entry by entry (motive, change, limit; the change is already per tick): a negative change lowers the motive only while it's above the limit, and stops at the limit; a positive one raises it only while it's below, and stops at the limit.
+
+## Dialog (opcode 0x24)
+
+**Read on Wii** (`cXObject::TryDialog`), with PS2 (`0x2306E0`) checked for the same shape: its two `EdithDialogPrimitive::SetDialog` calls (`0x1EDBC8`), the waiting code 4 and the answer code at `0x4928A8`. Likely. 505 uses. The dialog type is `+5` bits 4 to 7 (operand `+7` bits 4 to 6 the result temp, bit 7 semi-global strings).
+
+1. An end-of-game slide show is up: returns 4, so it waits.
+2. **The player has answered** (the answer code isn't 4): the button pressed (`GetModalDialogResult`) goes into the result temp, and the primitive returns the answer code, then resets it to 4. The UI's `EndDialog(bool)` sets it to 1 or 0, so a yes or OK takes the true branch and a no the false.
+3. A flow request is pending: returns 1 at once.
+4. Some dialogs are skipped when no family member is awake and visible, or the camera director has the letterbox up: type 4, and type 0 unless operands `+0` and `+3` are both 0xFE, set temp 0 to 0 and return 1; types 1, 2 and 5 return 1.
+5. Types 0 to 5 are **modal**: unless a global flag (`+0x36D` on the end-of-round globals) says not to, `SetDialog` shows it. Then types 0, 3 and 4 **return 4** and the node runs again each tick until the player answers (step 2); 1, 2 and 5 return 1 and don't wait. A `SetDialog` that fails returns 1.
+6. Other types are shown **without waiting** and return 1.
+
+So `Sub - Add Resources`' Dialog (`+5` 0x01, type 0) shows a modal message after an Identify and waits for the player to close it. For a port: show the message, return "wait" until it's dismissed, then put the button in the result temp and take the true branch for OK or yes.
+
+## SetBalloon (opcode 0x29)
+
+**Read on Wii** (`cXObject::TrySetBalloon`, PS2 `0x2262B0`). Likely. 336 uses. It sets a sprite slot over me or the stack object (the balloon over a Sim's head) and **returns 1 at once**; it doesn't wait. Two error paths return -1. Operands:
+
+| Operand | Meaning |
+|---|---|
+| `+0` bit 0 | Over the stack object, not me. Higher bits give a local number (Wii `GetLocalNum`) for showing that local's object |
+| `+2` | Low byte the icon index, high byte the icon group (`IconGroup::GetSpriteID`) |
+| `+4` | Likely the duration, in ticks or loops |
+| `+6` | Low byte the balloon type (`IconGroup::GetBalloonSpriteID`). Bits 8 show when inactive, 9 the "not" sign over it, 10 reverse, 11 the duration is in loops, 12 offset by temp 0, 13 blink |
+
+It can show the stack object's sprite, a neighbour's, a local's object's or an icon; the balloon then stays for the duration (`ActivateForTicks`, `ActivateForLoops`, or forever) and ages in `cXObject::Simulate`'s upkeep. `Sub - Add Resources`' balloon (`00 00 00 0d 1e 00 03 01`) is icon group 0xD index 0, type 3, 30 ticks, shown when inactive.
+
 ## Routing
 
 What's here comes from the PS2 code where it gives an address, and the names come from the Wii build. **Proven** means read on PS2 or tested on the disc. **Likely** means read on Wii only, with PS2's function found by its calls but not compared line by line. Below `TryGotoRoutingSlot` and `TryGotoRelative`, 19 of the 20 handlers match byte for byte: all but `WaitingForStand`, which is parked. So do `GotoRoutingSlot` itself (`0x1AA008`) and `XRoute`'s constructor, copy constructor and `Construct`; `vector<XRoute>::DoInsertValue` (`0x1D16D0`) is not matched yet. PS2 emits most of the short ones together after `Routing_Failed`, in Wii's order. `RoutingSlot`'s small methods match too: `WriteSlot`, `AllowDirection`, `SetFacingDirection`, `SetDistances`, `SetTileDistances`, `GetXOffset` and `GetYOffset`. Its constructor isn't: it writes a vtable at `0x4B7FC0`, and the name in `symbols.txt` is on `0x4B8020`, which needs sorting out with the `Slot` base class first.
@@ -1634,7 +1723,7 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 
 ## Grab (opcode 4)
 
-**Read on PS2** (`cXObject::TryGrab`, `0x230ED0`), likely. 31 uses. The stack object goes into my hand. No stack object is false. The object is asked two virtuals, `+0x130` and `+0x138` on its vtable, with my location and me as arguments: the first can refuse, false, and the second does the pick-up. Neither body has been read; the port lets any object go that nothing else holds, and puts it in slot 0 with its container variable set to me. With a model (`+0x14`), the object's render flags get bits `0xC0` set, or `0x100` as well when `+0` bit 0 is set, and everything it contains gets the same, walking the container chain. Always true after that.
+**Read on PS2** (`cXObject::TryGrab`, `0x230ED0`), likely. 31 uses. The stack object goes into my hand. No stack object is false. The object is asked two virtuals, `+0x130` and `+0x138` on its vtable, with my location and me as arguments: the first can refuse, false, and the second does the pick-up. They are cXObject vtable slots 37 and 38, **`CanPlace` and `Place`**, with me as the container: a pick-up is placing the object into my hand. See "Picking up: CanPlace into a hand" below. With a model (`+0x14`), the object's render flags get bits `0xC0` set, or `0x100` as well when `+0` bit 0 is set, and everything it contains gets the same, walking the container chain. Always true after that.
 
 ## Tree tables and the action queue
 
@@ -1679,7 +1768,9 @@ Flag bits: 0 available to visitors, 1 can join, 2 immediate, 3 allow consecutive
 2. Nothing queued: returns 1. Back on the same node after an action that wasn't a continuation, the frame's word `+8` is still set: returns 1, so the tree moves on and the main loop looks again.
 3. A head that doesn't run as a sub-action needs the primitive's `+2` operand, or it returns 1; with an action already running it is error 0x51.
 4. A head whose object is gone leaves the queue, and the primitive returns 2.
-5. `0x19F548` prepares it: my variable 0x32 goes to 0; the object's variable 8 bit 9 or an entry flag against the Sim's kind refuses it; then the table's prefix check tree, unless the entry ignores it, and the entry's check tree run on me with the object as the stack object. Interaction flag bit 9 passes whatever they said. A failure is `ActionSkipped` (`0x1DD310`), the queue drops the head, and the primitive returns 2.
+5. `0x19F548` prepares it: my variable 0x32 goes to 0; the object's variable 8 bit 9 or an entry flag against the Sim's kind refuses it; then the table's prefix check tree, unless the entry ignores it, and the entry's check tree run on me with the object as the stack object. Interaction flag bit 9 passes whatever they said. A failure is `ActionSkipped` (`0x1DD310`), the queue drops the head, and the primitive returns 2. **`ActionSkipped(action)`, proven, PS2:** it takes the action's stack object (`Interaction::GetStackObject`, `0x24D720`), finds the action in the ring and removes it (`ActionQueue::Remove`, `0x1A69B0`), and then, if there's an object, runs that object's **entry point 4** tree to the end at once (`cXObject::RunTree`, `0x253FD8`: the object's function table gives the tree, `HasFunction`, and vtable slot 9 `RunCheckTree` runs it) with my ID as the stack object and no parameters. An object without an entry point 4 tree gets nothing. Wii's `ActionSkipped` is the same.
+
+**The 8-visible rule is proven:** `AddAction` byte-matches, and its step 5 above is the rule.
 6. `cXObject::GosubObjectTree` (`0x255D30`) clears my idle status and pushes the action tree, from the object's own behaviour, onto my stack with the object as the new frame's stack object.
 7. `+0x538` is set, the countdown operand goes to 0, the frame's `+8` is set, variable 8 bit 6 again, and the primitive returns 3: the node reruns straight into the action.
 
