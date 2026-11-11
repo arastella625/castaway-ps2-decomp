@@ -4,7 +4,8 @@
 Usage:
   python -I tools/placed.py check <game.iso>
   python -I tools/placed.py list  <game.iso> <lot_01>
-  python -I tools/placed.py lot   <game.iso> <out.glb> <lot_01> [--posed]
+  python -I tools/placed.py lot   <game.iso> <out.glb> <lot_01> [--posed] [--variants]
+  python -I tools/placed.py models <game.iso> <out.json>
 
 check decodes every object of every house. list prints one lot's objects. lot writes the lot's
 terrain, its scenery and every placed object that has a model to one .glb, which is game data:
@@ -12,8 +13,15 @@ keep it out of the repo. Terrain is the node named after the lot; placed objects
 the other nodes, with names starting 'placed ' and 'scenery '. COLOR_0 holds what VU1 sends the GS
 per vertex, and material extras hold the draw order and any detail pass, whose texture rides in
 occlusionTexture. docs/formats/world.md has the format.
+
+--variants gives each placed node extras.guid and extras.graphic (variable 0), and a child node
+'variant <graphic> <model>' for each other model its ObjAnimDef list can show, for a reader to
+show when a tree changes variable 0 and to hide until then. models writes the game's model choice
+for every definition, {GUID: {row, rig, anim_defs: [[graphic, model, animation]]}}, for objects a
+tree creates that no lot places. Both are game data.
 """
 import collections
+import json
 import math
 import os
 import struct
@@ -671,7 +679,36 @@ def split_terrain(terrain, data, level, shader_hashes):
     return ground, floor
 
 
-def export_lot(disc, out_path, lot, posed=False):
+def signed(guid):
+    return struct.unpack('<i', struct.pack('<I', guid))[0]
+
+
+def variant_nodes(builder, mesh_for, entry, shown):
+    """A child per other model the object's ObjAnimDef list can show, one per graphic."""
+    children = []
+    for graphic, model, _animation in entry[1]:
+        if model in (None, shown) or mesh_for(model) is None:
+            continue
+        child = {'name': 'variant %d %s' % (graphic, model), 'mesh': mesh_for(model),
+                 'extras': {'variant': graphic}}
+        if model.startswith(PALM_TRUNK):
+            child['children'] = palm_crown(builder, mesh_for(PALM_LEAF))
+        children.append(builder.add_node(child))
+    return children
+
+
+def export_models(disc, out_path):
+    """The game's model choice for every definition (ISimsObjectModel::GetAnimDef's table)."""
+    table = model_table(disc)
+    rows = {str(signed(guid)): {'row': row, 'rig': rig, 'anim_defs': [list(a) for a in anims]}
+            for guid, (row, anims, rig) in table.items()}
+    with open(out_path, 'w', encoding='ascii') as out:
+        json.dump(rows, out, separators=(',', ':'))
+    print('wrote %s: %d definitions' % (out_path, len(rows)))
+    return 0
+
+
+def export_lot(disc, out_path, lot, posed=False, variants=False):
     objects = read_houses(disc).get(lot)
     if objects is None:
         raise arc.FormatError('no placed objects for %s' % lot)
@@ -750,6 +787,9 @@ def export_lot(disc, out_path, lot, posed=False):
                 'rotation': model_rotation(placed.direction), 'scale': MODEL_MIRROR}
         if name.startswith(PALM_TRUNK):
             node['children'] = palm_crown(builder, mesh_for(PALM_LEAF))
+        if variants:
+            node['extras'] = {'guid': signed(placed.guid), 'graphic': placed.variables.get(GRAPHIC_KEY, 0)}
+            node.setdefault('children', []).extend(variant_nodes(builder, mesh_for, table[placed.guid], name))
         nodes.append(builder.add_node(node))
         placed_count += 1
     builder.gltf['scenes'][0]['nodes'] = nodes
@@ -765,8 +805,11 @@ def main(argv):
         return check(arc.Disc(argv[2]))
     if len(argv) == 4 and argv[1] == 'list':
         return list_lot(arc.Disc(argv[2]), argv[3])
-    if len(argv) in (5, 6) and argv[1] == 'lot' and argv[5:] in ([], ['--posed']):
-        return export_lot(arc.Disc(argv[2]), argv[3], argv[4], len(argv) == 6)
+    if len(argv) >= 5 and argv[1] == 'lot' and set(argv[5:]) <= {'--posed', '--variants'}:
+        return export_lot(arc.Disc(argv[2]), argv[3], argv[4], '--posed' in argv[5:],
+                          '--variants' in argv[5:])
+    if len(argv) == 4 and argv[1] == 'models':
+        return export_models(arc.Disc(argv[2]), argv[3])
     print(__doc__)
     return 2
 

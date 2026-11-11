@@ -494,6 +494,11 @@ frames a second. `ERAnim::LoadFromFile` reads it into `+0x70`, then `+0x74` and 
 971 at 60 (the adult walk, run and idles among them), and 15 at odd rates (0.01 to 15). So
 `af_walk_base`, 68 frames at 60, lasts 1.117 s, not 2.233 s.
 
+**Proven, note times are milliseconds at that rate.** Of the clips with notes, every note falls within the clip's
+length at its stored rate on 513 of the 515 clips at 60 and 1,120 at 30. The exceptions are 36 clips at 30 and 2 at
+60, with a note past the end.
+So a tree event at 900 ms in `a2o-eatfruit-small` comes 900 ms after the clip starts, at playback 1.
+
 **Corrected.** This page said every clip runs at 30 frames a second. The 380 floats seen rising at
 30 a second in a running game were 30-a-second clips; the export had timed every clip that way.
 

@@ -205,3 +205,27 @@ Open:
 - The `*.wav` entry's role; perhaps a wildcard for sounds found elsewhere.
 - Font name mapping; `AptAuxPCEorGL_Initialize` takes an `AptAuxFontList`.
 - For the port this needs an Apt interpreter, or a conversion to Godot scenes plus a script port. SWF tools won't read it.
+
+`tools/apt.py` reads all of this: `check` reads all 147 (1,223 shapes, 1,192 bitmaps, 1,182 sprites, 381 texts, 84
+fonts, 950 exports, 370 sheets, 0 failures) and rejects a cut file and a wrong tag; `find` names the movies whose
+constants hold a script name; `export` writes a movie's sheets as PNG with its header, exports, fonts and strings.
+
+### The interaction menu
+
+**Proven, it's `tsc5_interaction_menu`.** `ActionMenu::SetBackdrop` calls `AptViewer::NewCallFunction` with
+`imuSetBackdrop`, and `ActionMenu` builds its localisation keys with the prefix `IMU_`. Of the 147 movies, only
+`tsc5_interaction_menu`'s constants hold `imuSetBackdrop`. `ActionMenu`'s constructor loads it through
+`UIScreenManager::LoadUIScreen`, and installs `GetVariable`, `SetVariable` and `GetLocalizable` commands for its scripts.
+
+- **The movie:** 640 x 448, 28 ms frames, 2 frames. 24 shapes, 24 bitmaps, 44 sprites, 5 texts, fonts `Arial` and
+  `_sans`, and one sheet, `001.tgq`.
+- **The sheet:** rounded item buttons (plain white, green-edged and red), left, right, up and down arrows, plus and
+  minus icons and a soft backdrop.
+- **The exports:** `lib_itembar_left`, `lib_itembar_right`, `lib_itembar_dc`, `lib_titlebar_left` and the corner
+  pieces `lib_imu_ul`, `lib_imu_ur`, `lib_imu_ll`, `lib_imu_lr`, `lib_imu_dc`. **Likely**, from these names, it's a list
+  of item bars under a title bar, framed by corner pieces, not a pie.
+- **The game's calls into it:** `imuShow`, `imuHide`, `imuRefresh`, `imuMore`, `imuInput`, `imuBlank`,
+  `imuSetBackdrop`, `imuShowCount`, `imuHideCount`, `imuScrollArrowEnable`, `imuObjectButtonEnable`, `imuClearList`.
+  It calls back through `IMU_ShowCallback`, `IMU_HideCallback` and `IMU_RefreshCallback`.
+
+**Open:** where each piece sits. That's in the `.geo` shapes and the PlaceObject records, neither decoded.
