@@ -2781,7 +2781,9 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         if (!person)
             return 0;
         gEORGlobals->SetSelectedPerson(person);
-        return person == gEORGlobals->mPlayerPerson;
+        if (person == gEORGlobals->mPlayerPerson)
+            return 1;
+        return 0;
     }
     case 0x21:
         return ShowAllObjectDialogs(elem, primParam);
@@ -2789,6 +2791,7 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         // Opens Create-a-Sim for neighbour t2 on lot t1 (flow state 8), keeping the selected
         // Sim to come back to. While the HUD's transition target is 3 it returns 2.
         s16 selected = 0;
+        s16 neighbor = mTemps[2];
         if (_globals.mPlayerPerson)
             selected = _globals.mPlayerPerson->GetNeighborID();
         HUDTarget *hud = _gd.mHudTarget;
@@ -2799,7 +2802,7 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
             break;
         }
         UIDB::UIDBSetInt("CAS_mode", 1);
-        UIDB::UIDBSetInt("CAS_neighborID", mTemps[2]);
+        UIDB::UIDBSetInt("CAS_neighborID", neighbor);
         UIDB::UIDBSetInt("CAS_CurrentGameTime", GetSimulator()->mGameTime);
         UIDB::UIDBSetInt("CAS_lotnumber", mTemps[1]);
         UIDB::UIDBSetInt("PlayerNumber", 0);
@@ -3222,8 +3225,11 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
     }
     case 0x27: {
         // AutoFood picks a food from t1, t2 and t3. True if it found one.
+        s16 t1 = mTemps[1];
+        s16 t2 = mTemps[2];
+        s16 t3 = mTemps[3];
         AutoFood food;
-        if (food.AutonomousFoodSelection(mTemps[1], mTemps[2], mTemps[3]))
+        if (food.AutonomousFoodSelection(t1, t2, t3))
             return 1;
         return 0;
     }
