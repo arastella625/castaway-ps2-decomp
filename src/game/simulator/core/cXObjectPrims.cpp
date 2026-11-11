@@ -2530,7 +2530,7 @@ inline void EnableBuyAndBuild(ObjectModule *module, cXObject *object)
 // Primitive 1: GenericSimCall, a switch on the s16 at +0 with its operands in my temps.
 // Not matched, but every call is written. The cases are in the game's order, which is proven:
 // GCC lays the bodies out as the source has them, and the jump table at 0x4BA900 sorted by
-// address gives that order. 2,341 words against the game's 2,388, 1,904 of them lined up.
+// address gives that order. 2,349 words against the game's 2,388, 1,955 of them lined up.
 // docs/formats/bhav.md has what each call does, and Wii's TryGenericSimCall names nearly every
 // function they call.
 long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
