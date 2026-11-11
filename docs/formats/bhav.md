@@ -949,7 +949,7 @@ Then 0x18 and the end. So for the port: **a Sim can pick an object up when its h
 **`SimMotives`** does nothing unless my variable 0x22 is 0 and I'm in the world. Then:
 
 1. Person data 0xA set: `Motives::Cleanup` only. Otherwise `Motives::Sim` (`0x1FEA60`), which ends with `Cleanup`.
-2. Unless I'm a chimp or a boar, and when the goal-and-unlock data allows it, each entry 8 to 0xF of kind 4 that's set pins a motive at 0 every tick: 8 motive 5, 9 motive 6, 0xA motive 7, 0xB motive 9, 0xC motive 8, 0xD motive 15, 0xE motive 14, 0xF motive 13.
+2. Unless I'm a chimp or a boar, while any motive is still locked (`GoalUnlock::AreAnyMotivesLocked`, vtable slot 18), **each locked motive is held at 0** every tick (`IsLocked(4, n)`, slot 3; this used to say "set", but the slot is Wii's `IsLocked`): 8 motive 5, 9 motive 6, 0xA motive 7, 0xB motive 9, 0xC motive 8, 0xD motive 15, 0xE motive 14, 0xF motive 13.
 3. `CalcHappy` (`0x1ADF30`).
 
 **`Motives::Sim`.** The `Motives` object is at Sim `+0x13C`; its `+0x44 + 4k` is motive k (Sim `+0x180`), and its first 16 floats are the decay rates. Each tick, with `R(i)` = rate i / 720:
@@ -986,6 +986,52 @@ where pdN is the neighbour's person data N and the trait names are Wii's (`sMoti
 Rates 0 to 6 are the normal set, 8 to 12 the set while motive 11 is below 0 (13 and 14 are 0). So an average-personality castaway (traits 500) loses motive 7 at (-184 - 25) / 720 = 0.29 a tick.
 
 **The `SetMotiveDelta` list** is applied after `SimMotives`, entry by entry (motive, change, limit; the change is already per tick): a negative change lowers the motive only while it's above the limit, and stops at the limit; a positive one raises it only while it's below, and stops at the limit.
+
+## Global 3: the selected Sim
+
+**Proven, PS2.** Global 3 (simulator `+0x3E`) is the **selected Sim's object ID**, or 0 with none. Trees can read it but not write it: `GetGlobalRef` refuses index 3, as it does 0xB, 0x20 and 0x2E. Only `EGlobal::SetSelectedPerson` (`0x32AC78`) writes it. That also sets `_globals +0x174` (the player's Sim), the Sim's animator and flags, and the neighbourhood's word `+0x18` = the Sim's neighbour ID (person data 0xC). It runs whenever the selection changes: the player switching Sims (`SimInteractor::Update`), GenericSimCall 0x1F, and a few other callers. So a port that keeps the selected Sim's ID in global 3 is doing what the game does.
+
+## Goals: what GenericSimCall 0x42 returns
+
+**Read on Wii; PS2 calls the same vtable slot.** Likely. Every action ends in `person_sg`'s `Update Goals and Unlocks` (0x20A1), which calls GenericSimCall 0x42 with a goal book in t0. That is `GoalUnlock::TryEvaluateGoals(book)`:
+
+1. No `PlanManager`: 0.
+2. Book 0: `CheckMiscGoals`.
+3. Books 1 to 6: the book's own status (`GetUnlockIndex(0, book)`, a byte at `+4` on the goal data) must be neither 0 nor 3, or it's 0. Then `CheckBook1` to `CheckBook6`. Any other book is 0.
+
+Each check walks its goals. A goal with status 0 can move to 1 when its condition starts to apply (for example, being on a lot past 1). The first goal found at status 2 gets its plan group unlocked (`PlanManager::UnlockGroupPlan`) and a sound, and moves to 3. Its number (0x6D, 0x85, 0x86 and so on) is returned at once. So the statuses are likely 0 hidden, 1 active, 2 achieved and 3 rewarded, and **the call reports at most one newly finished goal**: t1 is its number and the branch is true, or false when nothing finished.
+
+The `GoalUnlock` vtable, from Wii's `__vt__10GoalUnlock`, names the slots our `GoalAndUnlockData` stubs: 0 `ClearGoalsAndUnlocks`, 1 `GetUnlockCount`, 2 `IsUsed`, 3 `IsLocked`, 4 `IsUnlocked`, 5 `IsCompleted`, 6 to 8 the same three by number, 9 `GrantUnlock`, 10 `GetStatus`, 11 `SetStatus`, 12 `IsRecentlyUnlocked`, 13 `SetRecentlyUnlocked`, 14 `DoStream`, 15 `TryEvaluateGoals`, 16 `PlanMade`, 17 `ResourceHarvested`, 18 `AreAnyMotivesLocked`, 19 `IsMotiveUnlocked`, 20 `OpenAllBooksAndPages`, then the destructor.
+
+## Identify: the "identified" marker
+
+**Proven on the disc for the trees; type attributes proven by the matched code.** Identify on a resource is `Interaction - Taste` (`resources_sg` 0x200A; `source_sg` has its own at 0x2002).
+
+- Node 0 puts the stack object's semi-global attribute 0, its resource token ID, in temp 0.
+- Node 6 sets **the stack object's type attribute 0 to 2000**. The stack object is the object being tasted, the coconut: the coconut's Taste makes no object at all. (The palm's own Taste, `source_sg` 0x2002, plays harvest clips and has a CreateObject at node 16.)
+- **`Test - Is Resource Identified?`** (0x2007, parameter 0 the token ID) tests bit 10 of column 8 of that token's `InventoryTokens` row. Clear means the resource needs no identifying, and the test is true. Set means it does, and the test is true only if **the stack object's type attribute 0 is 2000**.
+
+**Whose type attributes.** They belong to the object's **GUID**: scope 0x25 reads `ObjSelector::GetTypeAttributes`, which looks up the folder's block for the definition's GUID (`+0xB8` is 0 on every definition; see "Type attributes" below). Every object of that GUID shares one array, so tasting one coconut marks every coconut of that GUID as identified. Nothing is written to the token or its row.
+
+**Why a port may see no marker.** A GUID only has a block if its definition says so. `ObjectFolder::AddSelector` (PS2 reads it at `0x21C98C`) makes an `ObjectTypeAttrBlock(GUID, count)` when the definition's **`+0xB4`** is non-zero, and `GetTypeAttrBlock` only searches the existing blocks. A GUID without one makes Taste's write error 0x40, and nothing is marked. On the disc, 143 of the 1,335 definitions have a count, 140 of them 1, 1 each 2, 8 and 9. A port should give each of those GUIDs an array of that many zeros when the object type loads.
+
+## Harvest: where the resource comes from
+
+**Proven on the disc, from the trees.** Two paths, chosen by the source's animation height (table 0x2000 of `source_sg`, "Animation Heights"):
+
+**1. Grab One: an animation event.** `Test - Does Height Support GrabOne?` (0x201D) is true only for heights 7 (Harvest Underground), 9 (Harvest Tree - Ground), 10 (Harvest Tree Low) and 11 (Harvest Tree Med).
+
+- `Sub - Play Harvest Anim` (0x201E) plays each stage's clip with its events going to local 0, and passes each event to `Sub - Handle Events` (0x201F) with the stage. The stages are the "Animation Indices" table 0x2004: 0 Start, 1 to 4 Loop 1 to 4, 5 Stop, 6 Grab One.
+- In the Grab One stage, **event 101** runs `Events - Grab One` (0x203D). If the source's semi-global attribute 8 (which resource, 1 to 3) is above 0, it takes the resource's token and GUID (`Get in Temp 1&2 - Resource GUID`, token columns 0xB and 0xA) and **CreateObject**s it.
+- Event 101 in the Start stage creates the tool prop (`Events - Start`). Event 501 in the loops only plays sounds (`Events - Loop`). Event 102 at Stop puts the prop away (`Events - Stop`).
+
+**2. Accrual: tree logic on a timer.** `Harvest - Core` (0x2007) calls `Sub - Start Resource Accrual` (0x2020) at node 1 and `Sub - Stop Resource Accrual` at node 14, so likely for every height. Start sets the source's semi-global attribute 8 to the resource index and 9 to 1, and notifies it; Stop clears them.
+
+- While attribute 9 is set, the source's own `Function - Main SG` (0x2001) loop counts down from `Get in Temp 0 - Accrual Rate` (0x2026), which depends on the resource.
+- Each time the count runs out and the source's resource count can be decremented (`Sub - Decrement Resource Count`), it calls `Resource - Add To Inventory` (0x2004).
+- That **adds one of the resource's token straight to the family inventory** (FamilyInventory op 0, token category, count 1), shows a balloon (icon group 0xD), updates the displayed count, runs `NotifyPlans`, and gives special resources a chance at extras (`Sub - Process Special Resources`).
+
+So **climbing a palm** (heights 4 Knife High Climb, 12 Harvest Tree High Knife, 14 Knife Not-So-High Climb) yields only through accrual: tokens in the inventory over time, no object and no event. A low tree uses both: a fruit in hand on event 101 in the Grab One stage, and tokens over time.
 
 ## Dialog (opcode 0x24)
 
@@ -1719,7 +1765,7 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 0x3D | 0 | t1 = the first word of the plan made from token t0. No such plan is error 0x6B. **Proven, PS2.** No tree uses it |
 | 0x40 | 2 | Neighbour t0's way here (`LotManager::CanSimGetToLot`). t1 = 0 first. Already on this lot, or no lot (-1): true. Otherwise false unless the lot graph exists, this lot has been visited and a route is found. The route is up to 30 lot numbers, and t1 = the last one; a route of 0 or 30 lots is false. No neighbour is error 0x38. **Proven, PS2** |
 | 0x41 | 3 | **Proven, PS2 and Wii; corrects an earlier reading.** True if there's a player tribe inventory and t0 is an ID in the `InventoryTokens` table. It doesn't check that the tribe has the token. No player Sim is false |
-| 0x42 | 7 | t1 = a goal value for t0. False if there's none |
+| 0x42 | 7 | **Evaluates goal book t0** (`GoalUnlock::TryEvaluateGoals`, vtable slot 15; PS2 calls `+0x80`). t1 = the number of a goal it has just completed, and true; false if none. See "Goals: what GenericSimCall 0x42 returns" |
 
 ## Grab (opcode 4)
 
