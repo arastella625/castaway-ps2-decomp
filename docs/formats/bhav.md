@@ -1374,6 +1374,154 @@ PS2 `0x4BC0B0`, with 8-byte entries from `+8`. The slots are:
 
 `GetStatus` on an unlock returns its bit, and `SetStatus(4, n, 1)` grants it.
 
+## CameraControl (opcode 0x28)
+
+**Proven, PS2** (`0x232378`) for what it returns, with Wii's names (`cXObject::TryCameraControl`). The camera work itself (which animation, cuts, interpolation, letterbox) is **not read** in detail. 57 uses.
+
+It's **presentation**: it drives the `CameraDirector` (`_globals +0x1D0`) and keeps its own progress in the frame word `+8`. What a tree sees:
+
+| Case | Returns |
+|---|---|
+| `_globals +0x464` set (Wii `+0x3B4`; what sets it isn't read) | Frame `+8` = 0, **false** |
+| The camera animation it asked for is still loading | 2: wait |
+| **`+4` bit 6, the test:** the director isn't in control, or it's in its hold state (state `+0x2B0` 0, 2 or 8) | **true**, otherwise **false**. Nothing is started |
+| The director's state `+0x2AC` is 2 | false |
+| I'm the selected Sim, `+4` bit 7 set, `+6` bit 2 clear, and a player interactor exists | false |
+| A target object (`+4` bit 4) that doesn't exist | Error 0x15, -1 |
+| Started, **`+4` bit 5 set** | **true at once** |
+| Started, bit 5 clear | 2 (wait) every tick until the director is done (state `+0x2B0` back to 0 or 8), then **true** |
+
+`+4` bit 0 also enables cancelling (`CameraDirector::CancelEnable`).
+
+**Who branches on it.** 12 of the 57 nodes have different true and false targets:
+
+- **Four are the test** (`00 00 00 00 ef 01 20 00`), in `Intro Camera` (three scenarios) and `scenario_sg` `Release to Game Camera`. They loop on `idle` until the camera is free.
+- **Seven are portal arrivals and the flood reaction.** They start a shot with bit 5 set and take a different path when it fails.
+- **One is `Interaction - Intro Sequence` node 9** (below).
+
+**For a port with no camera:** return true. The test then means "the camera is free", and every started shot counts as done. The tree's flow is the same as when the camera works, minus the waits.
+
+## The opening on the beach
+
+**Proven on the disc** (the trees as written, followed from node 0). The primitives are the ones documented in this file.
+
+### The scenario: `scenario_first_playable`
+
+**`F_Main` (0x1001):**
+
+1. My attribute 4 = 0; `idle`.
+2. **`Setup Start Sequence`** (0x1004). With the selected Sim (global 3) as the stack object, it calls `Hold Sim`, which pushes an action on it. Then `CheckObject`, and three `FamilyInventory` operations on the tribe.
+3. If that returns true:
+   - stack object = global 3, local 0 = it, local 1 = 0;
+   - **PushAction** `21 00 01 03 01`: likely `Interaction - Intro Sequence` on the Sim;
+   - then `Function - Main Loop`.
+
+   If it returns false, it calls `Intro Camera` and then the main loop.
+4. **`Function - Main Loop`** (`scenario_sg` 0x2029) is reached only at node 0, which calls `idle` forever. The rest of that tree (`Release to Game Camera`, `Set Selection Flags`) can't be reached.
+
+**`Interaction - Intro Sequence` (0x100F), on the Sim:**
+
+1. Node 0: if neighbourhood variable 6 bit 16 is set, return true at once. **The intro runs only once.**
+2. Set that bit. Local 1 = my stack object.
+3. `Animate` (`02 …`, then `01 …`). The second's false path loops through `idle`.
+4. **`Sub - Go to Start Position`** (0x1000), the one CreateObject here:
+   - SetToNext type 4 for GUID `0x50323DB5`, the start marker;
+   - only if there's none, **CreateObject** it out of the world (place 6), then `FindGoodLocation`;
+   - mark it (its variable 0x22 = 1) and `GotoRelative` to it.
+5. My person data 0x22 bit 1. t0 = me. **GenericSimCall 0x1F** selects me.
+6. **IdleAnimate** `01 00 00 00 00 10 00 00`. True goes on. **False is error 253**, which resets the Sim's action.
+7. `Animate` (`02 … 80`). Its false path loops through `idle`.
+8. **CameraControl node 9** (`00 00 09 01 2a 01 04 00`, bit 5 set): true calls `idle` once, false skips it.
+9. **GenericSimCall 0x09** (`LoadFinishing`).
+10. `Animate` (`02 00 …`). Its false target is itself.
+11. **CameraControl node 10** (`03 00 09 00 0a 0a 00 00`, bit 5 clear) waits for the shot, then continues either way.
+12. Stack object = local 1. **Its attribute 4 = 1**: this tells `Intro Camera` the intro is done. Return true.
+
+Nodes 2 and 13 to 21 (a neighbour count and two Dialogs) can't be reached.
+
+**`Intro Camera` (0x1003):**
+
+1. Node 0: `idle` until my attribute 4 is 1, set by the Intro Sequence.
+2. It counts the neighbours with Neighbor data 0x2C = constant 0x137[0] and data 0x28 from 1 to 6 (SetToNext type 5).
+3. A **modal Dialog**: string 3 with more than one, string 6 otherwise. It waits for the player.
+4. **`Tutorial - Task Complete` (2)**.
+5. **CompleteGoal op 3 on unlock 26** ("Start Tutorial", constant `0x4B20`).
+
+Its CameraControl nodes 1 to 4 can't be reached from node 0.
+
+### The tutorial object: `tutorial`
+
+- **`Function - Init` (0x1015).** It kills any other tutorial object (GUID `0x1A692C11`). Unless attribute 5 (set by `Handle Reset`) is 1, it sets attribute 1, the step, to -1, and attribute 7 to 0.
+- **`Function - Main` (0x1000):**
+  1. `idle`, then `CheckObject`, then `Get Sim in Temp 0`.
+  2. Tutorial flag 0 (`House Complete`) set: the tutorial is over, and it kills itself (a `KillObject`/`idle` loop).
+  3. Otherwise it goes on only if global 0x1A or global 0xA is 1; if neither is, it kills itself.
+  4. **It waits (`idle`) for unlock 26, "Start Tutorial"**, from `Intro Camera`.
+  5. Then it calls `Tutorial - Tutorial House` again and again: **a false result calls it again in the same tick** (node 1's false target is node 1), and true goes to `Tutorial - End`.
+- **`Tutorial - Tutorial House` (0x1001):**
+  - **Node 0:** if unlock 1 ("Basic 1 - Environment") is set, return true, which ends the tutorial.
+  - **Otherwise** it selects the step's tree by attribute 1, using constant table 0x12C.
+  - **When the step's tree returns true**, it adds 1 to attribute 1 and returns false, so the next step starts in the same tick.
+  - **When the step's tree returns false** (its false target 255), it returns false without moving on, so the same step runs again.
+
+| Step | Tree | Reached from node 0 | Waits on |
+|---|---|---|---|
+| 0 | `Lock Everything` (0x1002) | Selected Sim's motives 9, 6, 5, 15, 7, 8, 14, 13 = 100. Then a neighbour's (`Get in Temp 0 - Neighbor's instance ID`) = 80, `FindGoodLocation` and a `PushAction` on it. Marks every object of five GUIDs, from SetToNext type 4: start marker attribute 0, and others' attributes 0x12, 8, 3, 0xD | Nothing |
+| 1 | `Basic - Start` (0x1023) | If unlock 2 is set, true. Otherwise `Idle With Motive Floor` for constant 0x1001[2] × 24 ticks | That idle |
+| 2 | `Basic - Find Survival Book` (0x1005) | **Only node 0**: CompleteGoal op 3 on unlock 2, true. The book-finding nodes can't be reached | Nothing |
+| 3 | `Basic - Read Survival Book` (0x1006) | Unlock 2 set: modal Dialog 4. Button 1 sets unlock 1, which ends the tutorial on the next pass. Then true. Without unlock 2: `Sub - Create Survival Book` and `sub - Force Read Tutorial Book` (a PushAction) | The Dialog |
+| 4 | `Basic - Teach Navigation` (0x1036) | PS2: modal Dialog 5, `Tutorial - Wait for Complete Idle Loop` (either result), GenericSimCall 0x2C (close modeless dialogs), true. The seven Dialogs are Wii's path | The Dialog and the wait |
+| 5 | `Survival Basic 2: Gather Supplies` (0x1007) | **`sub - Create Coconut`**, then modal Dialog 7 (0x20 on Wii), true | The Dialog |
+| 6 | `Basic - Learn Harvesting` (0x102A) | Modal Dialog 9 (0x20 on Wii), then `Tutorial - Wait for Complete Idle Loop`. Done: `Idle With Motive Floor`, true. Timed out: **false**, so step 6 runs again | A harvest's `Task Complete` |
+| 7 | `Basic - Inventory` (0x102E) | Modal Dialog 0xA (6 on Wii), `Tutorial - Idle - No input`, true either way | The Dialog and the wait |
+| 8 | `Basic - Pause Menu` (0x1008) | **Only node 0**: `idle`, true | One idle |
+| 9 | `Basic - Inventory Screen` (0x100A) | **Only node 0**: `idle`, true | One idle |
+| 10 | `Survival Basic 3: eat` (0x1009) | **`sub - Create Coconut`**, modal Dialog 0x18 (2 on Wii), **unlock 10, hunger**, true | The Dialog |
+| 11 | `Basic - Eat` (0x1046) | `Get Sim in Temp 0`. If the Sim holds an object of one of five food GUIDs (coconut among them; TestObjectType on the object in its slot 0), it goes straight to `Tutorial - Wait for Complete Idle Loop`; otherwise modal Dialog 0x19 first. Done: true. Timed out: false, so step 11 runs again. Node 1's Dialog 0x16 can't be reached | Eating's `Task Complete` |
+
+**How a step waits.** `Tutorial - Wait for Complete Idle Loop` (0x103C) and `Tutorial - Idle - No input` (0x1011) loop through `Idle With Motive Floor`, a countdown of 15-tick idles from constant 0x1001[3] or [4], doubled.
+
+- **Done:** they stop when the tutorial's **attribute 6 is 1**. `Tutorial - Task Complete` (global 0x1F0) sets it on the tutorial object whose attribute 1 equals its parameter 0. Then GenericSimCall 0x2C closes modeless dialogs, attribute 6 = 0, and they return true.
+- **Timed out:** false.
+- **Who calls `Task Complete`:**
+  - `Intro Camera`, with 2;
+  - eating (`resources_sg` `Interaction - Eat`), putting a resource in the inventory, harvesting (`source_sg` `Harvest - Core`), sleeping on the ground and placing the mat, and building and lighting the fire pit;
+  - each survival book's catch-up;
+  - all with the caller's default parameters (not read here).
+
+**What only the real UI or camera can answer:**
+
+- **Every modal Dialog waits for a button.** Read Survival Book's Dialog 4 also branches on it: button 1 skips the tutorial.
+- **The CameraControl waits** in the Intro Sequence.
+- **Steps 6 and 11 finish only when the player does the action,** which calls `Task Complete`. Otherwise they time out and run again.
+
+### The objects the opening creates
+
+**Proven on the disc.** There are three CreateObject trees on this path, and each creates **one object, only when SetToNext type 4 finds none of that GUID**:
+
+| Tree | Object (GUID) | Place | Reached from |
+|---|---|---|---|
+| `Sub - Go to Start Position` | Start marker `0x50323DB5` | 6, then `FindGoodLocation` | The Intro Sequence, once |
+| `sub - Create Coconut` | Coconut `0xA78125FE` | 6, then `FindGoodLocation` | Steps 5 and 10 |
+| `Sub - Create Survival Book` | Survival book `0x1FC2477B` | 6, then `FindGoodLocation` | Step 3, only without unlock 2 |
+
+**SetToNext type 4 walks every object ID** (`GetObject(index)` for all of `GetNumObjects`), placed or not, and matches the selector. It doesn't test whether the object is in the world: `IsInteractionTile` is only checked with skipping on, and these nodes have it off. So an object made out of the world and never placed is still found next time.
+
+**In the game, the opening makes at most one marker, one coconut (until it's eaten) and one book.** Nothing on this path creates objects in a loop.
+
+**What would make a port create without stopping.** These things repeat:
+
+- **`Function - Main` calls `Tutorial House` again in the same tick** each time it returns false. That's after every finished step, and after every step that returns false.
+- **The only things that end a tick** on this path are an Idle primitive (`idle`, `Idle With Motive Floor`), a Dialog waiting (4), Animate, IdleAnimate or CameraControl waiting (2), and a CreateObject whose object isn't loaded yet.
+- **25,000 nodes in one tick is error 0x44D.** An error resets the tutorial object. It has `Handle Reset` (0x1033), which sets attribute 5 so that `Function - Init` keeps the step. Likely, since which entry point that tree is isn't checked here.
+
+So a port gets a new coconut or book on every pass if both of these hold:
+
+1. its SetToNext type 4 misses objects it made itself, for example ones still out of the world, or ones not in the ID list the search walks;
+2. a step keeps running again without waiting, for example because a Dialog returns at once instead of 4, or a CompleteGoal test of unlock 2 reads false so step 3 takes its book path.
+
+Stubbing IdleAnimate to return true lets the Intro Sequence finish. That sets scenario attribute 4, and `Intro Camera` then grants unlock 26, which is what starts the tutorial loop. So stubbing IdleAnimate is likely what first let the port reach the creating steps.
+
 ## Identify: the "identified" marker
 
 **Proven on the disc for the trees; type attributes proven by the matched code.** Identify on a resource is `Interaction - Taste` (`resources_sg` 0x200A; `source_sg` has its own at 0x2002).
