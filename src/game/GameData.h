@@ -13,9 +13,13 @@ public:
     Neighbor *GetPrimaryNeighbor();
 };
 
-// Wii: ActionMenu.
+// Wii: ActionMenu, the interaction menu (the Flash movie tsc5_interaction_menu). See
+// docs/formats/ui.md.
 class ActionMenu {
 public:
+    u8 pad_0x0[0x1cc];
+    int mHarvestCount; // 0x1cc  the movie's IMU_count, shown by imuShowCount
+
     void SetupHarvestCount(int count);
 };
 

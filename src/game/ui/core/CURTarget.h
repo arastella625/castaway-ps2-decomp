@@ -10,9 +10,15 @@
 // vtable pairing tiers; a one-instruction body cannot confirm that a name is right.
 class CURTarget {
 public:
-    u8 pad_0x0[0xb0];
+    u8 pad_0x0[0x8c];
+    // The cursor, in the Flash stage's 640 x 448 units: the constructor sets the bounds at
+    // +0x9C to +0xA8 to x 0 to 0x280 and y 0 to 0x1C0, and ClampCursor keeps it inside them.
+    int mX;         // 0x8c
+    int mY;         // 0x90
+    u8 pad_0x94[0x1c];
     u32 field_0xb0; // 0xb0
 
+    void GetPosition(int &x, int &y);
     u32 GetCursorHighlight();
 };
 
