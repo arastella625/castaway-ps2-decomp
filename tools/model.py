@@ -70,13 +70,19 @@ SHADER_LIT_FLAG = 0x08
 SHADER_PASSES_OFFSET = 0x3B
 SHADER_PASS_SIZE = 0x30
 PASS_FORMAT = '<IHB2fBBBB'  # texture, flags, a byte, two floats, then ALPHA, FIX, a byte, UV source
+PASS_SCROLL_OFFSET = 0x18  # then scale at 0x20 and offset at 0x28, two floats each
 PASS_SCALE_OFFSET = 0x20
+PASS_UV_OFFSET = 0x28
 PASS_BLEND_FLAG = 0x40
 SINGLE_SHADER_KIND = 0  # kind 1 is a multi-shader, a list of day and night shaders
 ALPHA_FIELD_SCREEN = 1  # in the GS ALPHA register, the colour already on the screen
 ALPHA_FIX_MIX = 0x64  # the GS ALPHA register: (source - destination) * FIX + destination
 ALPHA_ADD = 0x68  # the GS ALPHA register: source * FIX + destination
-UV_SCALED = 4  # the mesh's own UVs through the pass's scale; 3 is a reflection
+ALPHA_KEEP = 0x4A  # (0 - 0) * source alpha + destination: colour kept, source alpha still written
+ALPHA_ADD_BY_SCREEN = 0x58  # source * destination alpha + destination
+ALPHA_MIX_BY_SCREEN = 0x54  # (source - destination) * destination alpha + destination
+UV_SCALED = 4  # through the pass's matrix; Wii generates it from vertex positions (world.md)
+UV_SCROLLED = 5  # the mesh's UVs through the pass's matrix: what source 0 becomes when it scrolls
 
 
 @dataclass
@@ -349,6 +355,8 @@ class ShaderPass:
     fix: int  # ALPHA's constant, where 128 is 1.0
     uv_source: int
     uv_scale: tuple
+    uv_scroll: tuple = (0.0, 0.0)  # UV per second, likely; wraps at 1
+    uv_offset: tuple = (0.0, 0.0)
 
 
 @dataclass
@@ -379,7 +387,9 @@ def read_shader(data, name):
         pos = body + SHADER_PASSES_OFFSET + index * SHADER_PASS_SIZE
         texture, flags, _, _, _, alpha, fix, _, uv_source = struct.unpack_from(PASS_FORMAT, data, pos)
         scale = struct.unpack_from('<2f', data, pos + PASS_SCALE_OFFSET)
-        passes.append(ShaderPass(texture, flags, alpha, fix, uv_source, scale))
+        passes.append(ShaderPass(texture, flags, alpha, fix, uv_source, scale,
+                                 struct.unpack_from('<2f', data, pos + PASS_SCROLL_OFFSET),
+                                 struct.unpack_from('<2f', data, pos + PASS_UV_OFFSET)))
     lit = bool(struct.unpack_from('<I', data, body + SHADER_LIT_OFFSET)[0] & SHADER_LIT_FLAG)
     return Shader(lit, passes)
 
