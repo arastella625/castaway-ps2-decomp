@@ -439,7 +439,7 @@ The stack object is the frame's object ID. A call passes it on to the called tre
 | Budget | `+4` bit 0 just test, bit 1 clear means subtract |
 | CallNamedTree | See its own section |
 | CreateObject | See its own section |
-| Dialog | `+1` icon index; `+7` bits 1-3 icon type, bits 4-6 result temp, bit 7 semi-global strings |
+| Dialog | `+0`, `+3`, `+4` button strings, `+2` message, `+6` title; `+1` icon index; `+5` bits 0-3 the type; `+7` bits 1-3 icon type, bits 4-6 result temp, bit 7 semi-global strings. See its own section |
 | DirectionTo, DistanceTo | A flag byte (`+4`, `+2`), bit 0 set: the "from" value is the scope in the next byte and the data after it. Clear: scope 3, data 0xB. DistanceTo bit 1 returns sixteenths of a tile |
 | FindGoodLocation | `+2` flags: bit 0 start at relative object, 1 not prefer empty tiles, 2 editable tiles only (tile flag 0x20 clear, as `MayEditTile` in world.md), 3 orientation in temp 0, 4 prefer under roof |
 | Grab | `+0` bit 0 parenting prop bone |
@@ -1443,7 +1443,7 @@ Nodes 2 and 13 to 21 (a neighbour count and two Dialogs) can't be reached.
 
 1. Node 0: `idle` until my attribute 4 is 1, set by the Intro Sequence.
 2. It counts the neighbours with Neighbor data 0x2C = constant 0x137[0] and data 0x28 from 1 to 6 (SetToNext type 5).
-3. A **modal Dialog**: string 3 with more than one, string 6 otherwise. It waits for the player.
+3. A **modal Dialog** (type 3, one OK button): message string 3 under title string 2 with more than one castaway, message 6 under title 5 otherwise. It waits for the player. The text is in "Dialog (opcode 0x24)" below.
 4. **`Tutorial - Task Complete` (2)**.
 5. **CompleteGoal op 3 on unlock 26** ("Start Tutorial", constant `0x4B20`).
 
@@ -1469,15 +1469,15 @@ Its CameraControl nodes 1 to 4 can't be reached from node 0.
 | 0 | `Lock Everything` (0x1002) | Selected Sim's motives 9, 6, 5, 15, 7, 8, 14, 13 = 100. Then a neighbour's (`Get in Temp 0 - Neighbor's instance ID`) = 80, `FindGoodLocation` and a `PushAction` on it. Marks every object of five GUIDs, from SetToNext type 4: start marker attribute 0, and others' attributes 0x12, 8, 3, 0xD | Nothing |
 | 1 | `Basic - Start` (0x1023) | If unlock 2 is set, true. Otherwise `Idle With Motive Floor` for constant 0x1001[2] × 24 ticks | That idle |
 | 2 | `Basic - Find Survival Book` (0x1005) | **Only node 0**: CompleteGoal op 3 on unlock 2, true. The book-finding nodes can't be reached | Nothing |
-| 3 | `Basic - Read Survival Book` (0x1006) | Unlock 2 set: modal Dialog 4. Button 1 sets unlock 1, which ends the tutorial on the next pass. Then true. Without unlock 2: `Sub - Create Survival Book` and `sub - Force Read Tutorial Book` (a PushAction) | The Dialog |
-| 4 | `Basic - Teach Navigation` (0x1036) | PS2: modal Dialog 5, `Tutorial - Wait for Complete Idle Loop` (either result), GenericSimCall 0x2C (close modeless dialogs), true. The seven Dialogs are Wii's path | The Dialog and the wait |
-| 5 | `Survival Basic 2: Gather Supplies` (0x1007) | **`sub - Create Coconut`**, then modal Dialog 7 (0x20 on Wii), true | The Dialog |
-| 6 | `Basic - Learn Harvesting` (0x102A) | Modal Dialog 9 (0x20 on Wii), then `Tutorial - Wait for Complete Idle Loop`. Done: `Idle With Motive Floor`, true. Timed out: **false**, so step 6 runs again | A harvest's `Task Complete` |
-| 7 | `Basic - Inventory` (0x102E) | Modal Dialog 0xA (6 on Wii), `Tutorial - Idle - No input`, true either way | The Dialog and the wait |
+| 3 | `Basic - Read Survival Book` (0x1006) | Unlock 2 set: modal Dialog 4 (type 4, yes and no). Button 1 sets unlock 1, which ends the tutorial on the next pass. Then true. Without unlock 2: `Sub - Create Survival Book` and `sub - Force Read Tutorial Book` (a PushAction) | The Dialog |
+| 4 | `Basic - Teach Navigation` (0x1036) | PS2: **modeless** Dialog 5 (type 1, it doesn't wait), `Tutorial - Wait for Complete Idle Loop` (either result), GenericSimCall 0x2C (close modeless dialogs), true. The seven Dialogs are Wii's path | The wait |
+| 5 | `Survival Basic 2: Gather Supplies` (0x1007) | **`sub - Create Coconut`**, then modal Dialog 7 (type 3; 0x20 on Wii), true | The Dialog |
+| 6 | `Basic - Learn Harvesting` (0x102A) | **Modeless** Dialog 9 (type 1; 0x20 on Wii), then `Tutorial - Wait for Complete Idle Loop`. Done: `Idle With Motive Floor`, true. Timed out: **false**, so step 6 runs again | A harvest's `Task Complete` |
+| 7 | `Basic - Inventory` (0x102E) | **Modeless** Dialog 0xA (type 1; 6 on Wii), `Tutorial - Idle - No input`, true either way | The wait |
 | 8 | `Basic - Pause Menu` (0x1008) | **Only node 0**: `idle`, true | One idle |
 | 9 | `Basic - Inventory Screen` (0x100A) | **Only node 0**: `idle`, true | One idle |
-| 10 | `Survival Basic 3: eat` (0x1009) | **`sub - Create Coconut`**, modal Dialog 0x18 (2 on Wii), **unlock 10, hunger**, true | The Dialog |
-| 11 | `Basic - Eat` (0x1046) | `Get Sim in Temp 0`. If the Sim holds an object of one of five food GUIDs (coconut among them; TestObjectType on the object in its slot 0), it goes straight to `Tutorial - Wait for Complete Idle Loop`; otherwise modal Dialog 0x19 first. Done: true. Timed out: false, so step 11 runs again. Node 1's Dialog 0x16 can't be reached | Eating's `Task Complete` |
+| 10 | `Survival Basic 3: eat` (0x1009) | **`sub - Create Coconut`**, modal Dialog 0x18 (type 3; 2 on Wii), **unlock 10, hunger**, true | The Dialog |
+| 11 | `Basic - Eat` (0x1046) | `Get Sim in Temp 0`. If the Sim holds an object of one of five food GUIDs (coconut among them; TestObjectType on the object in its slot 0), it goes straight to `Tutorial - Wait for Complete Idle Loop`; otherwise **modeless** Dialog 0x19 (type 1) first. Done: true. Timed out: false, so step 11 runs again. Node 1's Dialog 0x16 can't be reached | Eating's `Task Complete` |
 
 **How a step waits.** `Tutorial - Wait for Complete Idle Loop` (0x103C) and `Tutorial - Idle - No input` (0x1011) loop through `Idle With Motive Floor`, a countdown of 15-tick idles from constant 0x1001[3] or [4], doubled.
 
@@ -1491,7 +1491,7 @@ Its CameraControl nodes 1 to 4 can't be reached from node 0.
 
 **What only the real UI or camera can answer:**
 
-- **Every modal Dialog waits for a button.** Read Survival Book's Dialog 4 also branches on it: button 1 skips the tutorial.
+- **Every modal Dialog waits for a button**: Intro Camera's and steps 3, 5 and 10. Read Survival Book's Dialog 4 also branches on it: button 1 skips the tutorial. Steps 4, 6, 7 and 11 show a modeless message (type 1) that doesn't wait; the step's wait loop does the waiting, and GenericSimCall 0x2C closes the message.
 - **The CameraControl waits** in the Intro Sequence.
 - **Steps 6 and 11 finish only when the player does the action,** which calls `Task Complete`. Otherwise they time out and run again.
 
@@ -1592,16 +1592,130 @@ Shed resource index 1, energy delta -60 an hour, stop at -90. So resource 0 with
 
 ## Dialog (opcode 0x24)
 
-**Read on Wii** (`cXObject::TryDialog`), with PS2 (`0x2306E0`) checked for the same shape: its two `EdithDialogPrimitive::SetDialog` calls (`0x1EDBC8`), the waiting code 4 and the answer code at `0x4928A8`. Likely. 505 uses. The dialog type is `+5` bits 4 to 7 (operand `+7` bits 4 to 6 the result temp, bit 7 semi-global strings).
+**Proven on PS2:** `cXObject::TryDialog` (`0x2306E0`), its operand helper (`0x230658`), `EdithDialogPrimitive::SetDialog` (`0x1EDBC8`), `StringSet::Load` and `GetLocString` (`0x263A40`, `0x263848`), read call by call, with Wii for the names. The strings below were read from the disc. 505 uses.
 
-1. An end-of-game slide show is up: returns 4, so it waits.
-2. **The player has answered** (the answer code isn't 4): the button pressed (`GetModalDialogResult`) goes into the result temp, and the primitive returns the answer code, then resets it to 4. The UI's `EndDialog(bool)` sets it to 1 or 0, so a yes or OK takes the true branch and a no the false.
-3. A flow request is pending: returns 1 at once.
-4. Some dialogs are skipped when no family member is awake and visible, or the camera director has the letterbox up: type 4, and type 0 unless operands `+0` and `+3` are both 0xFE, set temp 0 to 0 and return 1; types 1, 2 and 5 return 1.
-5. Types 0 to 5 are **modal**: unless a global flag (`+0x36D` on the end-of-round globals) says not to, `SetDialog` shows it. Then types 0, 3 and 4 **return 4** and the node runs again each tick until the player answers (step 2); 1, 2 and 5 return 1 and don't wait. A `SetDialog` that fails returns 1.
-6. Other types are shown **without waiting** and return 1.
+**Correction.** This section used to say the dialog type is `+5` bits 4 to 7. That's the Wii's layout. The type is a 4-bit bitfield, and a big-endian compiler puts the first bitfield in a byte's high bits, a little-endian one in its low bits. The Wii reads `(+5 >> 4) & 0xF`, the PS2 **`+5 & 0xF`**, and the PS2 disc's data is laid out for the PS2: its 505 Dialogs have low nibbles 0 to 5 (51, 168, 21, 226, 37 and 2 of them), and 470 have high nibble 0. Nothing in TryDialog or SetDialog reads the high nibble. `+7`'s fields below are the PS2's.
 
-So `Sub - Add Resources`' Dialog (`+5` 0x01, type 0) shows a modal message after an Identify and waits for the player to close it. For a port: show the message, return "wait" until it's dismissed, then put the button in the result temp and take the true branch for OK or yes.
+### Operands
+
+| Operand | Meaning |
+|---|---|
+| `+0` u8 | Third button's label (Cancel) |
+| `+1` u8 | Icon number, for `+7` icon types 2 to 4 |
+| `+2` u8 | **Message** |
+| `+3` u8 | First button's label (OK or Yes). For types 1, 2 and 5, a line under the message |
+| `+4` u8 | Second button's label (No) |
+| `+5` bits 0-3 | **Type**, below |
+| `+6` u8 | **Title** |
+| `+7` bits 1-3 | Icon type: 0 and 1 none, 2 a neighbour's picture, 3 an object's thumbnail, 4 row `+1` of the `DialogIconTable` quickdata table. For 2 and 3, the neighbour or object ID is my local `+1` |
+| `+7` bits 4-6 | The temp that gets the button pressed |
+| `+7` bit 7 | Take strings from my semi-global row instead of my own |
+
+**String numbers.** Every string operand is a number in `STR#` 0x12D, counting from 1.
+- **0 means the default**: a button's built-in label, or nothing for the message and title.
+- **0xFE means empty.**
+- **0xFF means "from a temp".** Before anything else, TryDialog replaces a 0xFF in `+2` with temp 0 + 1, `+6` with temp 1 + 1, `+3` temp 2 + 1, `+4` temp 3 + 1 and `+0` temp 4 + 1. 16 Dialogs on the disc do this, all in `+2` or `+0`.
+- A number past the set's end, or a string of length 0, also gives the default.
+
+### Where the text comes from
+
+1. **The string set is always `STR#` 0x12D** (301, the dialog strings). SetDialog asks the smart-data factory for a `StringSet` (type `0x6BC37BC5`) and loads ID 0x12D.
+2. **Whose:** the namespace of the stack frame's `Behavior` (`StackElem +0x10`).
+   - That's its `ObjSelector +4`, my own `ResFile` row, or `+8`, my semi-global row, when `+7` bit 7 is set.
+   - Subroutine calls keep the caller's Behavior (`TreeSim::Gosub` copies it when it's given none). So a Dialog in a global or semi-global tree still reads the strings of the object whose tree started the stack.
+   - For the tutorial's steps that's the `tutorial` row; for `Intro Camera`, `scenario_first_playable`.
+3. **Where in the row:** `StringSet::Load` ignores the namespace it's handed. It asks the object folder (`0x21D8E8`) for the namespace's `ResFile` row: row number × 0x48 in the `ResFile` quickdata table, or the global row for the global namespace.
+   - It then finds the ID in **the row's `+0x14` vector**. Its 12-byte entries are like `+0x10`'s: a `VECTOR` of string pointers, a tag, and the ID in the low 16 bits.
+   - `+0x10` holds the other sets: 0x100 to 0x104, 0x12C, 0x12F and 0x1F5 to 0x1FC. **0x12D is only ever in `+0x14`.**
+   - On the disc, `tutorial`'s `+0x14` holds just 0x12D, with 47 strings; `scenario_first_playable`'s holds 20.
+4. **The string:** `GetLocString(n)` returns entry n − 1, or a null string for n ≤ 0 or past the end. An entry points into the **language image** (see world.md's QUICKDAT.ARC), and that slot points to the UTF-16 text, so a reader follows two pointers.
+5. **The language: always 0.**
+   - `ESimsApp::Init` (PS2, around `0x2FD510`) stores 0 at the quickdata manager's `+0xD38`, right after `InitManagerArcOffsets1`.
+   - That's the Wii's `SetCurrentLanguage(GetDefaultLanguage())` inlined. The Wii's `GetDefaultLanguage` returns 0, and its manager keeps the language at `+0xD44`.
+   - `EDatasetManager::AllocateAndLoadResource` (`0x4114F8`) passes `+0xD38` to every load, and no other code writes it.
+   - This settles world.md's open question: **language image 0 is the US English text**.
+6. **Tokens:** if the text isn't empty, `cXObject::ParseUIString` (`0x227200`) fills in its `$` tokens (below).
+   - The `<COLOR_…>`, `<BUTTON_xx>` and `<FONT_…>` tags aren't tokens: `AptParagraph::Build` (`0x3045D8`) reads them when the text is laid out.
+   - Which picture each `<BUTTON_xx>` number draws isn't read.
+
+### Buttons and types
+
+**Default labels** come from the `NewUIStrings` quickdata table, by key (`EGlobal::GetNewUIString`): `ok` "OK", `yes` "Yes", `no` "No", `cancel` "Cancel". Type 6 and up shows the title "WARNING: DEPRECATED DIALOG" and no message.
+
+| Type | Uses on the disc | Shown by (Wii names) | Buttons | TryDialog returns |
+|---|---|---|---|---|
+| 0 | 51 | `UIDialog::SpawnDialog`, modal | 1 (OK); 2 if `+4` isn't 0xFE; 3 if `+0` isn't 0xFE either. So `+4` and `+0` left at 0 give Yes, No and Cancel | **4 until answered** |
+| 1 | 168 | `H2DTarget::SpawnModelessDialog` | None. `+3` is a line under the message | 1, at once |
+| 2 | 21 | The same, with no timeout (`+0x18` = −1) | None | 1, at once |
+| 3 | 226 | `UIDialog::SpawnDialog`, modal | 1: `+3`, default "OK" | **4 until answered** |
+| 4 | 37 | `UIDialog::SpawnDialog`, modal | 2: `+3` default "Yes", `+4` default "No" | **4 until answered** |
+| 5 | 2 | `H2DTarget::SpawnIntroThoughtBalloon`, timeout 10,000 | None | 1, at once |
+
+**What TryDialog does**, in order:
+
+1. Replace the 0xFF operands from temps.
+2. **The player has answered** (the answer code at `0x4928A8` isn't 4):
+   - the button pressed goes into the `+7` result temp;
+   - the primitive returns the answer code, and the code goes back to 4;
+   - the UI's `EndDialog(bool)` sets the code to 1 or 0, so OK or Yes takes the true branch and No the false.
+3. A flow request is pending: return 1.
+4. **Skipped dialogs.** It first looks for a family member who is awake and visible.
+   - No one is, or the camera director's letterbox is up: type 4, and type 0 unless `+0` and `+3` are both 0xFE, set temp 0 to 0 and return 1.
+   - Types 1, 2 and 5 return 1 when no one is.
+5. Types 0 to 5 return 1 without showing anything when a global flag (`+0x37C` on the object at `0x50A6A8`) is set.
+6. Otherwise SetDialog shows it.
+   - Types 0, 3 and 4 **return 4**, and the node runs again every tick until the player answers (step 2).
+   - Types 1, 2 and 5 return 1.
+   - A SetDialog that fails returns 1.
+
+**For a port:**
+- Read the type as `+5 & 0xF`.
+- Show types 0, 3 and 4 as a box with buttons that waits.
+- Show types 1, 2 and 5 as a message that stays up while the tree carries on. It goes when GenericSimCall 0x2C (close modeless dialogs) runs or the player closes it.
+
+### Tokens
+
+`ParseUIString`'s tokens come from the PS2 string table at `0x4BA3E0`. What each becomes is read on Wii (`ParseUIString` and its helper `ParseOneString`), so it's likely.
+- A token can be followed by `:N`, and then by `:M` or `,M`. These are decimal numbers, −1 when absent.
+- "Local N" is the stack frame's local N.
+
+| Token | Becomes |
+|---|---|
+| `$Me` | My name: the Sim's first name, or the object's catalogue name |
+| `$Object` | The stack object's name, the same way |
+| `$Neighbor` | A neighbour's name, from the neighbourhood's selector |
+| `$NameLocal:N`, `$LastNameLocal:N` | The first or last name of the object whose ID is local N |
+| `$Local:N` | Local N as a number |
+| `$MoneyLocal:N`, `$PlayerFunds` | Local N, or the household's funds, as money |
+| `$TokenNameLocal:N` | The name of inventory token local N |
+| `$FoodName` | A food name, from two temps (`get_food_replacement_string`) |
+| `$LocationName`, `$LocationNameLocal:N` | A lot's name from `HouseData`: the current one, or number local N |
+| `$PlayerName` | The selected neighbour's name |
+| `$TimeLocal` | A time of day (`GetTimeString`) |
+| `$GS…` | A key's male or female form (`EGlobal::GetGenderString`), by whether the Sim is male |
+| `$JobName`, `$JobDesc`, `$JobTrackName` | Placeholders, such as "Temp name for Job.  Add code support." |
+
+None of the opening's dialog strings uses a token.
+
+### The opening's dialogs
+
+**Proven on the disc.** The text is exact; `\r\n` is the string's own line break.
+
+| Tree, node | `+2` message, `+6` title, type | Text |
+|---|---|---|
+| `Intro Camera` (scenario) n11, one castaway | 6, title 5, type 3 | Title "Your Sim has shipwrecked!"; message "Learn to survive.\r\nFind your way home." |
+| `Intro Camera` n10, more than one | 3, title 2, type 3 | Title "The Sims have shipwrecked!"; message "Find and unite your lost crew.\r\nHelp them get home." |
+| Step 3 `Read Survival Book` n1 | 4, type 4 | "It's <COLOR_FF0B0077> Moneywell's\r\n<COLOR_FF0B0077> Big_Book_of_Survival! This will help your Sim survive. \r\n\r\nDo you want to read it and play the tutorial?" |
+| Step 4 `Teach Navigation` n1 | 5, type 1 | "Survival Tip 1: Survey your Environment\r\n\r\nLook around using <BUTTON_04>. This will move the camera" |
+| Step 5 `Gather Supplies` n2 | 7, type 3 | "Survival Tip 2: Gather Supplies. Nature is bountiful. Find and harvest anything you can on the beach or off nearby trees." |
+| Step 6 `Learn Harvesting` n1 | 9, type 1 | "Gather supplies! Walk up to something and press <BUTTON_00>. If there is more than one action, use the <BUTTON_03>  to select one." |
+| Step 7 `Inventory` n1 | 0xA, type 1 | "See what your sim has gathered. Press <BUTTON_05> and choose "Inventory"" |
+| **Step 10 `Survival Basic 3: eat` n2** | **0x18, type 3** | **"Survival Tip 3: Eat! This is your Hunger motive. \r\n\r\nEating will keep it filled. If it reaches empty, the Sim will starve. Check your Hunger by pressing  <BUTTON_06> then find something to eat."** |
+| Step 11 `Basic - Eat` n5 | 0x19, type 1 | "Eat something. Try walking up to a coconut and selecting EAT, or go to the Inventory and see what food you already have." |
+
+- **Buttons.** All of these leave `+0`, `+3` and `+4` at 0, and `+6` too except for Intro Camera's titles. So the buttons are the defaults: OK for type 3, and Yes and No for step 3's type 4.
+- **The Wii-path twins** (step 10 n4 string 2, step 5 n3 string 0x20 and so on) say "point the Wii_Remote" instead.
+- **Later tips:** the tutorial's 47 strings also include them, for example sleep (0xC), the fire pit (0x10) and "Basic Survival Complete!" (0x14).
 
 ## SetBalloon (opcode 0x29)
 

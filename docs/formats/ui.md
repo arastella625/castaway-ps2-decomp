@@ -1,4 +1,4 @@
-# UI: the interaction menu
+# UI: the interaction menu and the HUD
 
 How the game places, sizes and fills the interaction menu: the Flash (Apt) movie
 `tsc5_interaction_menu`, driven by `ActionMenu`. Read on PS2, with Wii for the names. Addresses
@@ -234,9 +234,127 @@ so those objects show no icon. For example:
 They are the same pictures the action queue shows: `ActionQueue::SetIconObject` (`0x1A6238`) and
 `ActionQueue::Insert` call the same `GetShaderForObject`.
 
+## The HUD in live mode
+
+What's on screen while the game runs, and the values the game feeds it. **Proven** parts were read in PS2 code or found on the disc; the rest is labelled.
+
+### Where the layouts are
+
+**Proven.** Most HUD pieces are "screens" laid out by a table in the ELF, not by a movie.
+- **The table:** arrays of pointers to strings that spell out an XML-like layout, starting at `0x496A60`. For example: `<scr><scid>MOT</scid><x>60</x><y>23</y> … <sw><swid>MOT_bar0</swid><x>20</x><y>-15</y><sf>s2c_comp_motivebar.swf</sf></sw> …</scr>`.
+- **Tags:**
+  - `scr` / `scid`: a screen and its three-letter ID, which is also its target class (`MOTTarget` and so on).
+  - `c` / `cid`: a container.
+  - `sw` / `swid` / `sf`: a placed movie and its file.
+  - `s` / `sid`: a 2D or 3D picture slot.
+  - `t` / `tid`: text, `stv` its source (`getloc:` a localizable name, `qd:` a quickdata string).
+  - `gad`: a button.
+  - `b`: a controller binding.
+  - `x`, `y`, `w`, `h`: in the 640 × 448 stage, relative to the parent. `v` is visible at start.
+- **The 19 screens:** AQU, TUH, BBH, CRD, FCM, G2D, H2D, ITB, LSM, M2M, MDI, MOT, RMD, SSH, TRC, WAF, PPC and KNL, plus one with no ID.
+
+The HUD's own movie is **`tsc6_hud`**. It's the only movie on the disc that defines `hudMeter`, `hudTod` and `hudMoon`, the functions `MODTarget::UpdateMood` calls (below). Its other functions are `hudShow`, `hudHide`, `hudShowButtons`, `hudHideButtons`, `hudSetAlpha` and `hudResetWarning`; what calls them isn't read.
+
+| Piece | Screen or movie | Files (for `screens.py`) |
+|---|---|---|
+| Motives | `MOT` screen, at (60, 23), hidden at start | `tsc5_comp_sidepanel_bkg`, `s2c_comp_motivebar` ×8, one icon movie per motive (table below) |
+| Mood, time of day, moon, clouds, warning | `tsc6_hud` | `tsc6_hud` |
+| Game speed | `H2D` screen: three movies at (128, 344), all hidden at start | `s2c_comp_hud_pause`, `s2c_comp_hud_ff`, `s2c_comp_hud_sff` |
+| Wants and the aspiration meter | `WAF` screen, at (580, 23) | `tsc5_comp_sidepanel_bkg`, `tsc5_aspiration_meter`, `s2c_comp_wants_bkgd`, `s2c_comp_wantsfears_slotmachine`, `s2c_comp_wantsfears_bkgd_gold`. Not read further |
+| Relationships | `RSPTarget`, from `H2DTarget::Update` | `tsc5_rsp_relationships_sidebar`. Not read further |
+| Modal dialog | `G2D` screen | `tsc5_comp_dialogbox` |
+| Modeless message | `MDI` screen, likely | `tsc5_comp_dialogbox` |
+| Thought balloon (Dialog type 5) | `ITB` screen, likely | Picture slots only |
+
+### Motives (`MOTTarget`)
+
+**Proven on PS2** (`0x2AB808` to `0x2ABFD0`, helpers `0x2BE7A0` and `0x2BE978`), with Wii for the names.
+
+**Bars and motives.** `MapMotiveIDFromBar` (`0x2BE978`) gives each bar its motive:
+
+| Bar | Motive | Icon movie | Its unlock |
+|---|---|---|---|
+| 0 | 14 social | `s2c_comp_social` | 14 |
+| 1 | 9 bladder | `s2c_comp_bladder` | 11 |
+| 2 | 8 hygiene | `s2c_comp_hygene` | 12 |
+| 3 | 7 hunger | `s2c_comp_hunger` | 10 |
+| 4 | 15 fun | `s2c_comp_fun` | 13 |
+| 5 | 5 energy | `s2c_comp_energy` | 8 |
+| 6 | 6 comfort | `s2c_comp_comfort` | 9 |
+| 7 | 13 room | `s2c_comp_room` | 15 |
+
+In the layout, icon k is at (0, 38k) and bar k at (20, 38k − 15), inside a container at (−26, 5).
+
+**Value to bar** (`ReadMotiveBar`, `0x2BE7A0`). For the selected Sim:
+- The **level** is `round((motive + 100) × 0.05)`, rounding .5 down, clamped to 0 to 10. So −100 is 0, 0 is 5 and 100 is 10.
+- The **trend** is set only when the motive has moved 4 or more since the value last kept, which is then updated: 1 if it went up, 2 if down, otherwise 0.
+
+**What's drawn** (`MOTTarget::Update`):
+- **Pacing:** each bar is redrawn at most every fifth update, unless something forces a redraw.
+- **Catching up:** a bar shown at a different level moves one step towards the new level each time it's redrawn. When the gap is 4 or more, or the motives were just shown, it jumps straight there.
+- **Frame:** the bar movie goes to the frame label `a` + (group + shown level), with the group:
+  - **0** while the trend is up (`a0` to `a10`);
+  - **11** while it's down or the bar is catching up (`a11` to `a21`);
+  - **22** when steady (`a22` to `a32`).
+  - `s2c_comp_motivebar` has exactly these 33 labels. The groups' looks (arrows, colours) are the movie's, so which is which is likely.
+- **Icon:** the motive's icon movie goes to `a1` when the shown level is below 2 and `a0` otherwise. Each icon movie has just those two labels, so `a1` is likely the warning look.
+
+**Locked motives aren't drawn** (`ShowMotives`, `0x2AB9F0`):
+- **Hidden:** for each bar whose motive `UISimulatorSupport::IsMotiveUnlocked` (`0x2E9248`) says is locked, the icon and bar are made invisible.
+- **Packed:** the unlocked ones are packed at the bottom, 38 apart. With n unlocked, the first is at y = 304 − 38n and the last at 266, which is where bar 7's layout puts it.
+- **Background:** `MOT_bkg` is resized to fit, getting 114 + 38n and 279 − 38n, likely its height and y.
+- **In the opening:** the panel shows only what the tutorial has unlocked. Hunger appears at step 10 (see bhav.md, "The opening on the beach").
+
+A locked motive is held at 0 by `SimMotives`. If it were drawn, it would be a half bar, level 5.
+
+### Mood, time and moon (`MODTarget::UpdateMood`, `0x2F6068`)
+
+**Proven on PS2.** Each value is sent to `tsc6_hud` only when it changes, by calling a function in the movie with the number as a string (`AptViewer::NewCallFunction` on the viewer at `_globals +0x16C`).
+
+| Function | Value |
+|---|---|
+| `hudTod(n)` | **The time of day in 5-minute steps**, 0 to 287: (hour × 60 + minute) / 5, modulo 288 (`0x2F5CB0`). The hour and minute come from the clock object's `+0x38` and `+0x42`, or the lot's start time plus an offset table when that object is absent. The arithmetic is proven; the two fields are likely |
+| `hudMeter(n)` | `MODTarget +0xA8`, which `0x2FB390` sets from (the selected Sim's motive 3 + 100) × 0.5, so the mood as 0 to 100. Also stored as the UIDB int `MoodMeter`. What `0x2FB390` does on the way (rounding, smoothing) isn't read |
+| `hudMoon(n)` | The word at `+0x470` of the object at `0x50A6A4`. What it counts isn't read |
+
+The movie reads `HUD_meter`, `HUD_tod`, `HUD_moon`, `HUD_cloudy`, `HUD_warning_icon` and `HUD_warning_text` too. `MODTarget::SetWarning` is called from `MOTTarget::Update`, so the warning is likely a low motive.
+
+### Game speed (`H2DTarget::UpdateSpeedControls`, `0x2A0408`)
+
+**Proven on PS2.** It hides the previous state's movie and shows the new one:
+- 1 `H2D_fastforward_swf`;
+- 2 `H2D_veryfastforward_swf`;
+- 3 `H2D_pause_swf`;
+- 0 none.
+
+All three sit at (128, 344). Who passes which state is `DisplayFastForwardState` (Wii name), not read here.
+
+### Dialogs
+
+- **Modal** (Dialog types 0, 3 and 4):
+  - `UIDialog::SpawnDialog` (`0x2BB5B8`) calls `G2DTarget::SpawnDialog`. Proven.
+  - The `G2D` layout: `tsc5_comp_dialogbox.swf` full screen.
+  - Title `G2D_title` at (240, 120), 310 wide, font 14, colour `0x45479E`.
+  - Message `G2D_body` at (170, 145), font 12, colour `0x424242`.
+  - Up to three buttons `G2D_button0` to `2`, 128 × 36, 36 apart, labelled `G2D_sel0` to `2`.
+  - An icon at (144, 160), 48 × 48.
+- **Modeless** (types 1 and 2):
+  - `H2DTarget::SpawnModelessDialog` (`0x2BBBC8`) copies the title and message into a new record.
+  - The `MDI` layout (dialog box, title at (24, 24), body at (24, 38), icon at (32, 64)) fits, but the link isn't proven.
+- **Thought balloon** (type 5): `SpawnIntroThoughtBalloon` (`0x2BBB68`), likely the `ITB` screen.
+
+### The action queue
+
+**Likely, partly read:**
+- **Source:** the Sim's `ActionQueue` sends each visible action to `H2DTarget::AddAction` (`ActionQueue::AddActionToHUD`, Wii names). Each action carries its text and an icon shader, the object's `*_action_queue` texture (see "The icon box" above).
+- **No movie:** no movie on the disc names an action queue, so the HUD likely draws the icons itself.
+- **Not read:** where they go and how many show.
+
 ## Not read
 
 - **Inside the movie:** row height, which way the list grows, how many of the 12 names show, where
   the title, count and icon sit, and how the movie offsets the box from the point it's given and
   keeps it on screen. These are in `tsc5_interaction_menu`'s ActionScript and timeline. The
   game's code doesn't do any of them.
+- **HUD:** what each `<BUTTON_xx>` number in a string draws; the bar groups' looks; `hudMoon`'s value;
+  who calls `DisplayFastForwardState`; where the action queue draws; the `WAF` and `RSP` panels.
