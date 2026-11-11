@@ -231,12 +231,26 @@ n+0x14, pixels at 36, palette, and an 8-byte trailer of u32 width and height, eq
 8-bit with 256 colours and decode with `tools/texture.py`. Checked by eye on one: a sheet of stone buttons from
 `s2c_main_menu`. There are 1,192 Bitmap characters to 370 sheets.
 
-Scripts look like ActionScript bytecode with added opcodes, such as `0x96` push, `0x99` jump, and `0xA2`, `0xAE`, `0xB5`.
-Likely, not decoded. Font names in the Font characters are `Arial` (42), `Benguiat Gothic Medium` (33), `_sans` (6),
+**Scripts: AVM1 bytecode with EA's own opcodes, proven in length.** `apt.py check` sweeps all 2,060 frame and init
+actions on the disc, 123,801 instructions. Each ends exactly at its End, with no unknown opcode.
+- **Operands of 0x80 and up** are 4-byte aligned words, pointers into the `.apt`:
+  - ConstantPool (0x88) is a count and a list of `.const` indices.
+  - PushData (0x96) is a count and a list of `.const` indices, where type 4 is a register.
+  - DefineFunction (0x9B) and DefineFunction2 (0x8E) give name, parameters, body size and two marker words. Bodies
+    follow inline.
+- **EA's pushes are not aligned:** byte 0xB5, short 0xB6, float 0xB4, long 0xB7. Neither are the one-byte
+  constant-pool operands of 0xA2 (push), 0xAE (push variable), 0xAF (get member) and 0xB0 to 0xB3 (call by name).
+- **The names** are from memory of OpenSAGE's table, so **likely**. 0x59 and 0x5A are corrected to push 0 and 1 by
+  use: calls to `getVariable` and `logger` pass their one argument's count with 0x5A.
+- **Not swept:** clip actions (257 lists).
+
+`apt.py script <iso> <movie> <out.txt>` writes a listing with names resolved.
+
+Font names in the Font characters are `Arial` (42), `Benguiat Gothic Medium` (33), `_sans` (6),
 `Arial Black` (2), `Verdana` (1), none of them the two disc fonts by name.
 
 Open:
-- Bytecode: the opcode table, and the difference between Apt 6 and 7.
+- Bytecode: clip actions, and the difference between Apt 6 and 7.
 - Button layout, the Text's three middle words and the batch kind 6 line width.
 - Mask layers (clip depth, 41 placements): decoded, not applied by `render`.
 - The `*.wav` entry's role; perhaps a wildcard for sounds found elsewhere.
@@ -291,7 +305,38 @@ places nothing, so the scripts attach every piece at run time (`attachMovie`).
 - **The item bars:** `lib_itembar_left`, `_right` and `_dc` hold `highlight_mc`, a tinted gradient with `inactive`
   and `active` frames, `outliner_mc`, the 250 × 25 bar, and `it_mc` with `item_txt`.
 
-**Open:** where the scripts put the pieces, how far they stretch the panel, and how many bars they attach. The
-constants name what the scripts set (`itembar_height`, `itembar_width`, `preset_x`, `preset_y`, `_x`, `_y`,
-`_height`, `menuOrientation`), but the numbers are in bytecode, not decoded. A Godot scene can be built from the
-JSON trees; the arranging script has to be ported or rewritten.
+**The arrangement at run time.**
+
+- **Proven, the game's side.** On Wii, `ActionMenu::VisibilityCallfunction` calls `imuShow` with three strings: x
+  and y, the cursor target's screen position (`CURTarget::GetPosition`, (320, 254) without one), then the item
+  count. The game also answers `getVariable` for `IMU_DirectControl` and `IMU_IsWideScreen`.
+
+**The movie's side, read from the listing** (`apt.py script`). The numbers are pushed literals, so they're
+**proven**. My reading of the branches is by hand, so it's **likely**.
+
+- **`init`:**
+  - `itembar_height` 25, `itembar_width` 251.2;
+  - `itempane_max_width` 270, `itempane_max_height` 210;
+  - `x_cutoff_max` 640, `y_cutoff_max` 448;
+  - `max_selections` 6;
+  - `x_direct` and `y_direct` (640, 420), or (605, 385) when `_platform` is `GC`.
+- **`imuShow_local(x, y)`:**
+  - Clamps x to [20, 620] and y to [20, 420].
+  - In direct control, it uses (`x_direct`, `y_direct`) and attaches `lib_imu_dc`. Otherwise it attaches
+    `lib_imu_` + `getOrientation(x, y)`.
+  - Attaches as `im`, at depth 100.
+  - On `GC` in widescreen, adds 110 to x.
+  - Sets `im._x` and `im._y` to the point.
+- **`getOrientation(x, y)`:** `ul`, so the menu grows right and down from the cursor. It's `ur` if x + 270 > 640,
+  `ll` if y + 210 > 448, and `lr` if both.
+- **`updateItemPane`:** attaches up to 6 bars, `itembar_<i>_mc`, into `item_pane_mc`.
+  - **Which bar:** `lib_itembar_left` for left orientations; `lib_itembar_right` for right ones, or `lib_itembar_dc`
+    in direct control.
+  - **x:** `sidepanel_mid_mc._x + _width − 1` for left. For right, `_x + 1`, minus `_width` when the orientation
+    starts with `l`.
+  - **y:** steps of 25. The base is −13 (−15 in direct control), or min(count, 6) × 25 + 16 for upper orientations.
+    Each step is 25 × (i + 1), adding a further −25 or +25 by orientation.
+  - **The side panel:** its middle is stretched to fit the bars, and its top goes to frame `cvs` or `cvn`.
+  - **Text:** each bar's text key is `getloc:IMU_<NN>`, and the selected one is highlighted.
+
+A Godot scene can be built from the JSON trees, with this arrangement as its script.

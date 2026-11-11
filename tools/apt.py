@@ -6,6 +6,7 @@ Usage:
   python -I tools/apt.py find   <game.iso> <script name>
   python -I tools/apt.py export <game.iso> <movie> <out_dir>
   python -I tools/apt.py layout <game.iso> <movie> <out_dir> [label]
+  python -I tools/apt.py script <game.iso> <movie> <out.txt>
 
 Each FLASHES entry is an HSLF wrapper round a BIGF archive of <movie>.apt (characters and
 timelines), <movie>.const (the constants its scripts use), <movie>.geo (shape triangles and their
@@ -14,8 +15,8 @@ and placement a layout rests on. find names the movies whose constants hold a sc
 game calls into a movie by name, such as ActionMenu's imuSetBackdrop. export writes a movie's
 sheets as PNG and its header, exports, fonts and strings as JSON. layout writes each export as a
 node tree (JSON) and a picture (PNG); with a label such as refresh, an export is drawn at the
-frame before it. All of it is game data: keep it out of the repo. docs/formats/media.md has the
-format.
+frame before it. script writes a movie's ActionScript as a listing. All of it is game data: keep
+it out of the repo. docs/formats/media.md has the format.
 """
 import collections
 import json
@@ -459,6 +460,137 @@ def entries(disc):
     return sorted(arc.read_toc(disc, arc.find_archive(disc, ARCHIVE)), key=lambda e: e.name)
 
 
+# Scripts: AVM1 with EA's own opcodes. Names are as OpenSAGE has them (from memory); check proves the
+# lengths, by sweeping every action on the disc to its End. 0x59 and 0x5A push 0 and 1: getVariable and
+# logger calls pass their one argument's count with 0x5A. Operands of 0x80 and up are 4-byte aligned
+# words (pointers into the .apt) except EA's byte, short, float and long pushes, which follow at once.
+OPCODES = {
+    0x00: 'End', 0x04: 'NextFrame', 0x05: 'PrevFrame', 0x06: 'Play', 0x07: 'Stop', 0x08: 'ToggleQuality',
+    0x09: 'StopSounds', 0x0A: 'Add', 0x0B: 'Subtract', 0x0C: 'Multiply', 0x0D: 'Divide', 0x0E: 'Equals',
+    0x0F: 'Less', 0x10: 'And', 0x11: 'Or', 0x12: 'Not', 0x13: 'StringEquals', 0x14: 'StringLength',
+    0x15: 'StringExtract', 0x17: 'Pop', 0x18: 'ToInteger', 0x1C: 'GetVariable', 0x1D: 'SetVariable',
+    0x20: 'SetTarget2', 0x21: 'StringAdd', 0x22: 'GetProperty', 0x23: 'SetProperty', 0x24: 'CloneSprite',
+    0x25: 'RemoveSprite', 0x26: 'Trace', 0x27: 'StartDrag', 0x28: 'EndDrag', 0x29: 'StringLess',
+    0x2A: 'Throw', 0x2B: 'CastOp', 0x2C: 'ImplementsOp', 0x30: 'RandomNumber', 0x31: 'MBStringLength',
+    0x32: 'CharToAscii', 0x33: 'AsciiToChar', 0x34: 'GetTime', 0x35: 'MBStringExtract', 0x36: 'MBCharToAscii',
+    0x37: 'MBAsciiToChar', 0x3A: 'Delete', 0x3B: 'Delete2', 0x3C: 'DefineLocal', 0x3D: 'CallFunction',
+    0x3E: 'Return', 0x3F: 'Modulo', 0x40: 'NewObject', 0x41: 'DefineLocal2', 0x42: 'InitArray',
+    0x43: 'InitObject', 0x44: 'TypeOf', 0x45: 'TargetPath', 0x46: 'Enumerate', 0x47: 'Add2', 0x48: 'Less2',
+    0x49: 'Equals2', 0x4A: 'ToNumber', 0x4B: 'ToString', 0x4C: 'PushDuplicate', 0x4D: 'StackSwap',
+    0x4E: 'GetMember', 0x4F: 'SetMember', 0x50: 'Increment', 0x51: 'Decrement', 0x52: 'CallMethod',
+    0x53: 'NewMethod', 0x54: 'InstanceOf', 0x55: 'Enumerate2', 0x58: 'EA_0x58', 0x59: 'EA_PushZero',
+    0x5A: 'EA_PushOne', 0x5B: 'EA_0x5B', 0x5C: 'EA_CallFuncPop', 0x5D: 'EA_CallFunc',
+    0x5E: 'EA_CallMethodPop', 0x5F: 'EA_CallMethod', 0x60: 'BitAnd', 0x61: 'BitOr', 0x62: 'BitXor',
+    0x63: 'BitLShift', 0x64: 'BitRShift', 0x65: 'BitURShift', 0x66: 'StrictEquals', 0x67: 'Greater',
+    0x68: 'StringGreater', 0x69: 'Extends', 0x70: 'EA_PushThisVar', 0x71: 'EA_PushGlobalVar',
+    0x72: 'EA_ZeroVar', 0x73: 'EA_PushTrue', 0x74: 'EA_PushFalse', 0x75: 'EA_PushNull',
+    0x76: 'EA_PushUndefined',
+    0x81: 'GotoFrame', 0x83: 'GetURL', 0x87: 'SetRegister', 0x88: 'ConstantPool', 0x8A: 'WaitForFrame',
+    0x8B: 'SetTarget', 0x8C: 'GotoLabel', 0x8D: 'WaitForFrame2', 0x8E: 'DefineFunction2', 0x8F: 'Try',
+    0x94: 'With', 0x96: 'PushData', 0x99: 'BranchAlways', 0x9A: 'GetURL2', 0x9B: 'DefineFunction',
+    0x9D: 'BranchIfTrue', 0x9E: 'CallFrame', 0x9F: 'GotoFrame2',
+    0xA1: 'EA_PushString', 0xA2: 'EA_PushConstant', 0xA3: 'EA_PushWordConstant', 0xA4: 'EA_GetStringVar',
+    0xA5: 'EA_GetStringMember', 0xA6: 'EA_SetStringVar', 0xA7: 'EA_SetStringMember',
+    0xAE: 'EA_PushValueOfVar', 0xAF: 'EA_GetNamedMember', 0xB0: 'EA_CallNamedFuncPop',
+    0xB1: 'EA_CallNamedFunc', 0xB2: 'EA_CallNamedMethodPop', 0xB3: 'EA_CallNamedMethod',
+    0xB4: 'EA_PushFloat', 0xB5: 'EA_PushByte', 0xB6: 'EA_PushShort', 0xB7: 'EA_PushLong',
+    0xB8: 'EA_BranchIfFalse', 0xB9: 'EA_PushRegister',
+}
+OPERANDS = {
+    0x81: ['u32'], 0x83: ['str', 'str'], 0x87: ['u32'], 0x88: ['u32', 'ptr'], 0x8A: ['u32', 'u32'],
+    0x8B: ['str'], 0x8C: ['str'], 0x8D: ['u32'], 0x8E: ['str', 'u32', 'u32', 'ptr', 'u32', 'u32', 'u32'],
+    0x94: ['u32'], 0x96: ['u32', 'ptr'], 0x99: ['s32'], 0x9A: ['u32'], 0x9B: ['str', 'u32', 'ptr', 'u32', 'u32', 'u32'],
+    0x9D: ['s32'], 0x9F: ['u32'], 0xA1: ['str'], 0xA2: ['u8'], 0xA3: ['u16'], 0xA4: ['str'], 0xA5: ['str'],
+    0xA6: ['str'], 0xA7: ['str'], 0xAE: ['u8'], 0xAF: ['u8'], 0xB0: ['u8'], 0xB1: ['u8'], 0xB2: ['u8'],
+    0xB3: ['u8'], 0xB4: ['f32'], 0xB5: ['s8'], 0xB6: ['s16'], 0xB7: ['l32'], 0xB8: ['s32'], 0xB9: ['u8'],
+}
+ALIGNED_OPERANDS = {'u32', 's32', 'ptr', 'str'}
+UNALIGNED_FORMATS = {'u8': '<B', 's8': '<b', 'u16': '<H', 's16': '<h', 'f32': '<f', 'l32': '<i'}
+CONSTANT_OPERAND = {0xA2, 0xAE, 0xAF, 0xB0, 0xB1, 0xB2, 0xB3}  # a byte index into the ConstantPool
+CONST_REGISTER = 4
+ACTION_ITEM, INIT_ACTION_ITEM = 1, 8
+
+
+def instructions(code, pos, limit=200000):
+    """Sweep one action to its End: (offset, opcode, operands). Function bodies are inline."""
+    for _ in range(limit):
+        if not 0 <= pos < len(code):
+            raise arc.FormatError('Apt: a script runs past the end')
+        op = code[pos]
+        if op not in OPCODES:
+            raise arc.FormatError('Apt: unknown opcode %#x at %#x' % (op, pos))
+        start, pos, operands = pos, pos + 1, []
+        kinds = OPERANDS.get(op, [])
+        if any(k in ALIGNED_OPERANDS for k in kinds):
+            pos = (pos + 3) & ~3
+        for kind in kinds:
+            if kind in ALIGNED_OPERANDS:
+                value = struct.unpack_from('<i' if kind == 's32' else '<I', code, pos)[0]
+                operands.append(cstring(code, value) if kind == 'str' and value else value)
+                pos += 4
+            else:
+                fmt = UNALIGNED_FORMATS[kind]
+                operands.append(struct.unpack_from(fmt, code, pos)[0])
+                pos += struct.calcsize(fmt)
+        yield start, op, operands
+        if op == 0:
+            return
+    raise arc.FormatError('Apt: a script with no End')
+
+
+def script_entries(apt, movie):
+    """Where every frame action and init action starts, root and sprites. Clip actions are not read."""
+    out = []
+    count, character_at = u32(apt, movie + 20), u32(apt, movie + 24)
+    timelines = [('root', movie)] + [('sprite %d' % i, u32(apt, character_at + 4 * i)) for i in range(count)
+                                     if u32(apt, character_at + 4 * i)
+                                     and u32(apt, u32(apt, character_at + 4 * i)) == SPRITE]
+    for label, at in timelines:
+        frames, frame_at = u32(apt, at + 8), u32(apt, at + 12)
+        for frame in range(frames):
+            items, items_at = u32(apt, frame_at + 8 * frame), u32(apt, frame_at + 8 * frame + 4)
+            for index in range(items):
+                item = u32(apt, items_at + 4 * index)
+                if u32(apt, item) == ACTION_ITEM:
+                    out.append(('%s frame %d' % (label, frame), u32(apt, item + 4)))
+                elif u32(apt, item) == INIT_ACTION_ITEM:
+                    out.append(('%s frame %d init %d' % (label, frame, u32(apt, item + 4)), u32(apt, item + 8)))
+    return out
+
+
+def const_values(const):
+    """Every .const entry as text: strings quoted, registers as rN."""
+    count, table = u32(const, 24), u32(const, 28)
+    out = []
+    for i in range(count):
+        kind, value = u32(const, table + 8 * i), u32(const, table + 8 * i + 4)
+        out.append(repr(cstring(const, value)) if kind == CONST_STRING
+                   else 'r%d' % value if kind == CONST_REGISTER else 'type %d: %#x' % (kind, value))
+    return out
+
+
+def listing(name, parts, movie):
+    """A movie's scripts as text, constant-pool and PushData references resolved."""
+    apt, values, lines = parts[name + '.apt'], const_values(parts[name + '.const']), []
+    for label, at in script_entries(apt, movie):
+        lines.append('==== %s at %#x' % (label, at))
+        pool = []
+        for pos, op, operands in instructions(apt, at):
+            if op == 0x88:
+                pool = [values[u32(apt, operands[1] + 4 * i)] for i in range(operands[0])]
+                text = '%d entries' % operands[0]
+            elif op in CONSTANT_OPERAND:
+                text = pool[operands[0]] if operands[0] < len(pool) else 'pool %d?' % operands[0]
+            elif op == 0x96:
+                text = ', '.join(values[u32(apt, operands[1] + 4 * i)] for i in range(operands[0]))
+            elif op in (0x8E, 0x9B):
+                text = 'function %r, %d bytes' % (operands[0], operands[4] if op == 0x8E else operands[3])
+            else:
+                text = ' '.join(str(v) for v in operands)
+            lines.append('%06x  %-22s %s' % (pos, OPCODES[op], text))
+    return lines
+
+
 def layout_problems(name, parts, movie, sheets, totals):
     """Everything a layout rests on, for one movie: a list of what does not hold."""
     problems = []
@@ -481,6 +613,12 @@ def layout_problems(name, parts, movie, sheets, totals):
                 if item['type'] == 'place':
                     totals['placements'] += 1
                     problems += ['character %d: %s' % (character, p) for p in place_problems(item, chars)]
+    for label, at in script_entries(parts[name + '.apt'], movie):
+        try:
+            totals['script instructions'] += sum(1 for _ in instructions(parts[name + '.apt'], at))
+            totals['scripts swept'] += 1
+        except (arc.FormatError, struct.error) as error:
+            problems.append('%s: %s' % (label, error))
     for export_name, character in movie_info(parts[name + '.apt'], movie, name)['exports']:
         try:
             node(chars, shapes, character)
@@ -556,7 +694,11 @@ def check(disc):
                             struct.pack_into('<I', apt, item + 4, u32(apt, item + 4) & ~HAS_MATRIX)
                             return bytes(apt)
             raise arc.FormatError('no scaled placement in %s (%d characters)' % (name, len(chars)))
+        def bad_opcode(apt):  # the root's first action begins with an opcode Apt doesn't have
+            apt[script_entries(bytes(apt), movie)[0][1]] = 0x02
+            return bytes(apt)
         passed &= caught('a UV rectangle moved one texel', name + '.geo', shift_uv)
+        passed &= caught('a script starting with an unknown opcode', name + '.apt', bad_opcode)
         passed &= caught('a scaled placement without its matrix flag', name + '.apt', drop_matrix_flag)
     print('failures: %d' % len(failures))
     for failure in failures[:10]:
@@ -619,6 +761,15 @@ def layout(disc, movie, out_dir, label=None, scale=2.0):
     return 0
 
 
+def script(disc, movie, out_path):
+    _, _, parts, at = read_movie(disc, movie_entry(disc, movie))
+    lines = listing(movie, parts, at)
+    with open(out_path, 'w', encoding='utf-8') as out:
+        out.writelines(line + '\n' for line in lines)
+    print('wrote %s: %d lines' % (out_path, len(lines)))
+    return 0
+
+
 def main(argv):
     if len(argv) == 3 and argv[1] == 'check':
         return check(arc.Disc(argv[2]))
@@ -626,6 +777,8 @@ def main(argv):
         return find(arc.Disc(argv[2]), argv[3])
     if len(argv) == 5 and argv[1] == 'export':
         return export(arc.Disc(argv[2]), argv[3], argv[4])
+    if len(argv) == 5 and argv[1] == 'script':
+        return script(arc.Disc(argv[2]), argv[3], argv[4])
     if len(argv) in (5, 6) and argv[1] == 'layout':
         return layout(arc.Disc(argv[2]), argv[3], argv[4], *argv[5:])
     print(__doc__)
