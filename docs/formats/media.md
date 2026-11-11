@@ -185,8 +185,46 @@ proven by its fields, and Font by the names it holds. Exactly one Background per
 type and u32 value. Type 1 (13,989) is a string offset, holding script names like `getVariable`, `SELECT`, `DPAD_UP`.
 Type 4 (16,907) is open, likely a register.
 
-`.geo`: `Apt PCGL geometry file\x1A\0`, then a u32 that equals the Shape count in all 147. Binary, with floats visible.
-Layout open.
+`.geo`: `Apt PCGL geometry file\x1A\0`, then pointer-linked records, offsets from the member's start. **Proven** on
+all 147 by `apt.py check`:
+
+- **Header:** shape count, shape table offset, bitmap count, bitmap table offset.
+- **Bitmap table:** pairs of bitmap character number and sheet number (`001.tgq` is 1). That's how a Bitmap
+  selects its sheet.
+- **Shape table:** rows of shape character number (always the Shape's own number, in all 1,223), batch count, and
+  an offset to that many batch offsets.
+- **Batch:** u32 kind, count, vertex offset, ARGB colour. Vertices are x, y float pairs in the shape's own space.
+  - **Kind 1:** solid triangles, count triangles (69 batches).
+  - **Kind 6:** line segments, count segments of two points: outlines (30).
+  - **Kind 5:** textured triangles (1,199). It adds a 4×4 matrix (GL column order) from shape space to bitmap pixels,
+    the bitmap's character number, a zero word, and the bitmap's UV rectangle on its sheet, 0x68 bytes in all.
+- **The textured fit:** the UV rectangle is the bitmap's area on the sheet, half a texel in from each edge. So the
+  bitmap's top left is (u0 × width − 0.5, v0 × height − 0.5), and its size is the rectangle plus one texel. On all
+  1,199 textured batches, the matrix maps the batch's points onto exactly 0 to that size, within 0.05 px. A shape
+  stretches a 1- or 2-pixel strip by giving the matrix a small scale, such as 0.012.
+- **Rows:** V counts rows as stored, with v = 0 the first stored row. `texture.rgba` flips rows for PNG, so a
+  renderer samples `texture.stored_rgba`. Checked by eye: with the flip, the item bar drew arrow icons.
+- **Bounds:** every point lies inside its Shape character's bounds.
+
+The `.apt` records a layout needs. **Proven** by the same check, 0 failures:
+
+- **Shape (1):** type, signature, bounds (left, top, right, bottom floats), geometry number.
+- **Text (2):** type, signature, bounds, font character, alignment (0, 1 or 2; likely left, right, centre), ARGB
+  colour, size, three words, initial text offset, variable name offset. The menu's title holds the placeholder
+  text `Victorian Love Seat`.
+- **Sprite (5):** type, signature, frame count, frames offset, one word.
+- **PlaceObject (3), 64 bytes:**
+  - Fields: type, flags, depth, character, matrix a b c d, tx, ty (floats), ARGB colour multiply, ARGB colour add,
+    ratio, name offset, clip depth, clip actions offset.
+  - Flags are SWF PlaceObject2's: move 1, character 2, matrix 4, colour transform 8, ratio 0x10, name 0x20, clip depth
+    0x40, clip actions 0x80.
+  - **The check:** on all 19,301 placements in every timeline, sprites included, each field without its flag holds
+    its default: identity matrix, multiply `ffffffff`, add 0, no name, clip depth −1. Each placed character exists.
+  - **The matrix:** x' = a·x + c·y + tx, y' = b·x + d·y + ty. **Likely** for b and c, which are 0 in nearly all
+    placements. Mirrored pieces use a = −1 or d = −1.
+- **Colour transforms:** multiply `00ffffff` (alpha 0) is how a piece starts hidden and fades in, as in
+  `lib_imu_*`.
+- **RemoveObject (4):** type, depth. **FrameLabel (2):** type, name offset, then two words.
 
 `.tgq`: a texture without a name. `TXFL` in reading order, 16 zero bytes, then the same fields as an archive texture from
 n+0x14, pixels at 36, palette, and an 8-byte trailer of u32 width and height, equal to the header in all 370. All 370 are
@@ -198,10 +236,9 @@ Likely, not decoded. Font names in the Font characters are `Arial` (42), `Bengui
 `Arial Black` (2), `Verdana` (1), none of them the two disc fonts by name.
 
 Open:
-- `.geo` layout, and how a Bitmap selects its sheet and region. Bitmap numbers exceed the `.tgq` count in 139 files,
-  so the number is not a plain sheet index.
 - Bytecode: the opcode table, and the difference between Apt 6 and 7.
-- PlaceObject, Sprite, Text and Button layouts.
+- Button layout, the Text's three middle words and the batch kind 6 line width.
+- Mask layers (clip depth, 41 placements): decoded, not applied by `render`.
 - The `*.wav` entry's role; perhaps a wildcard for sounds found elsewhere.
 - Font name mapping; `AptAuxPCEorGL_Initialize` takes an `AptAuxFontList`.
 - For the port this needs an Apt interpreter, or a conversion to Godot scenes plus a script port. SWF tools won't read it.
@@ -209,6 +246,17 @@ Open:
 `tools/apt.py` reads all of this: `check` reads all 147 (1,223 shapes, 1,192 bitmaps, 1,182 sprites, 381 texts, 84
 fonts, 950 exports, 370 sheets, 0 failures) and rejects a cut file and a wrong tag; `find` names the movies whose
 constants hold a script name; `export` writes a movie's sheets as PNG with its header, exports, fonts and strings.
+`check` also proves the `.geo` and PlaceObject decoding above on all 147. Its two controls break the interaction menu:
+a UV rectangle moved by one texel, and a scaled placement with its matrix flag cleared. Each is caught.
+
+`layout` writes each export, and `_root` (what frame 0 places), as a node tree in JSON:
+- **Sprites:** children by depth, each with its name, matrix, colour transform and its own frame labels with frame
+  numbers.
+- **Shapes:** their batches, each with its sheet and pixel region.
+- **Texts:** font, size, colour and alignment.
+
+`layout` also draws each tree to PNG (nearest texel, texts as their box only). With a label, such as `refresh`, it
+draws each export that has the label at the frame before it.
 
 ### The interaction menu
 
@@ -228,4 +276,22 @@ constants hold a script name; `export` writes a movie's sheets as PNG with its h
   `imuSetBackdrop`, `imuShowCount`, `imuHideCount`, `imuScrollArrowEnable`, `imuObjectButtonEnable`, `imuClearList`.
   It calls back through `IMU_ShowCallback`, `IMU_HideCallback` and `IMU_RefreshCallback`.
 
-**Open:** where each piece sits. That's in the `.geo` shapes and the PlaceObject records, neither decoded.
+**Each piece's layout is proven** (`apt.py layout <iso> tsc5_interaction_menu <dir> refresh`). The root timeline
+places nothing, so the scripts attach every piece at run time (`attachMovie`).
+
+- **`lib_imu_dc`** at its shown frame, 10, the frame before `refresh`, reads as the menu:
+  - `titlebar_mc`, a title pill: `tb_mid` and two `tb_end` caps, one mirrored.
+  - `bkg_mid_mc`, an oval backdrop, with frames labelled `green` and `red`.
+  - `IMU_icon`, a 59 × 59 black square at 0.63 scale. **Likely** the slot for the object's picture.
+  - `hc_mc`, a count bubble holding `count_txt`.
+  - `item_pane_mc`, a column of side panel top, middle (stretched 54×) and bottom.
+  - Four arrows, hidden at alpha 0, with frames `inactive`, `on` and `active`.
+  - `mask1_mc`, a mask.
+- **`lib_imu_ul`, `_ur`, `_ll` and `_lr`:** the same parts arranged for each corner, with the side panel unstretched.
+- **The item bars:** `lib_itembar_left`, `_right` and `_dc` hold `highlight_mc`, a tinted gradient with `inactive`
+  and `active` frames, `outliner_mc`, the 250 × 25 bar, and `it_mc` with `item_txt`.
+
+**Open:** where the scripts put the pieces, how far they stretch the panel, and how many bars they attach. The
+constants name what the scripts set (`itembar_height`, `itembar_width`, `preset_x`, `preset_y`, `_x`, `_y`,
+`_height`, `menuOrientation`), but the numbers are in bytecode, not decoded. A Godot scene can be built from the
+JSON trees; the arranging script has to be ported or rewritten.
