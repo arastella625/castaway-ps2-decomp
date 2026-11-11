@@ -2561,8 +2561,7 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         me->Pickup();
         other->Pickup();
         FTilePt tile;
-        tile.mX = -0x10;
-        tile.mY = -0x10;
+        tile.Set(-1, -1);
         if (me->CanPlace(tile, 1, theirs, 0))
             me->Place(tile, 1, theirs, 0);
         if (other->CanPlace(tile, 1, mine, 0))
@@ -2597,10 +2596,14 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
     case 0x03: {
         // Only for the selected Sim: asks the game flow for state 0x20.
         cXPerson *person = GetObjectFromID(elem->mStackObject)->GetPerson();
-        OBJECT_ERROR_CHECK(person, 0x1c);
-        OBJECT_ERROR_CHECK(person == _globals.GetSelectedPerson(), 0x14);
-        StateMachineFlow::SetFlowRequest((StateMachineFlow::eGameState)0x20);
-        break;
+        if (person) {
+            if (person == _globals.GetSelectedPerson()) {
+                StateMachineFlow::SetFlowRequest((StateMachineFlow::eGameState)0x20);
+                break;
+            }
+            OBJECT_ERROR_CHECK(0, 0x14);
+        }
+        OBJECT_ERROR_CHECK(0, 0x1c);
     }
     case 0x02: {
         // The stack object becomes the icon of my current action, if it has an ID.
@@ -2872,9 +2875,11 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         // Aspiration points: neighbourhood variables 0xC and 0xD hold them as low and high
         // halves of ten thousand. t0 is added, up to 999,999.
         Neighborhood *neighbors = GetNeighborhood();
-        int total = neighbors->mVars[0xd] * 10000 + neighbors->mVars[0xc] + mTemps[0];
-        if (total > 999999)
-            total = 999999;
+        int max = 999999;
+        int total = neighbors->mVars[0xc] + neighbors->mVars[0xd] * 10000 + mTemps[0];
+        if (total < max)
+            max = total;
+        total = max;
         neighbors->mVars[0xc] = total % 10000;
         neighbors->mVars[0xd] = total / 10000;
         break;

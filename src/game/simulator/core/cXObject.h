@@ -35,6 +35,16 @@ public:
 
     FTilePt() {}
 
+    // Wii: Set. Each coordinate is a Wii FInt, the integer above 4 bits of fraction:
+    // SetInteger keeps the fraction, then SetFrac clears it.
+    void Set(int x, int y)
+    {
+        mX = (mX & 0xf) | (x << 4);
+        mX = (mX & ~0xf) | (0 & 0xf);
+        mY = (mY & 0xf) | (y << 4);
+        mY = (mY & ~0xf) | (0 & 0xf);
+    }
+
     int SquareDist(const FTilePt &other) const
     {
         int dx = other.mX - mX;
