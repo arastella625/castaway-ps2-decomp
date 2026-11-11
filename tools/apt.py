@@ -286,18 +286,32 @@ def node(chars, shapes, character, frame=0, depth_path=()):
         out['frames'] = len(entry['frames'])
         out['labels'] = {item['name']: index for index, items in enumerate(entry['frames'])
                          for item in items if item['type'] == 'label'}
-        out['children'] = []
-        for depth, placed in sorted(display_list(entry['frames'], frame).items()):
-            if placed['character'] is None:
-                continue
-            if depth_path.count(placed['character']) or len(depth_path) > 32:
-                raise arc.FormatError('character %d places itself' % character)
-            child = node(chars, shapes, placed['character'], 0, depth_path + (character,))
-            child.update(depth=depth, name=placed['name'], matrix=list(placed['matrix']),
-                         multiply='%08x' % placed['multiply'], add='%08x' % placed['add'])
-            if placed['clip_depth'] != NO_CLIP:
-                child['clip_depth'] = placed['clip_depth']
-            out['children'].append(child)
+        out['children'] = children(chars, shapes, entry, frame, depth_path + (character,))
+        # Where each label's run of frames settles: the frame before the next label, or the last.
+        # A script's gotoAndPlay(label) ends there, if the run stops at its end (likely).
+        starts = sorted(set(out['labels'].values()))
+        out['states'] = {}
+        for label, start in out['labels'].items():
+            later = [f for f in starts if f > start]
+            settled = (later[0] if later else out['frames']) - 1
+            out['states'][label] = {'frame': settled, 'children': children(
+                chars, shapes, entry, settled, depth_path + (character,))}
+    return out
+
+
+def children(chars, shapes, entry, frame, depth_path):
+    out = []
+    for depth, placed in sorted(display_list(entry['frames'], frame).items()):
+        if placed['character'] is None:
+            continue
+        if depth_path.count(placed['character']) or len(depth_path) > 32:
+            raise arc.FormatError('character %d places itself' % depth_path[-1])
+        child = node(chars, shapes, placed['character'], 0, depth_path)
+        child.update(depth=depth, name=placed['name'], matrix=list(placed['matrix']),
+                     multiply='%08x' % placed['multiply'], add='%08x' % placed['add'])
+        if placed['clip_depth'] != NO_CLIP:
+            child['clip_depth'] = placed['clip_depth']
+        out.append(child)
     return out
 
 

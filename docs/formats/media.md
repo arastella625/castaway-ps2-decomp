@@ -240,8 +240,16 @@ actions on the disc, 123,801 instructions. Each ends exactly at its End, with no
     follow inline.
 - **EA's pushes are not aligned:** byte 0xB5, short 0xB6, float 0xB4, long 0xB7. Neither are the one-byte
   constant-pool operands of 0xA2 (push), 0xAE (push variable), 0xAF (get member) and 0xB0 to 0xB3 (call by name).
-- **The names** are from memory of OpenSAGE's table, so **likely**. 0x59 and 0x5A are corrected to push 0 and 1 by
-  use: calls to `getVariable` and `logger` pass their one argument's count with 0x5A.
+- **The names** are from memory of OpenSAGE's table, so **likely**. Four are corrected by use:
+  - **0x59 and 0x5A push 0 and 1.** Calls to `getVariable` and `logger` pass their one argument's count with 0x5A.
+  - **0xB1 (call by name) and 0xB3 (call method by name) store their result** in the variable named beneath the
+    arguments: EA's fused `x = f(...)`. Across the disc nothing after them ever takes a result. Read as a plain call,
+    `imuShow_local` ends with `menuOrientation` and its value still on the stack, and attaches `lib_imu_` with no
+    corner (the control in `apt_run.py check`).
+  - **0x70 pushes `this`** (`this.lockInput = true`, `this.getVariable(...)`).
+- **Branches** count from the end of the branch instruction. All 6,484 on the disc land on an instruction start.
+- **DefineFunction2's third word** is the register count (low byte) and AVM1's flags (high 16 bits; 0x01 preloads
+  `this` into r1). Its parameter list is pairs of register and name.
 - **Not swept:** clip actions (257 lists).
 
 `apt.py script <iso> <movie> <out.txt>` writes a listing with names resolved.
@@ -311,8 +319,15 @@ places nothing, so the scripts attach every piece at run time (`attachMovie`).
   and y, the cursor target's screen position (`CURTarget::GetPosition`, (320, 254) without one), then the item
   count. The game also answers `getVariable` for `IMU_DirectControl` and `IMU_IsWideScreen`.
 
-**The movie's side, read from the listing** (`apt.py script`). The numbers are pushed literals, so they're
-**proven**. My reading of the branches is by hand, so it's **likely**.
+- **Proven on Wii, which piece.** `IMU_DirectControl` is `ActionMenu` byte 0x1B9. It's set to 1 only when
+  `InteractorManager` has a player interactor, the Wii pointer. Without one the menu takes the cursor corners.
+  **Likely** that's what the PS2 does; its build isn't read.
+
+**The movie's side, run:** `tools/apt_run.py` executes the scripts on stand-in clips. The stand-ins are built from the
+layout trees, with `_width` and `_height` from the shapes' bounds (**likely** as Flash measures them). The numbers
+below come from that run, and `apt_run.py check` tests them with a control. `apt_run.py menu` writes every case
+(4 corners and dc, 0 to 12 items, every scroll offset: 170 cases) to JSON, which the port's
+`scenes/ui/interaction_menu.tscn` applies.
 
 - **`init`:**
   - `itembar_height` 25, `itembar_width` 251.2;
@@ -329,14 +344,30 @@ places nothing, so the scripts attach every piece at run time (`attachMovie`).
   - Sets `im._x` and `im._y` to the point.
 - **`getOrientation(x, y)`:** `ul`, so the menu grows right and down from the cursor. It's `ur` if x + 270 > 640,
   `ll` if y + 210 > 448, and `lr` if both.
-- **`updateItemPane`:** attaches up to 6 bars, `itembar_<i>_mc`, into `item_pane_mc`.
-  - **Which bar:** `lib_itembar_left` for left orientations; `lib_itembar_right` for right ones, or `lib_itembar_dc`
-    in direct control.
-  - **x:** `sidepanel_mid_mc._x + _width − 1` for left. For right, `_x + 1`, minus `_width` when the orientation
-    starts with `l`.
-  - **y:** steps of 25. The base is −13 (−15 in direct control), or min(count, 6) × 25 + 16 for upper orientations.
-    Each step is 25 × (i + 1), adding a further −25 or +25 by orientation.
-  - **The side panel:** its middle is stretched to fit the bars, and its top goes to frame `cvs` or `cvn`.
-  - **Text:** each bar's text key is `getloc:IMU_<NN>`, and the selected one is highlighted.
+- **`updateItemPane`:** attaches up to 6 bars, `itembar_<i>_mc`, into `item_pane_mc`, at depth 50 + i.
+  - **Which bar:** `lib_itembar_left` in `ul` and `ll`, `lib_itembar_right` in `ur` and `lr`, `lib_itembar_dc` in
+    direct control.
+  - **Positions, in the pane:**
 
-A Godot scene can be built from the JSON trees, with this arrangement as its script.
+    | Piece | Bar x | Bar 0 y, then each next bar |
+    |---|---|---|
+    | `ul` | 44.4 | 25n + 16, then 25 less (n = bars shown) |
+    | `ur` | −38.4 | 25n + 16, then 25 less |
+    | `ll` | 44.35 | −63, then 25 less |
+    | `lr` | −31.6 | −63, then 25 less |
+    | `dc` | −31.6 | −65, then 25 less |
+
+  - **Order:** item 0 is the bottom bar in every corner, and the list grows upward. Bar i shows item offset + i.
+  - **The side panel:** its middle is stretched to fit the bars: 25n − 43 tall in `ul` and `ur`, 25n − 45.6 in `ll`
+    and `lr`, +3 in `dc`. Its top moves to the end. With 0 or 1 items that height is negative, so the panel
+    closes: the middle is set 15 tall and hidden, and so is the bottom. In the lower corners and `dc`, the top goes to
+    frame `cvs` when closed and `cvn` when open; the upper corners don't change its frame.
+  - **Highlight:** the bar showing the selected item, by absolute index, goes to frame `active`. Its gradient's tint
+    settles at `00a7f155` (green), against `00b2d1c9` (pale teal) for the others.
+- **Scroll arrows:** with more than 6 items, `arrow_up_mc` shows while items lie above the top bar, and
+  `arrow_dn_mc` while offset > 0. 12 items at offset 0, 3 and 6 give up only, both, and down only.
+- **The pointer** (`ptr_mc`) goes to the selected bar's `_y + _height / 2`, but stays at alpha 0 in every case run.
+
+**Open:** text and icon fill-in (`getloc:IMU_<NN>`, `IMU_icon` of type `CCR2D`), the show and hide animations, and
+`selectButton` and `doInput`'s exact navigation. The port maps up to the next item (up the screen) and down to the
+previous one, which is **likely**.
