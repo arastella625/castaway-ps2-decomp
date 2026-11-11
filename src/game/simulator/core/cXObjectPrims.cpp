@@ -2530,7 +2530,7 @@ inline void EnableBuyAndBuild(ObjectModule *module, cXObject *object)
 // Primitive 1: GenericSimCall, a switch on the s16 at +0 with its operands in my temps.
 // Not matched, but every call is written. The cases are in the game's order, which is proven:
 // GCC lays the bodies out as the source has them, and the jump table at 0x4BA900 sorted by
-// address gives that order. 2,341 words against the game's 2,388, 1,904 of them lined up.
+// address gives that order. 2,349 words against the game's 2,388, 1,955 of them lined up.
 // docs/formats/bhav.md has what each call does, and Wii's TryGenericSimCall names nearly every
 // function they call.
 long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
@@ -2561,8 +2561,7 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         me->Pickup();
         other->Pickup();
         FTilePt tile;
-        tile.mX = -0x10;
-        tile.mY = -0x10;
+        tile.Set(-1, -1);
         if (me->CanPlace(tile, 1, theirs, 0))
             me->Place(tile, 1, theirs, 0);
         if (other->CanPlace(tile, 1, mine, 0))
@@ -2597,10 +2596,14 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
     case 0x03: {
         // Only for the selected Sim: asks the game flow for state 0x20.
         cXPerson *person = GetObjectFromID(elem->mStackObject)->GetPerson();
-        OBJECT_ERROR_CHECK(person, 0x1c);
-        OBJECT_ERROR_CHECK(person == _globals.GetSelectedPerson(), 0x14);
-        StateMachineFlow::SetFlowRequest((StateMachineFlow::eGameState)0x20);
-        break;
+        if (person) {
+            if (person == _globals.GetSelectedPerson()) {
+                StateMachineFlow::SetFlowRequest((StateMachineFlow::eGameState)0x20);
+                break;
+            }
+            OBJECT_ERROR_CHECK(0, 0x14);
+        }
+        OBJECT_ERROR_CHECK(0, 0x1c);
     }
     case 0x02: {
         // The stack object becomes the icon of my current action, if it has an ID.
@@ -2778,7 +2781,9 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         if (!person)
             return 0;
         gEORGlobals->SetSelectedPerson(person);
-        return person == gEORGlobals->mPlayerPerson;
+        if (person == gEORGlobals->mPlayerPerson)
+            return 1;
+        return 0;
     }
     case 0x21:
         return ShowAllObjectDialogs(elem, primParam);
@@ -2786,6 +2791,7 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         // Opens Create-a-Sim for neighbour t2 on lot t1 (flow state 8), keeping the selected
         // Sim to come back to. While the HUD's transition target is 3 it returns 2.
         s16 selected = 0;
+        s16 neighbor = mTemps[2];
         if (_globals.mPlayerPerson)
             selected = _globals.mPlayerPerson->GetNeighborID();
         HUDTarget *hud = _gd.mHudTarget;
@@ -2796,7 +2802,7 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
             break;
         }
         UIDB::UIDBSetInt("CAS_mode", 1);
-        UIDB::UIDBSetInt("CAS_neighborID", mTemps[2]);
+        UIDB::UIDBSetInt("CAS_neighborID", neighbor);
         UIDB::UIDBSetInt("CAS_CurrentGameTime", GetSimulator()->mGameTime);
         UIDB::UIDBSetInt("CAS_lotnumber", mTemps[1]);
         UIDB::UIDBSetInt("PlayerNumber", 0);
@@ -2872,9 +2878,11 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         // Aspiration points: neighbourhood variables 0xC and 0xD hold them as low and high
         // halves of ten thousand. t0 is added, up to 999,999.
         Neighborhood *neighbors = GetNeighborhood();
-        int total = neighbors->mVars[0xd] * 10000 + neighbors->mVars[0xc] + mTemps[0];
-        if (total > 999999)
-            total = 999999;
+        int max = 999999;
+        int total = neighbors->mVars[0xc] + neighbors->mVars[0xd] * 10000 + mTemps[0];
+        if (total < max)
+            max = total;
+        total = max;
         neighbors->mVars[0xc] = total % 10000;
         neighbors->mVars[0xd] = total / 10000;
         break;
@@ -3217,8 +3225,11 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
     }
     case 0x27: {
         // AutoFood picks a food from t1, t2 and t3. True if it found one.
+        s16 t1 = mTemps[1];
+        s16 t2 = mTemps[2];
+        s16 t3 = mTemps[3];
         AutoFood food;
-        if (food.AutonomousFoodSelection(mTemps[1], mTemps[2], mTemps[3]))
+        if (food.AutonomousFoodSelection(t1, t2, t3))
             return 1;
         return 0;
     }
