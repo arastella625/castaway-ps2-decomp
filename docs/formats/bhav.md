@@ -976,21 +976,21 @@ Then 0x18 and the end. So for the port: **a Sim can pick an object up when its h
 
 1. Person data 0xA set: `Motives::Cleanup` only. Otherwise `Motives::Sim` (`0x1FEA60`), which ends with `Cleanup`.
 2. Unless I'm a chimp or a boar, while any motive is still locked (`GoalUnlock::AreAnyMotivesLocked`, vtable slot 18), **each locked motive is held at 0** every tick (`IsLocked(4, n)`, slot 3; this used to say "set", but the slot is Wii's `IsLocked`): 8 motive 5, 9 motive 6, 0xA motive 7, 0xB motive 9, 0xC motive 8, 0xD motive 15, 0xE motive 14, 0xF motive 13.
-3. `CalcHappy` (`0x1ADF30`).
+3. `CalcHappy` (`0x1ADF30`): mood, motive 3. See "Mood" below.
 
 **`Motives::Sim`.** The `Motives` object is at Sim `+0x13C`; its `+0x44 + 4k` is motive k (Sim `+0x180`), and its first 16 floats are the decay rates. Each run (every 60 ticks), with `R(i)` = rate i / 720:
 
 | Motive | Change per run |
 |---|---|
 | 5 | `R(s + 3)` |
-| 6 | `R(s + 1)` × (1 + rain level + wind level). Likely, Wii: no rain under a roof, and rain gear scales it down |
+| 6 | `R(s + 1)` × (1 + rain + wind). See "Motive 6 and the weather" below |
 | 7 | `R(s)`. In family 1 (neighbour person data 0x28 is 1), at -90 or below it's a tenth of that (`/7200`). In any other family it never goes below -75 |
 | 8 | `R(s + 4)` |
 | 9 | `R(s + 2)` |
 | 13 | Set to the current room's environment score (`RoomManager::GetRoomEnvironmentScore`), unless the room is 0xFFFB |
 | 14 | `R(s + 5)` |
 | 15 | `R(s + 6)` |
-| 0 | Likely, Wii: above a threshold it loses the "aspiration decrement" share each tick |
+| 0 | Above -80, loses `aspiration decrement` (0.1) / 150 each run. See "Motive 0" below |
 
 `s` is 0 normally and **8 while motive 11 is below 0**: a second set of rates, where motive 5 rises fast (+540), so motive 5 behaves like energy and a negative motive 11 like sleep. **`Cleanup` clamps every motive to -100..100.**
 
@@ -1010,6 +1010,69 @@ where pdN is the neighbour's person data N and the trait names are Wii's (`sMoti
 | Neat × pd6/1000 | | | | | -75 | | | | | | | |
 
 Rates 0 to 6 are the normal set, 8 to 12 the set while motive 11 is below 0 (13 and 14 are 0). So an average-personality castaway (traits 500) loses motive 7 at (-184 - 25) / 720 = 0.29 a run, so 8.7 a game hour (30 runs), or about 23 game hours from 100 to -100.
+
+**Mood: `CalcHappy`** (`0x1ADF30`). **Proven, PS2.** Mood is motive 3 (Sim `+0x18C`). It's a **weighted mean of ten motives**, each weighted by a curve of its own value:
+
+> mood = Σ (motive × weight(motive)) / Σ weight(motive)
+
+- **Which curves, by Sim type** (`0x1DD428`): 0 uses the curve set at `0x5101C8`, 1 the set at `0x510298`, and 5 the set at `0x510368`. Types 2 to 4 reach no set, and above 5 mood isn't updated.
+- **Where the curves come from.** `0x1A6F90` fills each set the first time:
+  - the motive of curve k is entry k of `0x4B8858`: **5, 6, 7, 9, 8, 14, 15, 13, 10, 12**;
+  - `MotiveCurveSet::LoadFromFile` (`0x1FF120`) reads the points from the global object's string set: **`0x1F6`** for type 0, **`0x1FC`** for type 1, **`0x1F8`** for type 5. String k is curve k's points, as text `(x;y) (x;y) …`, parsed by `PiecewiseFn::AddPointsFromText`.
+- **The lookup** is linear between points. At or below the first x it's the first y, and above the last x it's the last y.
+
+Set `0x1F6`, weight against the motive's value, from the disc:
+
+| Curve | Motive | Points (value; weight) |
+|---|---|---|
+| 1 | 5 | (-100;0) (-60;5) (-40;3) (0;1) (100;1) |
+| 2 | 6 | (-100;10) (-80;3) (-40;1) (100;1) |
+| 3 | 7 | (-100;15) (-60;5) (-40;3) (0;1) (100;1) |
+| 4 | 9 | (-100;10) (-80;3) (-60;1) (100;1) |
+| 5 | 8 | (-100;5) (-80;3) (-40;1) (100;1) |
+| 6 | 14 | (-100;5) (-40;2) (40;2) (100;3) |
+| 7 | 15 | (-100;5) (-40;2) (40;2) (100;5) |
+| 8 | 13 | (-100;2) (0;1) (100;2) |
+| 9 | 10 | (-100;0) (100;0) |
+| 10 | 12 | (-100;0) (100;0) |
+
+So a motive weighs more the lower it gets: a starving motive 7 counts 15 times as much as a full one. Motives 10 and 12 don't count. **Sets `0x1F8` and `0x1FC`** are identical to each other. They give motive 5 no weight, and they change:
+- motive 6: (-100;10) (-80;3) (-40;1) (0;1) (100;3);
+- motive 8: (-100;12) (-80;3) (-40;1) (100;1);
+- motive 14: (-100;7) (-40;2) (40;1) (100;3);
+- motive 13: none;
+- motive 10: (-100;10) (-80;3) (-60;1) (100;2).
+
+Which type the castaways are is likely 0 (see the Sim's type above).
+
+**Motive 6 and the weather** (`Motives::Sim`, `0x1FEC50` to `0x1FEEC4`). **Proven, PS2**, with Wii's names (`WeatherManager`, `cFixedWorld::HasRoof`, `cXPerson::GetRainCarry`):
+
+1. Start with rain = 0 and wind = 0. If it's raining (`0x356908`, Wii `IsRaining`):
+   - rain = the weather manager's (`0x50A6A4`) rain level `+0x9C`;
+   - wind = its wind level `+0x80`, unless wind is disabled (`0x123C70`, or bit 0 of the flags at `+0x108`).
+2. **In a room.** If either is above 0 and my variable 0x1D, my room, isn't 0, it looks up the room (`0x1DFEA0`, Wii `RoomManager::GetRoom`). If the room's first word is above 0:
+   - its second word above 0 gives no rain and no wind;
+   - otherwise the wind is halved.
+   Likely these mean "enclosed" and "roofed".
+3. **Under a roof.** If rain is still above 0 and my tile is inside the lot (x from 1 to width − 2, y likewise), a tile with a roof (`HasRoof`, bit 3 of the tile's flags) gives no rain.
+4. **Carrying rain cover.** If rain is still above 0, `GetRainCarry` (Sim `+0x218`) = 1 multiplies it by 0.75, and 2 by 0.5.
+5. Motives `+0x54` = rain, and **motive 6 changes by R(s + 1) × (1 + rain + wind)**.
+
+**Where the levels come from.** They are whole numbers set by `SetRainLevel` and `SetWindLevel`, from the current weather state's sequence. On Wii, `SetWeatherState` takes the wind from the sequence entry's `+8` and the rain from its `+0xC`; the RoomEffect primitive can set them too. The states are quickdata table `WeatherState`: each row is a vector of 0x24-byte sequence entries, starting with a duration and a variance (likely game seconds). From the disc:
+
+| State | Stages: duration ± variance, wind, rain |
+|---|---|
+| `clear` | 21600 ± 1800, 0, 0 |
+| `rainy` | 3600 ± 1800, 1, 0 · 3600 ± 600, 1, 4 · 5400 ± 1800, 1, 1 |
+| `stormy` | 14400 ± 2400, 2, 0 · 14400 ± 600, 2, 3 · 14400 ± 2400, 2, 1 |
+| `hurricane` | 21600 ± 3600, 2, 0 · 21600 ± 10800, 3, 0 · 10800 ± 900, 4, 4 · 1800 ± 300, 0, 0 · 9900 ± 300, 4, 4 · 21600 ± 900, 3, 2 · 21600 ± 900, 2, 1 |
+
+So an unsheltered castaway in a rainy state's peak (wind 1, rain 4) loses motive 6 six times as fast as in clear weather. How the next state is chosen (`ChooseNewWeatherState`) isn't read.
+
+**Motive 0: the aspiration decrement** (`Motives::Sim`, `0x1FEF10`). **Proven, PS2.** Each run, if motive 0 is above -80 it loses `aspiration decrement` × 1/150 (`0x3BDA740F`).
+- `aspiration decrement` is the float at `0x510960`. A tuning loader (`0x1FE380`, slot 2 of the vtable at `0x4BB1E8`) reads it by name with a default of 0.1.
+- `SimsObjects` quickdata holds the same name with **0.1**, next to `aspiration mood bonus ratio` 0.3, `aspiration points per meter point` 12.5, `sleepiness multiplier` 7 and the other motive tunings. So it's 0.1 either way.
+- **So motive 0 loses 0.1 / 150 ≈ 0.00067 a run**, about 0.02 a game hour, and stops at -80.
 
 **The `SetMotiveDelta` list** is applied after `SimMotives`, entry by entry (motive, change, limit; the change is already per tick): a negative change lowers the motive only while it's above the limit, and stops at the limit; a positive one raises it only while it's below, and stops at the limit.
 
