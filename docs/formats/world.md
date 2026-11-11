@@ -677,9 +677,10 @@ ones have slot 4, and none is unlit without it. 1,575 use multi-shaders, which t
 
 **Proven, a second pass.** Most ground shaders have two passes. The second is `terrain_grass_noise_detail`
 or similar with ALPHA 0x64, so `mix(first pass, second pass, FIX / 128)`, FIX being 12 to 32 on ground (96 on `new_sand`, which mixes in `floor_sand`).
-UV source 4 is the mesh's own UVs through the pass's scale. **Likely** `uv * scale`, not `uv / scale`:
-0.24 repeats the noise about every 20 m and hides the base texture's tiling, but the code that builds
-that matrix wasn't followed to the multiply. `placed.py lot` writes this pass as `occlusionTexture`
+UV source 4 goes through the pass's matrix (scale, then offset; see "UV sources" below). **Correction,
+proven on Wii, likely on PS2:** Wii generates source 4 from the vertex position (`GX_TG_POS`), not the
+mesh's UVs. So `uv * scale`, which the port uses, is likely wrong for this pass; position × 0.24 would
+repeat the noise about every 4 units. Not changed this round. `placed.py lot` writes this pass as `occlusionTexture`
 plus `extras`, because glTF has no such layer.
 
 **Proven, draw order.** `UpdateShaderFlags` calls `IsAlphaShader`, which is `IsAlphaPass` on the first
@@ -851,12 +852,19 @@ their caustics (FIX 14) and then `water_ocean` (FIX 19), both on the mesh's own 
 writes an additive second pass in `emissiveTexture` (factor 0) with `extras.gs_blend2`, and the port
 draws it as a second additive pass.
 
-**Proven, `fogPlane` is drawn wrong, not fixed.** On lots 11, 12, 18 and 22, `lot_fog` and `lot_mist`
-have a first pass that writes no colour (0x4A), then Cs x Ad + Cd (0x58) with a second texture on UV
-source 5, which isn't decoded. The port draws the first pass's alpha texture as a solid cut-out,
-which shows white shapes. Adding it by its own alpha blew out to white, so that's not committed.
-`oceanSparkle` has the same two registers with one texture, so the name rule's additive drawing
-matches it (**likely**, if pass 0 writes the frame's alpha).
+**`fogPlane`, decoded.** On lots 11, 12, 18 and 22, `lot_fog` and `lot_mist` have two passes.
+- **Pass 1 (0x4A)** keeps the screen's colour. The GS still writes the source alpha, the fog shape's
+  texture alpha times the vertex alpha, into the frame buffer.
+- **Pass 2** reads that as Ad:
+  - `lot_fog` (0x58) adds Cs × Ad;
+  - `lot_mist` (0x54) mixes by it.
+- **Its texture** is on UV source 5: the mesh's UVs, scrolled at (0.06, 0.03) for `lot_fog` and at (0.05, 0.05)
+  with scale (0.4, 1) for `lot_mist`.
+
+`placed.py lot` writes that second pass as `extras.gs_blend2` with `uv_scale`, `uv_offset` and
+`uv_scroll`. The port draws both passes as one material: the first texture's alpha weights the second,
+scrolling texture. **Proven** in the formula, **likely** in the look: the frame buffer alpha before
+pass 1 doesn't matter here, but whether the GS's FBA or alpha test changes the written alpha wasn't read.
 
 #### What shows where list 3 was the only ground
 
@@ -928,10 +936,37 @@ A pass:
 | 0xB | f32 | -1.4 on some; a mipmap bias? | Open |
 | 0xF | u8 | The GS ALPHA register | Proven |
 | 0x10 | u8 | ALPHA's FIX, 128 being 1.0 | Proven |
-| 0x12 | u8 | UV source: 0 the mesh's, 3 reflection (every `reflection_*`), 4 scaled, 5 and 6 scrolled | 3 and 4 by shape |
-| 0x18 | f32 x 2 | UV scroll speed | Likely |
-| 0x20 | f32 x 2 | UV scale | Likely |
-| 0x28 | f32 x 2 | UV offset | Likely |
+| 0x12 | u8 | UV source, below | Proven |
+| 0x18 | f32 x 2 | UV scroll speed | Proven |
+| 0x20 | f32 x 2 | UV scale | Proven |
+| 0x28 | f32 x 2 | UV offset | Proven |
+
+**UV sources, proven.** On Wii, `ERShader::CopyShedData` copies a pass to memory, 0x38 bytes:
+- file 6 → memory 0xE;
+- the source at 0x12 → 0x1A;
+- scroll, scale and offset at 0x18, 0x20 and 0x28 → 0x20, 0x28 and 0x30.
+
+The PS2 code reads the same offsets with the same stride.
+
+- **At load** (`ERShader::DoLoad` on Wii, 0x4479E4 on PS2), a pass with a nonzero scroll speed gets bit 0x40 of
+  byte 6, and source 0 becomes 5, source 1 becomes 6. No shader on the disc has that bit or source 1 stored. 4 passes
+  store 5; 41 store 0 with a speed, such as `rainstreaksModerate`, and become 5.
+- **Each frame,** `EShader::Update(dt)` adds dt × speed to the pass's position for bit 0x40, wrapped into
+  [−1, 1] (**likely** dt in seconds).
+- **The matrix,** built for every pass by Wii's `ENgcRenderer::SetShader` and PS2's 0x42B9F8:
+  `Translate(position)` (or identity), `PreTranslate(offset)`, `PreScale(scale)`. With `EMat4`'s row
+  vectors that is `uv × scale + offset + position`. PS2 source 4 can also turn it by 45° when pass byte 0x13
+  is set (its constant 0x3F350481 is cos 45°).
+- **What reads it,** Wii's `SetupTextureCoordinateGeneration`, by memory byte 0x1A:
+  - **4:** from the position (`GX_TG_POS`), through the matrix.
+  - **5:** from UV set 0, through the matrix.
+  - **6:** from UV set 1, through the matrix.
+  - **1:** UV set 1, untransformed.
+  - **2 and 3:** UV set 0, untransformed.
+  - **Others:** a default case, not read.
+- **PS2:** it passes mode 0, 2 and 3 for sources 4, 5 and 6 to the draw. That those modes mean the same
+  sets is likely; the VU side wasn't read. Source 3 is still a reflection by its shaders' names, so its
+  environment mapping is elsewhere.
 
 ALPHA is four two-bit fields, `(A - B) * C + D`, the GS's own. `IsAlphaPass` reads it as such, and
 `SetupFinalBlendMode` switches on it: 0x44 is ordinary alpha, 0x54 uses the screen's alpha, 0x64 mixes

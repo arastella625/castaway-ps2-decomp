@@ -372,22 +372,30 @@ def add_detail_pass(builder, library, material, shader):
 
 
 def add_second_pass(builder, library, material, shader):
-    """Write an additive second pass, like the sea's water_ocean over its caustics.
+    """Write a second pass the GS blends over the first, like the sea's water_ocean over its
+    caustics, or fogPlane's scrolling mist over the alpha its first pass writes.
 
     Its texture rides in emissiveTexture with a zero emissiveFactor, so a reader that knows
-    nothing of it adds nothing, and extras.gs_blend2 says how the GS mixes it.
+    nothing of it adds nothing, and extras.gs_blend2 says how the GS mixes it. A pass on UV
+    source 5 adds its UV transform: uv * scale + offset + scroll * seconds, wrapped.
     """
     if len(shader.passes) < 2:
         return
-    layer = shader.passes[1]
-    if (not layer.flags & mdl.PASS_BLEND_FLAG or layer.alpha != mdl.ALPHA_ADD or not layer.fix
-            or layer.uv_source != shader.passes[0].uv_source
+    first, layer = shader.passes[:2]
+    added = layer.alpha == mdl.ALPHA_ADD and layer.fix and layer.uv_source == first.uv_source
+    by_screen = (first.alpha == mdl.ALPHA_KEEP and layer.uv_source == mdl.UV_SCROLLED
+                 and first.uv_source == 0
+                 and layer.alpha in (mdl.ALPHA_ADD_BY_SCREEN, mdl.ALPHA_MIX_BY_SCREEN))
+    if (not layer.flags & mdl.PASS_BLEND_FLAG or not (added or by_screen)
             or layer.texture_hash not in library.textures):
         return
     material['emissiveTexture'] = {
         'index': add_texture(builder, library.read_texture(layer.texture_hash))}
     material['emissiveFactor'] = [0.0, 0.0, 0.0]
     material['extras']['gs_blend2'] = {'alpha': layer.alpha, 'fix': layer.fix}
+    if by_screen:
+        material['extras']['gs_blend2'].update(
+            uv_scale=list(layer.uv_scale), uv_offset=list(layer.uv_offset), uv_scroll=list(layer.uv_scroll))
 
 
 def add_material(builder, library, shader_hash, cache, layers=False):
