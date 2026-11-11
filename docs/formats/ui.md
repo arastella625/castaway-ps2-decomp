@@ -107,7 +107,7 @@ registers the sound callbacks `IMU_SndOpen` to `IMU_SndRefresh`.
 |---|---|
 | `IMU_exists` | `"loaded"` |
 | `IMU_DirectControl` | `"1"` if `ShowMenu` found a direct-control interactor (`+0x1AC`), else `"0"` |
-| `IMU_draw_one` | `"1"` if `+0x1A8`, else `"0"`. Set by the menu builder (`0x324D78`) when the object's interactions fall into 3 or more top-level groups. Wii's equivalent is `Set2LineMoreEnable(true)`. Likely |
+| `IMU_draw_one` | `"1"` if `+0x1A8`, else `"0"`. Set by the menu builder (`0x324D78`) when the object has 3 or more top-level entries and the caller asks for it. The list is then cut to its first interaction. Wii's equivalent is `Set2LineMoreEnable(true)`. See "How the item list is built and ordered" |
 | `IMU_show_arrow_left` | `IMU_DirectControl`'s value if `+0x1BC` is set, else `"0"` |
 | `IMU_show_arrow_right` | `IMU_DirectControl`'s value if `+0x1B8` is set, else `"0"` |
 | `IMU_title` | The object's name (a Sim's own name for a person) |
@@ -138,6 +138,45 @@ and where, is in the movie.
 Both are ignored while `+0x164` is 0, or while a check at `0x2BB290` on `0x514F1C` is true.
 `ShowMenu` and `DoRefresh` clear `+0x164`. What sets it again isn't read: likely the movie's
 `IMU_RefreshCallback` once it has redrawn, so a port can accept input once a refresh is done.
+
+## How the item list is built and ordered
+
+The steps are **read on Wii** (`FlashPiMenu`, `ObjTestSim`, `ActionMenu::MenuItem`). PS2's builder makes the same calls in the same order (`0x324D78` and `0x3250B0` below), and the draw-one and sort steps are checked on PS2. Likely overall, with the PS2-checked parts marked.
+
+**1. The interactions, in tree table order.** `CollectInteractionsForObject(object, list, max)` (PS2 `0x34B150`) asks `ObjTestSim::AppendInteractionsForMenu` once per tile of a multi-tile object. Each call walks the object's tree table **from entry 0 upward**, runs each entry's check tree (`RunMenuCheckTree`) and **appends** (`push_back`) every interaction that passes and isn't hidden. The interaction's name can be one the check tree made with MakeActionString. One extra goes first: when the target is another Sim and my current action's entry allows joining, an interaction built from that action is tried before entry 0. **So the list's order is the tree table's entry order**, tile by tile.
+
+**2. Draw-one** (`AddObjectInteractionsToMenu`; **proven, PS2** `0x324D78` on).
+- **Count:** with more than 2 interactions, it counts the menu's top-level entries, stopping at 3. Each interaction without a `/` counts as one. Each new group (the name before the first `/`, searched from the second character) counts as one, though only the first two groups are remembered.
+- **3 or more, with the caller's flag set:** the list is collected again with a **maximum of 1**, and `IMU_draw_one` (Wii `Set2LineMoreEnable`) is set to 1.
+- **Otherwise** it's 0.
+
+So an object with 3 or more top-level entries, when the caller asks for it, shows **only its first interaction** plus the movie's "more".
+
+**3. One submenu per object.** Unless the caller says it's the only object, everything goes inside a submenu named after the object (`GetObjectMenuName`, PS2 `0x3495D8`). `AddMenu` reuses an existing child with the same name and object.
+
+**4. Grouping: `CreateInteractionMenu`** (PS2 `0x3250B0`). Repeat until the list is empty:
+
+1. **Take the first remaining interaction.** Its group is the text before its first `/`; with no `/`, it's the whole name.
+2. **The group's colour** is the highest-priority text colour among the interactions in that group.
+3. **With a `/`,** `AddMenu` opens the group as a submenu titled with that text.
+4. **Sweep the list from the start:**
+   - **Two slashes** (`Group/Sub/Item`): it opens a nested submenu `Sub`, adds **every** `Group/Sub/…` interaction to it in list order, removes them, closes it, and restarts the sweep.
+   - **One slash in this group,** or no slash when the group itself has none: it's added as an item labelled with the text after the `/` (or the whole name) and removed.
+5. **Close the group submenu.**
+
+The resulting order:
+- **Groups appear in the order of their first member.**
+- **Within a group,** items keep tree table order, except that a nested submenu sits where its first member was and gathers all its members.
+- **Ungrouped interactions all appear together,** at the place of the first one.
+
+**Adding is appending.** `AddSubItem` walks to the end of the current submenu and inserts there, so item 0 of each menu is the first one added.
+
+**5. The selected Sim last** (`SortSelectedSimToBottom`; called from `ShowMenu` on the root, PS2 `0x2C3120` with the root at `+0x90`).
+- **What it does:** it finds the item whose object is the selected Sim and moves it to the **end** of the list.
+- **Where it applies:** the root list, and recursively only the first item's submenu.
+- **When it matters:** in a menu of several objects, where each object is a submenu, so the selected Sim's own entry ends up last.
+
+**Item text.** Each label is wrapped in a colour tag for the movie, `<COLOR_FFrrggbb>` (format at PS2 `0x4D95F0`). The colour comes from the table at `0x4D9608`: colour 1 `1AAF2B` (green), 2 `F5F500` (yellow), 3 `911A12` (red), 4 `808080` (grey); colour 0 has no tag. On PS2 a coloured label also has its spaces replaced by `_` (`0x3252E8`). Likely the movie turns them back.
 
 ## The icon box
 
