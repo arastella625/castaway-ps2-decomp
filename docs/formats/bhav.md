@@ -944,7 +944,7 @@ The result is true unless an operation below says otherwise.
 | `+3` bits 1, 2 | Influence on me, on the stack object. See below |
 | `+3` bits 3 to 6 | Type, with 0 meaning 1 |
 
-The change is the value times 1/1800, so it's per tick.
+The change is the value times 1/1800, so it's per tick: a game hour is 1,800 ticks, so the value is the change per game hour (see "Time").
 
 **On a non-Sim**, neither influence bit is -1 at once. With one set, it goes to `PassiveInfluenceSystem`: clear all calls `ClearInfluenceMotiveDeltas`, and otherwise `SetInfluenceMotiveDelta` records motive, change, limit and type for that object.
 
@@ -970,7 +970,7 @@ Then 0x18 and the end. So for the port: **a Sim can pick an object up when its h
 
 ## Motives over time
 
-**Proven, PS2**, with Wii for the names. Each tick `cXPerson::Simulate` (PS2 `0x1AD954` on) runs `SimMotives` (`0x1ADD48`), adds one to person data 8 (it wraps to 0 at 0x8000), and then applies the `SetMotiveDelta` list.
+**Proven, PS2**, with Wii for the names. `cXPerson::Simulate` (PS2 `0x1AD8E0`) runs `SimMotives` (`0x1ADD48`) **only every 60 ticks** (when the tick count reaches `+0x214` + 60; this used to say every tick), that is every 2 game minutes. Every tick it adds one to person data 8 (it wraps to 0 at 0x8000) and applies the `SetMotiveDelta` list. See "Time" for how long a tick is.
 
 **`SimMotives`** does nothing unless my variable 0x22 is 0 and I'm in the world. Then:
 
@@ -978,9 +978,9 @@ Then 0x18 and the end. So for the port: **a Sim can pick an object up when its h
 2. Unless I'm a chimp or a boar, while any motive is still locked (`GoalUnlock::AreAnyMotivesLocked`, vtable slot 18), **each locked motive is held at 0** every tick (`IsLocked(4, n)`, slot 3; this used to say "set", but the slot is Wii's `IsLocked`): 8 motive 5, 9 motive 6, 0xA motive 7, 0xB motive 9, 0xC motive 8, 0xD motive 15, 0xE motive 14, 0xF motive 13.
 3. `CalcHappy` (`0x1ADF30`).
 
-**`Motives::Sim`.** The `Motives` object is at Sim `+0x13C`; its `+0x44 + 4k` is motive k (Sim `+0x180`), and its first 16 floats are the decay rates. Each tick, with `R(i)` = rate i / 720:
+**`Motives::Sim`.** The `Motives` object is at Sim `+0x13C`; its `+0x44 + 4k` is motive k (Sim `+0x180`), and its first 16 floats are the decay rates. Each run (every 60 ticks), with `R(i)` = rate i / 720:
 
-| Motive | Change per tick |
+| Motive | Change per run |
 |---|---|
 | 5 | `R(s + 3)` |
 | 6 | `R(s + 1)` × (1 + rain level + wind level). Likely, Wii: no rain under a roof, and rain gear scales it down |
@@ -1009,9 +1009,92 @@ where pdN is the neighbour's person data N and the trait names are Wii's (`sMoti
 | Outgoing × pd5/1000 | | | | | | -100 | | | | | | |
 | Neat × pd6/1000 | | | | | -75 | | | | | | | |
 
-Rates 0 to 6 are the normal set, 8 to 12 the set while motive 11 is below 0 (13 and 14 are 0). So an average-personality castaway (traits 500) loses motive 7 at (-184 - 25) / 720 = 0.29 a tick.
+Rates 0 to 6 are the normal set, 8 to 12 the set while motive 11 is below 0 (13 and 14 are 0). So an average-personality castaway (traits 500) loses motive 7 at (-184 - 25) / 720 = 0.29 a run, so 8.7 a game hour (30 runs), or about 23 game hours from 100 to -100.
 
 **The `SetMotiveDelta` list** is applied after `SimMotives`, entry by entry (motive, change, limit; the change is already per tick): a negative change lowers the motive only while it's above the limit, and stops at the limit; a positive one raises it only while it's below, and stops at the limit.
+
+## Time: ticks, the game clock and game speed
+
+**Proven, PS2**, with Wii for the names, unless marked likely.
+
+**Real time to game time: `cSimulator::Simulate`** (`0x1BF008`, Wii `Simulate__10cSimulatorFv`) runs once a frame:
+
+1. `UpdateSpeed` (`0x1E0C50`) sets the speed multiplier `+0x98`, below.
+2. `ms = min(dt × 1000, 66.67)`, where `dt` is the global float at `0x49FDC4` (see "Frame time" below).
+3. Unless paused, the accumulator `+0xA0` gets `ms × multiplier`. It's capped at **2,520**: the excess is taken back out of `ms`.
+4. `dt` becomes `ms × 0.001`, and the true dt is kept at `+0xA4` (`RestoreTrueDt`, `0x1E0948`, puts it back).
+5. Unless paused: **while the accumulator is at least 42, take 42 off it and run `SimulateOneTick`** (`0x1BEF10`). If that pauses the game, the accumulator is emptied.
+6. Paused: `SimulateOneTick` runs once, for the objects allowed to run while paused, and no game time passes.
+
+So **one tick is 42 ms of real time at 1×**: 1000 / 42 = **23.8 ticks a second**, whatever the frame rate.
+- **Low frame rates:** below 15 frames a second, frames are capped at 66.67 ms, so the game slows down.
+- **Backlog:** at most 60 ticks (2,520 ms) can be waiting.
+- **At 60 frames a second**, a tick runs every 2 or 3 frames: 0.4 ticks a frame.
+
+**Frame time.** `0x49FDC4` starts as 1/60. Each frame the engine's timer (`0x3E2E68` on) counts the vertical blanks since the last frame, from 1 to 15, and sets dt to that count × the frame period. That period is **1/60** (`0x3C888889`), or **1/50** (`0x3CA3D70A`) when the flag at `0x500638` is 1, likely the PAL setting. Another mode, chosen by a flag at the timer's `+8` that its constructor clears, uses a 3-frame average of the measured time instead. Likely the first mode is the one used. Either way **dt is real time**, so ticks follow the clock, not frames.
+
+**A tick: `SimulateOneTick`** (`0x1BEF10`).
+- **`TickAllObjects`** (`0x1BF1B8`) walks every object ID from a cursor kept at `+0xC4`.
+  - **Asleep:** an object with idle status above 0 has it counted down (the Idle primitive's sleep).
+  - **Otherwise:** the object's `Simulate` (vtable `+0x60`) runs, with the tick count.
+  - **A failed `Simulate`:** stops the walk at once, returns false, and the next tick resumes at that object.
+  - **While paused:** only objects flagged to run while paused are run, and it returns false.
+- **If it returned true:** the tick count `+0x9C` goes up by 1, and `UpdateGameTime(2)` (`0x1BF480`) runs.
+- **Then, every tick:** the passive influence check, `PlanManager::Update` and `ObjectModule::PostSim`.
+
+**The game clock: `UpdateGameTime(2)`.** Each tick adds **2 game seconds** to global 6, unless the one-shot flag at `0x49240C` says to skip once.
+
+| Global (simulator `+0x38` + 2n) | Unit | Rolls over at |
+|---|---|---|
+| 6 (`+0x44`) | seconds | 60 (`0x4B6710`) |
+| 5 (`+0x42`) | minutes | 60 (`0x4B670E`) |
+| 0 (`+0x38`) | hour | 24 (`0x4B670C`) |
+| 1 (`+0x3A`) | day of the month, from 1 | above 28 (`0x4B6706`). Each new day also adds 1 to global 0x1C (`+0x70`) and calls `ObjectModule::DayChanged` |
+| 7 (`+0x46`) | month, from 1 | above 12 (`0x4B6708`) |
+| 8 (`+0x48`, likely: Wii adds a year after month 12) | year | |
+
+So **a game minute is 30 ticks** (1.26 s at 1×), a game hour 1,800 ticks (75.6 s), and a day 43,200 ticks (30.24 minutes).
+
+This agrees with the trees' own unit: SetMotiveDelta's change is the value × 1/1800 a tick, so its value is **per game hour**. The game starts at hour 9 (global 0x18).
+
+**Time of day.** Likely (Wii, `GameTime::ComputeTimeOfDay` on the hour):
+
+| Hour | Value |
+|---|---|
+| Below 6 | 2 (night) |
+| 6 | 3 (dawn) |
+| 7 to 17 | 0 (day) |
+| 18 | 1 (dusk) |
+| 19 on | 2 (night) |
+
+I didn't find PS2's copy.
+
+**Game speed** (`UpdateSpeed`, `0x1E0C50`, and `TranslateSpeedToFloat`, `0x1E0CD8`). The multiplier `+0x98` is:
+- **0:** while paused (`+0xD0`, `+0xD8`, or the pause count `+0x5A`), or stopped (`+0xC4`) outside `Simulate`.
+- **Otherwise,** by the speed setting `+0x58`:
+
+| Speed | Multiplier | Ticks a second |
+|---|---|---|
+| 0 | 1.0 | 23.8 |
+| -1 | 0.5 | 11.9 |
+| -2 | 5.0 | 119 |
+| -3 | 30.0 | 714 |
+| Anything else | 1.0 | 23.8 |
+
+**How the player sets it** (`H2DTarget::UpdateSpeedControls`, `0x2A0408`, state at HUD `+0x224`):
+- **-3 (30×)** when no family member is awake and visible (`0x2550D8`, Wii `IsFamilyMemberAwakeAndVisible`), unless a check on `0x514EF4` holds it at 0. **So time races while everyone sleeps.**
+- **-2 (5×)** while controller command 0x28 is held, and only if fast-forward is enabled (`0x514F3C`).
+- **-4** (command 0x27) pauses.
+- **Otherwise 0.**
+
+-1 isn't used there. The multiplier scales only how fast real time fills the accumulator. **A tick's effects are the same at every speed:** faster means more ticks a second. Locomotion's time multiplier (locomotion.md) likely reads the same value.
+
+**Motives: every 60 ticks. Proven, PS2.** `cXPerson::Simulate` (`0x1AD8E0`) calls `SimMotives` only when the tick count has reached the Sim's `+0x214` + 60, and then sets `+0x214` to it. So motives decay **once every 2 game minutes** (2.52 s at 1×), 30 times a game hour. Everything else in `cXPerson::Simulate` runs every tick:
+- person data 8 goes up by 1;
+- the `SetMotiveDelta` list is applied;
+- the neighbour's data words 8 to 0x11, the skills, are held at no more than 1,000.
+
+**One Simulate tick = 42 ms of real time at 1× (23.8 a second; ×0.5, ×5 or ×30 at the other speeds); one game minute = 30 ticks (2 game seconds a tick).**
 
 ## Global 3: the selected Sim
 
