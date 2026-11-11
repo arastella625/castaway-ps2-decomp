@@ -3166,7 +3166,7 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         break;
     }
     case 0x42: {
-        s16 value = GetNeighborhood()->mGoals.GetGoalValue(mTemps[0]);
+        s16 value = GetNeighborhood()->mGoals.TryEvaluateGoals(mTemps[0]);
         if (value) {
             mTemps[1] = value;
             break;

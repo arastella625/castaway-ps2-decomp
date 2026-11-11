@@ -56,7 +56,7 @@ public:
     virtual void Slot12();
     virtual void Slot13();
     virtual void Slot14();
-    virtual s16 GetGoalValue(int goal); // GenericSimCall 0x42
+    virtual s16 TryEvaluateGoals(int book); // Wii GoalUnlock slot 15; GenericSimCall 0x42
     virtual void Slot16();
     virtual void Slot17();
     virtual void Slot18();

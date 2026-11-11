@@ -92,7 +92,9 @@ For each node, `DoNodeAction` adds one to the iteration count and then tests it.
 | 0 | Go to the false target; last result = false |
 | 2 | Stop for this tick. The node doesn't change, so it runs again next tick. This is how a primitive waits |
 | 3 | Run the same node again in this tick |
-| -1, 4, other | Failed |
+| -1, 4, other | Failed: `DoNodeAction` returns 2 and `Simulate` 0, and the node doesn't change |
+
+**What a failure without an error does. Read on PS2 and Wii, likely.** When nothing set an error (no `cXObject::Error`), a failed primitive's node runs again next tick, like 2. The only difference is that `cXObject::Simulate` skips that tick's upkeep: the countdown variable and `SpriteSlot::Tick`, which ages balloons. Dialog (below) returns 4 to wait for the player, and GenericSimCall 8 and 0x10 return 4 while they wait.
 
 - A node index of 0xFE or 0xFF pops the frame, sets the last result and takes the caller's true or false target, so a call looks like a primitive to its caller. Popping the last frame is error 0x3E9.
 
@@ -599,11 +601,16 @@ So a tree animates in a loop: the false branch handles an event, then comes back
 | `+4` | Table |
 |---|---|
 | 0 | A list of the **controlling object**: the object of the Sim's newest action (`cXPerson::GetControllingObject`, `0x1DD8E8`), or the Sim itself with none. With `+5` bit 2 the list is the stack object's, and the number is `GetParams()[+0]` |
-| 1, 2 | Two fixed lists on the global holder at `0x492410` (`+0x14`, `+0x18`). Not read further |
-| 3 | A list by Sim body code on the same holder (`+0x1C` plus 4 x code, `0x1E15A8`) |
+| 1 | **The global row's list `0x80`** (holder `+0x18`, `0x1E1520`; Wii `GetGlobalAnimRef`). 62 uses: listening, watching, reacting to art |
+| 2 | **The global row's list `0x82`** (holder `+0x14`, `0x1E1498`; Wii `GetPersonStockAnimRef`). 1 use, in `car_sg` |
+| 3 | A list by Sim type on the same holder (`+0x1C` plus 4 x type, `0x1E15A8`) |
+
+**The holder. Proven, PS2** (`0x1C00C8` on, Wii `InitSkillLookup`). It's `GlobalSkillTables` at `0x492410`. Each table is the global object's row's animation list with that set ID: `+0` `0x96`, `+4` `0x98`, `+8` `0x99`, `+0xC` `0xA4`, `+0x10` `0xA5`, `+0x14` `0x82`, `+0x18` `0x80`, then `+0x1C` six lists by Sim type (`0x9C` plus the type). This corrects the earlier reading of kinds 1 and 2, which had the two lists the other way round and called them unread. Neither kind is on the coconut's or the palm's trees: Eat, Identify (`Interaction - Taste`) and Harvest use kinds 0 and 3 only.
 | Others | No clip, and the primitive returns 1 |
 
-The lists are the `ResFile` row's `+4` vector. Its entries are 8 bytes: a vector of pointers to `AnimRefName` rows, each of which points at an `AnimRef` row, whose word is the clip's name hash, and an s16 set ID. For kind 0 the set is `0x81` plus the Sim's body code (`ESim +0xC4`; 0 for an adult), looked up on the object's own row and then its semi-global row (`0x19EFD8`, `0x19F0A8`); for kind 3 it is the global row's `0x9C` plus the code. A code of 4 falls back to 3, and an empty entry in the first list falls through to the next. So `Interaction - Eat` on a coconut plays `resources_sg`'s list `0x81`: 3 `a2o-peelfruit`, 9 `a2o-eatfruit-small`, 0xA to 0xC the large-fruit clips; and `Reach - Grab`'s `Animate` with `+4` of 3 and parameter 0 set to 10 plays `a2o_reach_floorht` from the global list `0x9C`. A clip the Sim's kind can't play (none found) is error 0x42.
+The lists are the `ResFile` row's `+4` vector. Its entries are 8 bytes: a vector of pointers to `AnimRefName` rows, each of which points at an `AnimRef` row, whose word is the clip's name hash, and an s16 set ID. For kind 0 the set is `0x81` plus the **Sim type** (see below), looked up on the object's own row and then its semi-global row (`0x19EFD8`, `0x19F0A8`); for kind 3 it is the global row's `0x9C` plus the code. A code of 4 falls back to 3, and an empty entry in the first list falls through to the next. So `Interaction - Eat` on a coconut plays `resources_sg`'s list `0x81`: 3 `a2o-peelfruit`, 9 `a2o-eatfruit-small`, 0xA to 0xC the large-fruit clips; and `Reach - Grab`'s `Animate` with `+4` of 3 and parameter 0 set to 10 plays `a2o_reach_floorht` from the global list `0x9C`. A clip the Sim's kind can't play (none found) is error 0x42.
+
+**The "body code" is the Sim type. Proven, PS2.** Both the kind 0 and kind 3 lookups call `Neighbor::GetSimType` (`0x2513A8`: `lh $v0, 0xC4($a0)` on the Sim's `Neighbor`), which is the neighbour's **person data 0x2C**, the same field as Wii's `Neighbor::GetSimType`. It isn't an `ESim` field, as this section used to say. Wii's tests give the values: 2 to 4 are pets, 3 and 4 dogs. The neighbourhood on the disc has types 0 (`pizzadude`), 1 (`officer`, `repoman`, `firefighter`, `npc_paperdelivery`) and 5 (`maid`, `thief`). The castaways are made at run time, so their type isn't on the disc: **likely** 0, an ordinary adult.
 
 **Events are the clip's notes.** An `ANIM` file ends in notes, each a time in milliseconds, a kind and a string (`docs/ASSET_FORMATS.md`). Kind 6 notes are what the tree gets: the string is the event number. `a2o_reach_floorht` has 101, 104 to 108, then 102 at 1,200 ms and 103 at 2,250 ms, and `Reach - Grab` does its `Grab` when the event in its local equals 102, the number it chose for a floor-height reach. `a2o-eatfruit-small` sends 501 at 900 ms, the bite. The 80-byte event records after the notes are empty on every clip on the disc. Kind 1 notes are footsteps (`step`, `scuf`) and kind 5 sounds.
 
@@ -916,6 +923,141 @@ The change is the value times 1/1800, so it's per tick.
 **On a non-Sim**, neither influence bit is -1 at once. With one set, it goes to `PassiveInfluenceSystem`: clear all calls `ClearInfluenceMotiveDeltas`, and otherwise `SetInfluenceMotiveDelta` records motive, change, limit and type for that object.
 
 **On a Sim**, an influence bit means the non-Sim path. Without one, it's the Sim's own list at `+0x200`, 12 bytes an entry: motive, change, limit. Clear all empties it. It holds 16, and a full list quietly drops the new one. All paths without an error are **true**.
+
+## Picking up: CanPlace into a hand
+
+**Read on Wii, with PS2's error codes in the same order** (`cXObject::TestPlace`, PS2 `0x2104C8`, about 890 instructions). Likely. `Grab`'s two calls are `CanPlace(location, level, container, slot)` and `Place` with the same arguments, the container being me. `CanPlace` (`0x253938`) is `CanPlaceSingleTile` (`0x253958`): it builds a `PlacementSpec` and calls `TestPlace`.
+
+**The `PlacementSpec`** (`0x255978`): `+0` a valid byte (1), `+4` the tile, `+0xC` the container, `+0x10` the slot (-1 without a container), `+0x14` the level. With a container whose slot isn't a TS2 slot, the tile becomes the container's own location.
+
+**`TestPlace`** returns false at the first test that fails, with the reason in Wii's `gPlacementError`. Before the container tests it checks the tile: in bounds, tile flags and walls, grass for objects that need it or can't have it (0x13, 0x14), indoors or outdoors (9, 0xA), and without a container, `TestIntersection` (entry point 5). **With a container**, in order:
+
+| Test | Fails with |
+|---|---|
+| The container has the slot | 0xD |
+| The slot is empty, or holds this object | 0xB |
+| No other slot of the container at the same height holds another object at the same offsets | 0xB |
+| This object's variable 0x1B is no more than the container's variable 0x1C (size against room) | 0xE |
+| This object isn't the container or anything that holds it | 0xB |
+
+Then 0x18 and the end. So for the port: **a Sim can pick an object up when its hand slot exists and is empty, and the object's variable 0x1B fits the Sim's variable 0x1C**; the tile tests use the Sim's own tile, which a standing Sim passes.
+
+## Motives over time
+
+**Proven, PS2**, with Wii for the names. Each tick `cXPerson::Simulate` (PS2 `0x1AD954` on) runs `SimMotives` (`0x1ADD48`), adds one to person data 8 (it wraps to 0 at 0x8000), and then applies the `SetMotiveDelta` list.
+
+**`SimMotives`** does nothing unless my variable 0x22 is 0 and I'm in the world. Then:
+
+1. Person data 0xA set: `Motives::Cleanup` only. Otherwise `Motives::Sim` (`0x1FEA60`), which ends with `Cleanup`.
+2. Unless I'm a chimp or a boar, while any motive is still locked (`GoalUnlock::AreAnyMotivesLocked`, vtable slot 18), **each locked motive is held at 0** every tick (`IsLocked(4, n)`, slot 3; this used to say "set", but the slot is Wii's `IsLocked`): 8 motive 5, 9 motive 6, 0xA motive 7, 0xB motive 9, 0xC motive 8, 0xD motive 15, 0xE motive 14, 0xF motive 13.
+3. `CalcHappy` (`0x1ADF30`).
+
+**`Motives::Sim`.** The `Motives` object is at Sim `+0x13C`; its `+0x44 + 4k` is motive k (Sim `+0x180`), and its first 16 floats are the decay rates. Each tick, with `R(i)` = rate i / 720:
+
+| Motive | Change per tick |
+|---|---|
+| 5 | `R(s + 3)` |
+| 6 | `R(s + 1)` × (1 + rain level + wind level). Likely, Wii: no rain under a roof, and rain gear scales it down |
+| 7 | `R(s)`. In family 1 (neighbour person data 0x28 is 1), at -90 or below it's a tenth of that (`/7200`). In any other family it never goes below -75 |
+| 8 | `R(s + 4)` |
+| 9 | `R(s + 2)` |
+| 13 | Set to the current room's environment score (`RoomManager::GetRoomEnvironmentScore`), unless the room is 0xFFFB |
+| 14 | `R(s + 5)` |
+| 15 | `R(s + 6)` |
+| 0 | Likely, Wii: above a threshold it loses the "aspiration decrement" share each tick |
+
+`s` is 0 normally and **8 while motive 11 is below 0**: a second set of rates, where motive 5 rises fast (+540), so motive 5 behaves like energy and a negative motive 11 like sleep. **`Cleanup` clamps every motive to -100..100.**
+
+**The rates** (`Motives::InitDecayRates`, `0x1FEF80`), set from data in the executable:
+
+> rate[i] = base[row][i] + Active[row][i] × pd2 / 1000 + Playful[row][i] × pd4 / 1000 + Outgoing[row][i] × pd5 / 1000 + Neat[row][i] × pd6 / 1000
+
+where pdN is the neighbour's person data N and the trait names are Wii's (`sMotiveDecayBase`, `sMotiveDecayActiveMod`, ...). The row is by Sim type: 0, 1, 5 and others row 0; 2 row 1; 3 and 4 row 2. The tables are at `0x4B9690` (base), `0x4B9750`, `0x4B9810`, `0x4B98D0` and `0x4B9990`, each three rows of 16 floats. Row 0, which the castaways use:
+
+| Rate | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 8 | 9 | 10 | 11 | 12 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Motive | 7 | 6 | 9 | 5 | 8 | 14 | 15 | 7 | 6 | 9 | 5 | 8 |
+| Base | -184 | -75 | -75 | -64 | -50 | -75 | -75 | -30 | -75 | -150 | 540 | -50 |
+| Active × pd2/1000 | -50 | | | +50 | | | | -20 | | | | |
+| Playful × pd4/1000 | | | | | | | -100 | | | | | |
+| Outgoing × pd5/1000 | | | | | | -100 | | | | | | |
+| Neat × pd6/1000 | | | | | -75 | | | | | | | |
+
+Rates 0 to 6 are the normal set, 8 to 12 the set while motive 11 is below 0 (13 and 14 are 0). So an average-personality castaway (traits 500) loses motive 7 at (-184 - 25) / 720 = 0.29 a tick.
+
+**The `SetMotiveDelta` list** is applied after `SimMotives`, entry by entry (motive, change, limit; the change is already per tick): a negative change lowers the motive only while it's above the limit, and stops at the limit; a positive one raises it only while it's below, and stops at the limit.
+
+## Global 3: the selected Sim
+
+**Proven, PS2.** Global 3 (simulator `+0x3E`) is the **selected Sim's object ID**, or 0 with none. Trees can read it but not write it: `GetGlobalRef` refuses index 3, as it does 0xB, 0x20 and 0x2E. Only `EGlobal::SetSelectedPerson` (`0x32AC78`) writes it. That also sets `_globals +0x174` (the player's Sim), the Sim's animator and flags, and the neighbourhood's word `+0x18` = the Sim's neighbour ID (person data 0xC). It runs whenever the selection changes: the player switching Sims (`SimInteractor::Update`), GenericSimCall 0x1F, and a few other callers. So a port that keeps the selected Sim's ID in global 3 is doing what the game does.
+
+## Goals: what GenericSimCall 0x42 returns
+
+**Read on Wii; PS2 calls the same vtable slot.** Likely. Every action ends in `person_sg`'s `Update Goals and Unlocks` (0x20A1), which calls GenericSimCall 0x42 with a goal book in t0. That is `GoalUnlock::TryEvaluateGoals(book)`:
+
+1. No `PlanManager`: 0.
+2. Book 0: `CheckMiscGoals`.
+3. Books 1 to 6: the book's own status (`GetUnlockIndex(0, book)`, a byte at `+4` on the goal data) must be neither 0 nor 3, or it's 0. Then `CheckBook1` to `CheckBook6`. Any other book is 0.
+
+Each check walks its goals. A goal with status 0 can move to 1 when its condition starts to apply (for example, being on a lot past 1). The first goal found at status 2 gets its plan group unlocked (`PlanManager::UnlockGroupPlan`) and a sound, and moves to 3. Its number (0x6D, 0x85, 0x86 and so on) is returned at once. So the statuses are likely 0 hidden, 1 active, 2 achieved and 3 rewarded, and **the call reports at most one newly finished goal**: t1 is its number and the branch is true, or false when nothing finished.
+
+The `GoalUnlock` vtable, from Wii's `__vt__10GoalUnlock`, names the slots our `GoalAndUnlockData` stubs: 0 `ClearGoalsAndUnlocks`, 1 `GetUnlockCount`, 2 `IsUsed`, 3 `IsLocked`, 4 `IsUnlocked`, 5 `IsCompleted`, 6 to 8 the same three by number, 9 `GrantUnlock`, 10 `GetStatus`, 11 `SetStatus`, 12 `IsRecentlyUnlocked`, 13 `SetRecentlyUnlocked`, 14 `DoStream`, 15 `TryEvaluateGoals`, 16 `PlanMade`, 17 `ResourceHarvested`, 18 `AreAnyMotivesLocked`, 19 `IsMotiveUnlocked`, 20 `OpenAllBooksAndPages`, then the destructor.
+
+## Identify: the "identified" marker
+
+**Proven on the disc for the trees; type attributes proven by the matched code.** Identify on a resource is `Interaction - Taste` (`resources_sg` 0x200A; `source_sg` has its own at 0x2002).
+
+- Node 0 puts the stack object's semi-global attribute 0, its resource token ID, in temp 0.
+- Node 6 sets **the stack object's type attribute 0 to 2000**. The stack object is the object being tasted, the coconut: the coconut's Taste makes no object at all. (The palm's own Taste, `source_sg` 0x2002, plays harvest clips and has a CreateObject at node 16.)
+- **`Test - Is Resource Identified?`** (0x2007, parameter 0 the token ID) tests bit 10 of column 8 of that token's `InventoryTokens` row. Clear means the resource needs no identifying, and the test is true. Set means it does, and the test is true only if **the stack object's type attribute 0 is 2000**.
+
+**Whose type attributes.** They belong to the object's **GUID**: scope 0x25 reads `ObjSelector::GetTypeAttributes`, which looks up the folder's block for the definition's GUID (`+0xB8` is 0 on every definition; see "Type attributes" below). Every object of that GUID shares one array, so tasting one coconut marks every coconut of that GUID as identified. Nothing is written to the token or its row.
+
+**Why a port may see no marker.** A GUID only has a block if its definition says so. `ObjectFolder::AddSelector` (PS2 reads it at `0x21C98C`) makes an `ObjectTypeAttrBlock(GUID, count)` when the definition's **`+0xB4`** is non-zero, and `GetTypeAttrBlock` only searches the existing blocks. A GUID without one makes Taste's write error 0x40, and nothing is marked. On the disc, 143 of the 1,335 definitions have a count, 140 of them 1, 1 each 2, 8 and 9. A port should give each of those GUIDs an array of that many zeros when the object type loads.
+
+## Harvest: where the resource comes from
+
+**Proven on the disc, from the trees.** Two paths, chosen by the source's animation height (table 0x2000 of `source_sg`, "Animation Heights"):
+
+**1. Grab One: an animation event.** `Test - Does Height Support GrabOne?` (0x201D) is true only for heights 7 (Harvest Underground), 9 (Harvest Tree - Ground), 10 (Harvest Tree Low) and 11 (Harvest Tree Med).
+
+- `Sub - Play Harvest Anim` (0x201E) plays each stage's clip with its events going to local 0, and passes each event to `Sub - Handle Events` (0x201F) with the stage. The stages are the "Animation Indices" table 0x2004: 0 Start, 1 to 4 Loop 1 to 4, 5 Stop, 6 Grab One.
+- In the Grab One stage, **event 101** runs `Events - Grab One` (0x203D). If the source's semi-global attribute 8 (which resource, 1 to 3) is above 0, it takes the resource's token and GUID (`Get in Temp 1&2 - Resource GUID`, token columns 0xB and 0xA) and **CreateObject**s it.
+- Event 101 in the Start stage creates the tool prop (`Events - Start`). Event 501 in the loops only plays sounds (`Events - Loop`). Event 102 at Stop puts the prop away (`Events - Stop`).
+
+**2. Accrual: tree logic on a timer.** `Harvest - Core` (0x2007) calls `Sub - Start Resource Accrual` (0x2020) at node 1 and `Sub - Stop Resource Accrual` at node 14, so likely for every height. Start sets the source's semi-global attribute 8 to the resource index and 9 to 1, and notifies it; Stop clears them.
+
+- While attribute 9 is set, the source's own `Function - Main SG` (0x2001) loop counts down from `Get in Temp 0 - Accrual Rate` (0x2026), which depends on the resource.
+- Each time the count runs out and the source's resource count can be decremented (`Sub - Decrement Resource Count`), it calls `Resource - Add To Inventory` (0x2004).
+- That **adds one of the resource's token straight to the family inventory** (FamilyInventory op 0, token category, count 1), shows a balloon (icon group 0xD), updates the displayed count, runs `NotifyPlans`, and gives special resources a chance at extras (`Sub - Process Special Resources`).
+
+So **climbing a palm** (heights 4 Knife High Climb, 12 Harvest Tree High Knife, 14 Knife Not-So-High Climb) yields only through accrual: tokens in the inventory over time, no object and no event. A low tree uses both: a fruit in hand on event 101 in the Grab One stage, and tokens over time.
+
+## Dialog (opcode 0x24)
+
+**Read on Wii** (`cXObject::TryDialog`), with PS2 (`0x2306E0`) checked for the same shape: its two `EdithDialogPrimitive::SetDialog` calls (`0x1EDBC8`), the waiting code 4 and the answer code at `0x4928A8`. Likely. 505 uses. The dialog type is `+5` bits 4 to 7 (operand `+7` bits 4 to 6 the result temp, bit 7 semi-global strings).
+
+1. An end-of-game slide show is up: returns 4, so it waits.
+2. **The player has answered** (the answer code isn't 4): the button pressed (`GetModalDialogResult`) goes into the result temp, and the primitive returns the answer code, then resets it to 4. The UI's `EndDialog(bool)` sets it to 1 or 0, so a yes or OK takes the true branch and a no the false.
+3. A flow request is pending: returns 1 at once.
+4. Some dialogs are skipped when no family member is awake and visible, or the camera director has the letterbox up: type 4, and type 0 unless operands `+0` and `+3` are both 0xFE, set temp 0 to 0 and return 1; types 1, 2 and 5 return 1.
+5. Types 0 to 5 are **modal**: unless a global flag (`+0x36D` on the end-of-round globals) says not to, `SetDialog` shows it. Then types 0, 3 and 4 **return 4** and the node runs again each tick until the player answers (step 2); 1, 2 and 5 return 1 and don't wait. A `SetDialog` that fails returns 1.
+6. Other types are shown **without waiting** and return 1.
+
+So `Sub - Add Resources`' Dialog (`+5` 0x01, type 0) shows a modal message after an Identify and waits for the player to close it. For a port: show the message, return "wait" until it's dismissed, then put the button in the result temp and take the true branch for OK or yes.
+
+## SetBalloon (opcode 0x29)
+
+**Read on Wii** (`cXObject::TrySetBalloon`, PS2 `0x2262B0`). Likely. 336 uses. It sets a sprite slot over me or the stack object (the balloon over a Sim's head) and **returns 1 at once**; it doesn't wait. Two error paths return -1. Operands:
+
+| Operand | Meaning |
+|---|---|
+| `+0` bit 0 | Over the stack object, not me. Higher bits give a local number (Wii `GetLocalNum`) for showing that local's object |
+| `+2` | Low byte the icon index, high byte the icon group (`IconGroup::GetSpriteID`) |
+| `+4` | Likely the duration, in ticks or loops |
+| `+6` | Low byte the balloon type (`IconGroup::GetBalloonSpriteID`). Bits 8 show when inactive, 9 the "not" sign over it, 10 reverse, 11 the duration is in loops, 12 offset by temp 0, 13 blink |
+
+It can show the stack object's sprite, a neighbour's, a local's object's or an icon; the balloon then stays for the duration (`ActivateForTicks`, `ActivateForLoops`, or forever) and ages in `cXObject::Simulate`'s upkeep. `Sub - Add Resources`' balloon (`00 00 00 0d 1e 00 03 01`) is icon group 0xD index 0, type 3, 30 ticks, shown when inactive.
 
 ## Routing
 
@@ -1623,11 +1765,11 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 0x3D | 0 | t1 = the first word of the plan made from token t0. No such plan is error 0x6B. **Proven, PS2.** No tree uses it |
 | 0x40 | 2 | Neighbour t0's way here (`LotManager::CanSimGetToLot`). t1 = 0 first. Already on this lot, or no lot (-1): true. Otherwise false unless the lot graph exists, this lot has been visited and a route is found. The route is up to 30 lot numbers, and t1 = the last one; a route of 0 or 30 lots is false. No neighbour is error 0x38. **Proven, PS2** |
 | 0x41 | 3 | **Proven, PS2 and Wii; corrects an earlier reading.** True if there's a player tribe inventory and t0 is an ID in the `InventoryTokens` table. It doesn't check that the tribe has the token. No player Sim is false |
-| 0x42 | 7 | t1 = a goal value for t0. False if there's none |
+| 0x42 | 7 | **Evaluates goal book t0** (`GoalUnlock::TryEvaluateGoals`, vtable slot 15; PS2 calls `+0x80`). t1 = the number of a goal it has just completed, and true; false if none. See "Goals: what GenericSimCall 0x42 returns" |
 
 ## Grab (opcode 4)
 
-**Read on PS2** (`cXObject::TryGrab`, `0x230ED0`), likely. 31 uses. The stack object goes into my hand. No stack object is false. The object is asked two virtuals, `+0x130` and `+0x138` on its vtable, with my location and me as arguments: the first can refuse, false, and the second does the pick-up. Neither body has been read; the port lets any object go that nothing else holds, and puts it in slot 0 with its container variable set to me. With a model (`+0x14`), the object's render flags get bits `0xC0` set, or `0x100` as well when `+0` bit 0 is set, and everything it contains gets the same, walking the container chain. Always true after that.
+**Read on PS2** (`cXObject::TryGrab`, `0x230ED0`), likely. 31 uses. The stack object goes into my hand. No stack object is false. The object is asked two virtuals, `+0x130` and `+0x138` on its vtable, with my location and me as arguments: the first can refuse, false, and the second does the pick-up. They are cXObject vtable slots 37 and 38, **`CanPlace` and `Place`**, with me as the container: a pick-up is placing the object into my hand. See "Picking up: CanPlace into a hand" below. With a model (`+0x14`), the object's render flags get bits `0xC0` set, or `0x100` as well when `+0` bit 0 is set, and everything it contains gets the same, walking the container chain. Always true after that.
 
 ## Tree tables and the action queue
 
@@ -1672,7 +1814,9 @@ Flag bits: 0 available to visitors, 1 can join, 2 immediate, 3 allow consecutive
 2. Nothing queued: returns 1. Back on the same node after an action that wasn't a continuation, the frame's word `+8` is still set: returns 1, so the tree moves on and the main loop looks again.
 3. A head that doesn't run as a sub-action needs the primitive's `+2` operand, or it returns 1; with an action already running it is error 0x51.
 4. A head whose object is gone leaves the queue, and the primitive returns 2.
-5. `0x19F548` prepares it: my variable 0x32 goes to 0; the object's variable 8 bit 9 or an entry flag against the Sim's kind refuses it; then the table's prefix check tree, unless the entry ignores it, and the entry's check tree run on me with the object as the stack object. Interaction flag bit 9 passes whatever they said. A failure is `ActionSkipped` (`0x1DD310`), the queue drops the head, and the primitive returns 2.
+5. `0x19F548` prepares it: my variable 0x32 goes to 0; the object's variable 8 bit 9 or an entry flag against the Sim's kind refuses it; then the table's prefix check tree, unless the entry ignores it, and the entry's check tree run on me with the object as the stack object. Interaction flag bit 9 passes whatever they said. A failure is `ActionSkipped` (`0x1DD310`), the queue drops the head, and the primitive returns 2. **`ActionSkipped(action)`, proven, PS2:** it takes the action's stack object (`Interaction::GetStackObject`, `0x24D720`), finds the action in the ring and removes it (`ActionQueue::Remove`, `0x1A69B0`), and then, if there's an object, runs that object's **entry point 4** tree to the end at once (`cXObject::RunTree`, `0x253FD8`: the object's function table gives the tree, `HasFunction`, and vtable slot 9 `RunCheckTree` runs it) with my ID as the stack object and no parameters. An object without an entry point 4 tree gets nothing. Wii's `ActionSkipped` is the same.
+
+**The 8-visible rule is proven:** `AddAction` byte-matches, and its step 5 above is the rule.
 6. `cXObject::GosubObjectTree` (`0x255D30`) clears my idle status and pushes the action tree, from the object's own behaviour, onto my stack with the object as the new frame's stack object.
 7. `+0x538` is set, the countdown operand goes to 0, the frame's `+8` is set, variable 8 bit 6 again, and the primitive returns 3: the node reruns straight into the action.
 
