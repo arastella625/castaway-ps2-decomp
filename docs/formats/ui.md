@@ -118,11 +118,33 @@ registers the sound callbacks `IMU_SndOpen` to `IMU_SndRefresh`.
 
 So the arrows are the left and right object-cycling arrows, and they only show in direct control.
 
+**What sets the arrow flags. Proven, PS2**, with Wii's names. Only three places write `+0x1B8` and `+0x1BC`:
+
+- **Cleared:** the constructor (`0x2C142C`) and `TerminateMenu` (`0x2C28A0`) set both to 0.
+- **`DirectInteractor::SetLeftArrow(b)`** (`0x176128`) and **`SetRightArrow(b)`** (`0x176150`) write `+0x1BC` and `+0x1B8` on the HUD's (`0x514C04`) action menu (`+0x90`), if there is one.
+- **When the menu opens in direct control** (Wii `DirectInteractor::Update`, PS2 `0x14B4B4`), the objects list is `GetInteractionMenuObjectList` (`0x14B7D0`): the cursor-highlighted objects near the Sim. If the list isn't empty and the menu isn't locked, it sets **left off** and **right on if the list has 2 or more objects**.
+- **When the player cycles** to another object, `ResetDisplayArrows` (`0x176178`) sets **left = the current object isn't the list's first**, and **right = it isn't the last**. There's no wrap-around: at either end, that side's arrow goes off. The flag rule is proven; that cycling stops at the ends rather than wrapping is likely, from Wii's `Update`, which falls back to the list's last or first object when it finds no next or previous one.
+
 **The visible window. Proven:** `UpdateGetLocalizationItems(sel)` (`0x2DFE40`) binds the movie's
 **12 text slots** to the names `IMU_` + `%0.2d` of **max(sel − 6, 0)** onward. So the movie always
 holds 12 consecutive item names around the highlighted item: up to 6 before it, and the rest
 after. It's called with the selection whenever that changes. Which of those 12 the movie draws,
 and where, is in the movie.
+
+**The numbers are absolute item numbers. Proven, PS2.**
+
+- **How a slot is bound.** Slot k (0 to 11) is a buffer at `+0x174 + 4k`. It's filled with `IMU_` and `%0.2d` of start + k, where start = max(sel − 6, 0).
+- **How a name is read.** When the movie asks for a name starting `IMU_`, `GetLocalizable` (`0x2C2D40`) reads the number after it with `atoi` (`0x3E0188`). That's an index into **the current menu level**, `+0xF0 + 4 × (+0x150)`, so a submenu's own items.
+- **What it returns.** Below that menu's count, it's that item's label (item `+0x44`). Past the end it's empty.
+
+| Selection | Slot 0 … slot 11 |
+|---|---|
+| 0 to 6 | `IMU_00` … `IMU_11` |
+| 7 | `IMU_01` … `IMU_12` |
+| 9 | `IMU_03` … `IMU_14` |
+| n ≥ 6 | `IMU_`(n − 6) … `IMU_`(n + 5) |
+
+So with 5 items and item 0 highlighted, slots 0 to 4 show the items and slots 5 to 11 are empty. Slot 6 holds the highlighted item once the selection is 6 or more. Before that, slot *sel* does.
 
 ### Variables the movie sets
 
@@ -218,5 +240,3 @@ They are the same pictures the action queue shows: `ActionQueue::SetIconObject` 
   the title, count and icon sit, and how the movie offsets the box from the point it's given and
   keeps it on screen. These are in `tsc5_interaction_menu`'s ActionScript and timeline. The
   game's code doesn't do any of them.
-- **What sets `+0x1B8`/`+0x1BC`, the arrow flags.** Likely, from Wii's `SetLeftArrowEnable` and
-  `SetRightArrowEnable`: the object-cycling in direct control.

@@ -1165,15 +1165,214 @@ I didn't find PS2's copy.
 
 ## Goals: what GenericSimCall 0x42 returns
 
-**Read on Wii; PS2 calls the same vtable slot.** Likely. Every action ends in `person_sg`'s `Update Goals and Unlocks` (0x20A1), which calls GenericSimCall 0x42 with a goal book in t0. That is `GoalUnlock::TryEvaluateGoals(book)`:
+**Proven, PS2**, with Wii's names. The `GoalUnlock` vtable is at `0x4BC0B0`; its slots are listed at the end. Each PS2 function below was compared with Wii's, and they use the same goal numbers, dialog keys, lot numbers and calls, in the same order. PS2 inlines `UIAUDIO::Instance` (a singleton at `0x49292C`), `EHouse::GetLotNum` (house `+0x3C`) and `cXPerson::GetNeighbor`.
 
-1. No `PlanManager`: 0.
+| Function | PS2 | Wii |
+|---|---|---|
+| `ClearGoalsAndUnlocks` | `0x1EF7A8` | `8010FAD8` |
+| `GetUnlockIndex(type, number)` | `0x1EFB40` | `8010FF44` |
+| `TryEvaluateGoals` | `0x1EFC80` | `80110830` |
+| `PlanMade` | `0x1EFD98` | `80110950` |
+| `ResourceHarvested` | `0x1F0010` | `80110C20` |
+| `CheckBook1` to `CheckBook6` | `0x1F03D0`, `0x1F0DF0`, `0x1F1698`, `0x1F1D90`, `0x1F22D8`, `0x1F2D90` | `80110FE0` on |
+| `CheckMiscGoals` | `0x1F36C8` | `80113370` |
+
+### The goal data in the save
+
+These are the 128 bytes world.md describes under "`GoalUnlock`" (neighbourhood data, goal data `+4`):
+
+| Bytes | Holds |
+|---|---|
+| 0 to 5 | Books 1 to 6 |
+| 6 to 0x17 | Pages: book × 10 + page, pages 1 to 3 |
+| 0x18 to 0x5F | Goals: book × 100 + page × 10 + goal, goals 1 to 4 |
+| 0x60 to 0x67 | Unlocks 0 to 63, one bit each: unlock n is bit n % 8 of byte 0x60 + n / 8 |
+| 0x68 to 0x7F | Goals 1000 to 1023, the "misc" goals. Byte 0x7F is also `DoStream`'s marker |
+
+Each byte is a signed status:
+
+| Status | Book or page | Goal |
+|---|---|---|
+| -1 | Not used | Not used |
+| 0 | Locked. Every book and page starts here | Not used by the checks |
+| 1 | Open | Open, not achieved. Every goal starts here |
+| 2 | Not used | **Achieved**, reward not given yet |
+| 3 | Finished | **Rewarded** |
+
+- **`ClearGoalsAndUnlocks`** (new game) zeroes all 128 bytes. It sets every goal, 0x18 to 0x5F and 0x68 to 0x7E, to 1. Then it marks these as unused (-1): page 12, page 43, and goals 134, 213, 214, 233, 234, 324, 414, 423, 424, 532, 533, 534, 613, 614, 632, 633 and 634.
+- **Unlocks all start clear.** So a new game has every motive locked (see "Motives over time").
+- **`GrantUnlock(type, n)`** (slot 9):
+  - a goal goes from 1 to 2 only;
+  - a book or page goes from 0 to 1 only;
+  - an unlock sets its bit.
+- **`IsCompleted`** is status 3, or the bit set for an unlock. **`IsLocked`** is status 0, or the bit clear.
+
+### Who marks a goal achieved (1 to 2)
+
+Something outside the checks does it, and the checks only reward it. The callers found:
+
+- **Trees**, through CompleteGoal operation 2 on type 2 (see "CompleteGoal"). Some examples:
+  - `resources_sg` `Interaction - Eat` and `food_carry_sg` `Interaction - Eat SG`: goal 1014;
+  - `bed_sg` `Interaction - Sleep`: goal 1012;
+  - sitting in a chair (`Motives - Comfort Inc`), relaxing on a bed or sitting by a fire: goal 1010;
+  - `social_sim2sim` `Greet - Person A`: goals 121 and 1011;
+  - `art_painting_sg` `SG_I_View`: goal 1013;
+  - `global` `Skill - Show Level Gain`: goal 1017;
+  - `crafting_sg` `Repair - Rock Workbench`: goal 111;
+  - the airplane radio: goals 131 and 132.
+- **`PlanMade(plan)`** (slot 16), when a plan is made:
+  - plans 0xD6 to 0xE6: goals 114 and 1010;
+  - 0x6C: goal 231;
+  - 0xC to 0x13: goal 222;
+  - 0x49 to 0x55: goal 223;
+  - 0x185 to 0x188: goal 623;
+  - 0x15: goal 111;
+  - 0x16: goals 111 and 1006;
+  - 0x32: goal 622;
+  - 0x38, 0x3C, 0x40 or 0x44: the first one sets unlock 27, and a second one, with unlock 27 already set, achieves goal 612;
+  - plans 0x12C to 0x1CD whose token is clothing for body part 0x1E: goal 224.
+- **`ResourceHarvested(token)`** (slot 17), when a resource is harvested:
+  - 0x7B: goal 1001;
+  - 0x9A: goal 1002;
+  - 0x8F: goal 1003;
+  - 0x6F: goal 1004;
+  - 0x99: goal 1005;
+  - 0x12C: goal 321;
+  - 0x12E: goal 413;
+  - 0xD9, 0x102, 0x10A or 0x10E: goal 323.
+- **The checks themselves**, for goals whose condition is in code. They are listed per book below.
+
+### `TryEvaluateGoals(book)`
+
+1. No `PlanManager`: returns 0.
 2. Book 0: `CheckMiscGoals`.
-3. Books 1 to 6: the book's own status (`GetUnlockIndex(0, book)`, a byte at `+4` on the goal data) must be neither 0 nor 3, or it's 0. Then `CheckBook1` to `CheckBook6`. Any other book is 0.
+3. Books 1 to 6: returns 0 if the book's status is 0 or 3. Otherwise it runs `CheckBook1` to `CheckBook6`. Any other book returns 0.
 
-Each check walks its goals. A goal with status 0 can move to 1 when its condition starts to apply (for example, being on a lot past 1). The first goal found at status 2 gets its plan group unlocked (`PlanManager::UnlockGroupPlan`) and a sound, and moves to 3. Its number (0x6D, 0x85, 0x86 and so on) is returned at once. So the statuses are likely 0 hidden, 1 active, 2 achieved and 3 rewarded, and **the call reports at most one newly finished goal**: t1 is its number and the branch is true, or false when nothing finished.
+**The value returned is a dialog key, not a goal number.** GenericSimCall 0x42 puts it in t1 and takes the true branch when it isn't 0. `person_sg` `Process Unlock Dialogs` (0x20A3) then picks the dialog from parameter 0, the book, and parameter 1, this key. One call gives at most one key, since each check returns as soon as it rewards something.
 
-The `GoalUnlock` vtable, from Wii's `__vt__10GoalUnlock`, names the slots our `GoalAndUnlockData` stubs: 0 `ClearGoalsAndUnlocks`, 1 `GetUnlockCount`, 2 `IsUsed`, 3 `IsLocked`, 4 `IsUnlocked`, 5 `IsCompleted`, 6 to 8 the same three by number, 9 `GrantUnlock`, 10 `GetStatus`, 11 `SetStatus`, 12 `IsRecentlyUnlocked`, 13 `SetRecentlyUnlocked`, 14 `DoStream`, 15 `TryEvaluateGoals`, 16 `PlanMade`, 17 `ResourceHarvested`, 18 `AreAnyMotivesLocked`, 19 `IsMotiveUnlocked`, 20 `OpenAllBooksAndPages`, then the destructor.
+**Who calls it.** `person_sg` `Update Goals and Unlocks` (0x20A1) runs at the end of every action. Node 0 goes on only when my object variable 0xB equals global 3, the selected Sim's ID (likely: that variable is the Sim's own ID):
+
+1. **Book 1 still locked:** if tutorial flag 0 (`House Complete`, unlock 0) is set, it opens book 1 (CompleteGoal operation 1).
+2. **Each open book** (status 1), 1 to 6 in order: GenericSimCall 0x42 with t0 = the book. The first one that returns true goes straight to `Process Unlock Dialogs`.
+3. **None did:** t0 = 0, the misc goals. True goes to `Process Unlock Dialogs`.
+
+### How each check works
+
+Every check walks its pages in order:
+
+- **An open page** (status 1) walks its goals in order. The first goal at status 2 is rewarded:
+  - `PlanManager::UnlockGroupPlan(goal number, 0)`;
+  - if that moved no plan, sound `0xF72F0A3C` (`UnlockGroupPlan` plays its own when it does);
+  - status 3;
+  - **return the goal's dialog key at once.**
+- **A page whose goals are all 3**, or unused, is finished the same way. Its plan group is the page number, it gets its own key, and its status becomes 3.
+- **A book with no open page left** is set to 3, and the check returns 0.
+- **Opening a page.** A locked page (0) is opened by its own condition, and that also returns a key.
+- **Unused pages and goals** (-1) never block a page or a book.
+
+**What a reward unlocks.** `UnlockGroupPlan(g)` (Wii `800D2D48`) moves every locked plan whose group (`Plan +0x10`) is g into the unlocked list and marks it unlocked. It plays the unlock sound `0x8335FCBB` unless its second argument is set, and returns whether any plan moved. **So a finished goal's plan group unlocks crafting plans, not motives.** Motives are unlocks 8 to 15, and only two things set them: a tree's CompleteGoal, and `CheckMiscGoals` (below).
+
+**Book 1** (`CheckBook1`):
+
+| Step | Condition and result | Key |
+|---|---|---|
+| Open page 11 | Page 11 locked. Opens 11 and 13, and 12 too if more than one person is on the islands (`GetNumberOfPeopleOnIslands`). Returns a key only on lot 1 or below, after sound `0xFC510AC7`. Otherwise the walk goes on | 0x14 |
+| Goal 111 | Achieved by plans 0x15 and 0x16, or by `Repair - Rock Workbench` | 0x16 |
+| Goal 112 | Achieved outside the check | 0x18 |
+| Goal 113 | Achieved by the check **on lot 3** | 0x1E |
+| Goal 114 | Achieved by plans 0xD6 to 0xE6 | 0x24 |
+| Page 11 done | Plan group 11 | 0x19 |
+| Goal 121 | The selected Sim's neighbour has a relationship of type 0 (`CountRelationshipsOfType(0, 1)` above 0), or `Greet` | 0x3A |
+| Goal 122 | A relationship of type 6 | 0x3B |
+| Goal 123 | The family has more than one member | 0x3C |
+| Goal 124 | Type 0 relationships = people on the islands − 1 | 0x3D |
+| Page 12 done | Plan group 12 | 0x3E |
+| Goals 131, 132, 133 | Outside the check (131 and 132 are the airplane radio) | 0x40, 0x41, 0x42 |
+| Page 13 done | Plan group 13 | 0x6D |
+
+**Books 2 to 6** follow the same pattern. Each first opens its page 1 with a key, and that returns only up to a lot number: book 2 lot 5 or below (0x21), book 3 lot 7 (0x2F), book 4 lot 11 (0x3F), book 5 lot 17 (0x4E). Book 6 opens page 61 with key 0x5C at once. Then:
+
+- **In-code goals:**
+  - goal 211: `CountRelationshipsOfType(6, false)` is more than `CountRelationshipsOfType(6, true)`;
+  - goal 232: on lot 7;
+  - goals 311 to 314: on lots 8, 9, 11 and 14;
+  - goal 422: on lot 17;
+  - goals 512 to 514: on lots 22, 21 and 26;
+  - goal 521: unlocks 20 to 23, the four statues, all set;
+  - goal 531: on lot 16 with the selected Sim's motive 15 at or above a constant (likely: the float compare isn't read further);
+  - goals 611 and 621: a room meeting a size condition (`RoomManager`, words `+0` and `+4`).
+- **Pages that open on something other than the previous page:**
+  - page 22 opens when goal 114 is rewarded (plan group 0x336);
+  - page 23 on unlock 16 ("Unlock Page 23", group 0x337);
+  - page 42 on unlock 19 ("Unlock Page 42", group 0x34A);
+  - page 52 on the four statue unlocks, with lot checks against 21 and 24 that aren't read in detail;
+  - page 53 on lot 16 or above (group 0x355);
+  - pages 62 and 63 on the tribe's inventory.
+- **What finishing page 11 of book 2 also does:** if page 12 is unused (a single castaway), it unlocks page 12's plan groups 0x79 to 0x7C and 0xC, so nothing is lost.
+
+The keys run 0x21 to 0x2E and 0x36 to 0x38 (book 2), 0x2F to 0x34, 0x6F to 0x71, 0x79 (book 3), 0x3F to 0x4D (book 4), 0x4E to 0x5B, 0x72 (book 5) and 0x5C to 0x67 (book 6). This is **likely** for the per-goal detail of books 2 to 6. It's read on Wii, and PS2 was compared by its goal numbers, keys and calls, not line by line.
+
+**The misc goals** (`CheckMiscGoals`, book 0) run every time:
+
+1. **Opening books by lot.** It opens any still-locked book on reaching a lot:
+   - book 1 above lot 1;
+   - book 2 at lot 4 or above;
+   - book 3 at lot 7;
+   - book 4 at lot 11;
+   - book 5 at lot 17;
+   - book 6 on lot 18.
+2. **Goal 1009** is achieved by the check when the selected Sim has a type 0 relationship (`CountRelationshipsOfType(0, 0)` above 0).
+3. **Goals 1009 to 1014 unlock a motive each** when rewarded. These are the only goals that do. The reward is plan group 1009 to 1014, status 3, then `GrantUnlock(4, n)`. The key is returned only on lots up to 8; past that, the walk goes on.
+
+| Goal | Achieved by | Unlock | Motive | Key |
+|---|---|---|---|---|
+| 1009 | A type 0 relationship (the check) | 14 Social | 14 | 0x7E |
+| 1010 | Sitting, relaxing on a bed, sitting by a fire; plans 0xD6 to 0xE6 | 9 Comfort | 6 | 0x7F |
+| 1011 | `Greet` | 12 Hygiene | 8 | 0x80 |
+| 1012 | Sleeping in a bed | 13 Fun | 15 | 0x81 |
+| 1013 | Viewing a painting | 15 Room | 13 | 0x82 |
+| 1014 | Eating, after the tutorial; pulling toilet paper; inspecting the catamaran | 11 Bladder | 9 | 0x83 |
+
+4. **Goals 1001 to 1008, 1015, 1016 and 1017** give only a plan group and a key: 0x75, 0x76, 0x77, 0x78, 0x7A, 0x7B, 0x7C, 0x7D, then 0x84, 0x85, 0x86. Goals 1007, 1008 and 1015 play sound `0xB22C2A90` themselves; they and 1016 and 1017 pass 1, so `UnlockGroupPlan` plays none.
+
+The unlock names are the global constant table 0x116, `Tutorial Flags`: 8 energy, 9 comfort, 10 hunger, 11 bladder, 12 hygiene, 13 fun, 14 social, 15 room. The motive each one guards is `IsMotiveUnlocked`'s table (`0x804199B8` on Wii): motives 5 to 9 → 8, 9, 10, 12, 11, and 13, 14, 15 → 15, 14, 13.
+
+### The eat goal and hunger
+
+**Proven on the disc and PS2.** Hunger (motive 7, unlock 10) is **not** unlocked by a goal check. The tutorial object's own trees do it.
+
+- **Where the state is kept.** The tutorial runs `Tutorial - Tutorial House` (0x1001) from `Function - Main`. Its state is **the tutorial object's attribute 1**, matched against global constant table 0x12C, `Tutorial State`: 10 is "Survival Basic 3: eat", 11 is "Basic - Eat".
+- **How a step advances.** The tree picks the step's subtree by that number. When the subtree returns true, it adds 1 to attribute 1 and returns false.
+- **Step 10 is `Basic - Survival Basic 3: eat`** (0x1009):
+  1. `sub - Create Coconut`;
+  2. a modal Dialog, string 0x18 (string 2 on Wii);
+  3. **CompleteGoal operation 3, type 4, constant `0x4B0A`**, which is table 0x116 entry 10, so `GrantUnlock(4, 10)`: hunger unlocked;
+  4. return true, so step 11, `Basic - Eat` (0x1046), starts.
+- **So hunger unlocks when the player closes the eat step's message, before the Sim eats.** From then on `SimMotives` no longer holds motive 7 at 0.
+- **The other motives' tutorial unlocks:**
+  - step 12, `Survival Basic 4: sleep`, unlocks energy (8);
+  - `Tutorial - End`, from node 0, unlocks energy, hunger and tutorial flag 0. Its nodes for hygiene (12) and bladder (11) can't be reached from node 0;
+  - the rest come from the misc goals above.
+- **When eating counts as goal 1014.** `Interaction - Eat` marks goal 1014 only when tutorial flag 0 (`House Complete`) is set: node 40 tests it, and node 41 sets goal 1014. During the tutorial, eating marks no goal. Bladder unlocks through goal 1014 after it, for example by eating.
+- **For a port to do this on the beach:**
+  - keep the tutorial object's attribute 1 as the step;
+  - run step 10's three actions when it is reached: make a coconut, show the message, set unlock bit 10;
+  - then advance to 11.
+  - Book 1 stays locked while tutorial flag 0 is clear and the lot is 1. So `Update Goals and Unlocks` evaluates only book 0, the misc goals, until then.
+
+### The vtable
+
+PS2 `0x4BC0B0`, with 8-byte entries from `+8`. The slots are:
+
+| Slots | Functions |
+|---|---|
+| 0 to 5 | `ClearGoalsAndUnlocks`, `GetUnlockCount`, `IsUsed`, `IsLocked`, `IsUnlocked`, `IsCompleted` |
+| 6 to 8 | The same three by book, page and goal |
+| 9 to 13 | `GrantUnlock`, `GetStatus`, `SetStatus`, `IsRecentlyUnlocked`, `SetRecentlyUnlocked` |
+| 14 to 17 | `DoStream`, `TryEvaluateGoals` (`+0x80`), `PlanMade`, `ResourceHarvested` |
+| 18 to 21 | `AreAnyMotivesLocked`, `IsMotiveUnlocked`, `OpenAllBooksAndPages`, the destructor |
+
+`GetStatus` on an unlock returns its bit, and `SetStatus(4, n, 1)` grants it.
 
 ## Identify: the "identified" marker
 
@@ -1975,7 +2174,7 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 0x3D | 0 | t1 = the first word of the plan made from token t0. No such plan is error 0x6B. **Proven, PS2.** No tree uses it |
 | 0x40 | 2 | Neighbour t0's way here (`LotManager::CanSimGetToLot`). t1 = 0 first. Already on this lot, or no lot (-1): true. Otherwise false unless the lot graph exists, this lot has been visited and a route is found. The route is up to 30 lot numbers, and t1 = the last one; a route of 0 or 30 lots is false. No neighbour is error 0x38. **Proven, PS2** |
 | 0x41 | 3 | **Proven, PS2 and Wii; corrects an earlier reading.** True if there's a player tribe inventory and t0 is an ID in the `InventoryTokens` table. It doesn't check that the tribe has the token. No player Sim is false |
-| 0x42 | 7 | **Evaluates goal book t0** (`GoalUnlock::TryEvaluateGoals`, vtable slot 15; PS2 calls `+0x80`). t1 = the number of a goal it has just completed, and true; false if none. See "Goals: what GenericSimCall 0x42 returns" |
+| 0x42 | 7 | **Evaluates goal book t0** (`GoalUnlock::TryEvaluateGoals`, vtable slot 15; PS2 calls `+0x80`). If a goal or page was just rewarded, t1 = its dialog key and true; false if none. **Proven, PS2.** See "Goals: what GenericSimCall 0x42 returns" |
 
 ## Grab (opcode 4)
 
