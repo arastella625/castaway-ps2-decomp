@@ -315,19 +315,28 @@ places nothing, so the scripts attach every piece at run time (`attachMovie`).
 
 **The arrangement at run time.**
 
-- **Proven, the game's side.** On Wii, `ActionMenu::VisibilityCallfunction` calls `imuShow` with three strings: x
-  and y, the cursor target's screen position (`CURTarget::GetPosition`, (320, 254) without one), then the item
-  count. The game also answers `getVariable` for `IMU_DirectControl` and `IMU_IsWideScreen`.
+**The game's side, proven on PS2** (the decomp kit's `docs/formats/ui.md`):
+- **What it sends:** `imuShow(x, y, count)`. From 3 items it follows with `imuRefresh(count, "1", "0")`, which
+  highlights item 1.
+- **Input:** `imuInput("up" / "down" / "select" / "cancel")`, one per press. The movie answers with `IMU_Highlight` and
+  `IMU_Choice`, which the game reads back.
+- **The point** is in stage units. In direct control (a stick-driven `DirectInteractor`) it's (320, 254).
+  Otherwise it's the cursor's position.
+- **`IMU_DirectControl`** is "1" in direct control.
+- **The stage** is the whole 640 × 448 screen, 1:1.
 
-- **Proven on Wii, which piece.** `IMU_DirectControl` is `ActionMenu` byte 0x1B9. It's set to 1 only when
-  `InteractorManager` has a player interactor, the Wii pointer. Without one the menu takes the cursor corners.
-  **Likely** that's what the PS2 does; its build isn't read.
-
-**The movie's side, run:** `tools/apt_run.py` executes the scripts on stand-in clips. The stand-ins are built from the
-layout trees, with `_width` and `_height` from the shapes' bounds (**likely** as Flash measures them). The numbers
-below come from that run, and `apt_run.py check` tests them with a control. `apt_run.py menu` writes every case
-(4 corners and dc, 0 to 12 items, every scroll offset: 170 cases) to JSON, which the port's
-`scenes/ui/interaction_menu.tscn` applies.
+**The movie's side, run:** `tools/apt_run.py` executes the scripts on stand-in clips, called exactly as above.
+- **The stand-ins** are built from the layout trees, with `_width` and `_height` from the shapes' bounds (**likely**
+  as Flash measures them).
+- **Frame scripts:** each library piece's timeline scripts run too, on the next frame after `attachMovie` or
+  `gotoAndPlay`, as in Flash. The pieces drive the menu themselves:
+  - frame 0 calls `_parent.updateItemPane(this)`;
+  - the show animation's end calls `_parent.callback("show")`;
+  - the `refresh` frames call `updateItemPane`, then `callback("refresh")`, which unlocks input (`lockInput`).
+- **What `apt_run.py menu` writes:** for each corner and dc, and 0 to 12 items, every state the up and down keys
+  reach (65 cases, 1,305 states). Each state has its arrangement, the highlight, and the state each key leads to. The
+  port's `scenes/ui/interaction_menu.tscn` follows that graph.
+- **Check:** `apt_run.py check` tests the run, with a control.
 
 - **`init`:**
   - `itembar_height` 25, `itembar_width` 251.2;
@@ -357,17 +366,30 @@ below come from that run, and `apt_run.py check` tests them with a control. `apt
     | `lr` | −31.6 | −63, then 25 less |
     | `dc` | −31.6 | −65, then 25 less |
 
-  - **Order:** item 0 is the bottom bar in every corner, and the list grows upward. Bar i shows item offset + i.
+  - **Order:** item 0 is the bottom bar in every corner, and the list grows upward. Bar i asks for
+    `getloc:IMU_<offset + i>`, and `IMU_NN` names item NN. That holds if the game's 12 bound names, from
+    max(highlight − 6, 0), keep their own numbers: the movie's request always falls inside that window. If the
+    names were renumbered from 0, the highlighted bar would show the wrong item past item 6. So the first reading is
+    **likely**; ui.md's wording allows both.
   - **The side panel:** its middle is stretched to fit the bars: 25n − 43 tall in `ul` and `ur`, 25n − 45.6 in `ll`
     and `lr`, +3 in `dc`. Its top moves to the end. With 0 or 1 items that height is negative, so the panel
     closes: the middle is set 15 tall and hidden, and so is the bottom. In the lower corners and `dc`, the top goes to
     frame `cvs` when closed and `cvn` when open; the upper corners don't change its frame.
-  - **Highlight:** the bar showing the selected item, by absolute index, goes to frame `active`. Its gradient's tint
-    settles at `00a7f155` (green), against `00b2d1c9` (pale teal) for the others.
-- **Scroll arrows:** with more than 6 items, `arrow_up_mc` shows while items lie above the top bar, and
-  `arrow_dn_mc` while offset > 0. 12 items at offset 0, 3 and 6 give up only, both, and down only.
-- **The pointer** (`ptr_mc`) goes to the selected bar's `_y + _height / 2`, but stays at alpha 0 in every case run.
+  - **Highlight:** the movie's `item_selected` counts from the bottom bar: `imuRefresh_local(count, hilite,
+    offset)` sets it to hilite − offset. That bar goes to frame `active`; its gradient's tint settles at `00a7f155`
+    (green), against `00b2d1c9` (pale teal) for the others.
+- **Keys (`selectButton`, run):**
+  - **Up** (+1) moves the highlight to the next item, up the screen; **down** moves it back.
+  - **The ends:** both stop at the first and last item.
+  - **Scrolling:** with more than 6 items, the list starts to scroll once the highlight passes bar 5, so the highlight
+    rides the top bar going up. 12 items: from item 1, 6 ups reach item 7 with items 2 to 7 shown, and 10 reach item
+    11 with items 6 to 11.
+  - **`select`:** sets `IMU_Choice` to the movie's offset, which is what ui.md finds the game saving per level and
+    handing back as `imuRefresh`'s third argument. The item the game runs is the highlight (`IMU_Highlight`).
+- **Scroll arrows:** `arrow_up_mc` shows while items lie above the top bar, and `arrow_dn_mc` while the list is
+  scrolled. They're the movie's, set by `showArrows`.
+- **The pointer** (`ptr_mc`) goes to the selected bar's `_y + _height / 2`. `callback("show")` and `("refresh")` set it
+  to alpha 100.
 
-**Open:** text and icon fill-in (`getloc:IMU_<NN>`, `IMU_icon` of type `CCR2D`), the show and hide animations, and
-`selectButton` and `doInput`'s exact navigation. The port maps up to the next item (up the screen) and down to the
-previous one, which is **likely**.
+**Open:** the icon (`IMU_icon`, an `_action_queue` texture per ui.md), the show and hide animations as drawn
+frames, and whether the bound names keep their numbers (above).
