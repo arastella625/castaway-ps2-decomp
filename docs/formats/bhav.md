@@ -673,6 +673,32 @@ On an object that isn't a Sim, `cXObject::TryAnimate` (`0x234558`) is all there 
 
 An object can sleep if it isn't a Sim, its variable 0x19 is 0, and no sprite slot is active. Idle status is a per-object word in `ObjectModule`, and it's what reading variable 0x19 clears, which ends the sleep at step 1. A port can ignore sleeping and always count down: the tick count comes out the same unless something wakes the object early.
 
+## IdleAnimate (opcode 0x40)
+
+**Proven, PS2:** read from `cXPerson::TryIdleAnimate` (`0x1AF460`, Wii name), not matched. 50 uses. Sims only.
+
+It plays an idle clip on a loop and counts loops down, then takes the true branch. Operands:
+
+| Operand | Meaning |
+|---|---|
+| `+0` | Clip number, resolved like Animate's |
+| `+2` | Low byte: the parameter that holds the loop count. High byte: a sync object |
+| `+5` | Bit 0 backwards, 1 the clip number is in parameter 0, 2 algorithmic idle selection, 3 idle overlays, 4 the loop count is the literal `+7`, bits 5 to 7 the clip table kind (as Animate's `+4`) |
+| `+6` | Behaviour: 0, 1 or 2 (below) |
+| `+7` | Literal loop count, when `+5` bit 4 is set |
+
+Each tick:
+
+1. The Sim's model isn't loaded: return 2 (run again next tick).
+2. The player is steering this Sim directly (the animator's player control is on, it's the selected Sim and the direct interactor's status is 1): return 1.
+3. Call the animator's `TryIdleAnimate` (vtable `+0x50`, slot 9, `SAnimator2::TryIdleAnimate`, `0x103AC8`). It resolves the clip with Animate's tables, or picks an algorithmic idle, loads it, waits for the sync object if there is one, and starts it looping. It returns 2 while loading and 1 once started, and **delivers no events**. A 2 or -1 from it is returned as it is.
+4. Behaviour 0: return 1. The clip is left looping and the tree moves on.
+5. The loop counter is the Sim's word `+0x5F4` (Wii `+0x5E0`); -0x8000 means unset. When unset it's loaded from `+7` if `+5` bit 4 is set, otherwise from the parameter `+2` names. That parameter number must be below the frame's parameter count, and at least 1 when `+5` bit 1 is set (parameter 0 then holds the clip), or it's error 8.
+6. Counter 0: clear bit 6 (0x40) of my variable 8, set the counter back to -0x8000, return 1.
+7. Behaviour 1: the counter goes down by 1 every tick; return 2. Behaviour 2: it goes down by 1 each time the clip's track completes, and the track is restarted; return 2.
+
+So for a port: start the idle clip looping; behaviour 0 is true at once, behaviour 1 waits the count in **ticks**, behaviour 2 waits the count in **completed loops**. NotifyStackObject's case 0x40 sets `+0x5F4` to 0, which ends a running IdleAnimate on its next tick.
+
 ## Random (opcode 8)
 
 **Proven:** `cXObject::TryRandom` byte-matches.
@@ -1022,16 +1048,54 @@ The `GoalUnlock` vtable, from Wii's `__vt__10GoalUnlock`, names the slots our `G
 **1. Grab One: an animation event.** `Test - Does Height Support GrabOne?` (0x201D) is true only for heights 7 (Harvest Underground), 9 (Harvest Tree - Ground), 10 (Harvest Tree Low) and 11 (Harvest Tree Med).
 
 - `Sub - Play Harvest Anim` (0x201E) plays each stage's clip with its events going to local 0, and passes each event to `Sub - Handle Events` (0x201F) with the stage. The stages are the "Animation Indices" table 0x2004: 0 Start, 1 to 4 Loop 1 to 4, 5 Stop, 6 Grab One.
-- In the Grab One stage, **event 101** runs `Events - Grab One` (0x203D). If the source's semi-global attribute 8 (which resource, 1 to 3) is above 0, it takes the resource's token and GUID (`Get in Temp 1&2 - Resource GUID`, token columns 0xB and 0xA) and **CreateObject**s it.
+- In the Grab One stage, **event 101** runs `Events - Grab One` (0x203D). If the source's semi-global attribute 8 (which resource, 0 to 2; see "the accrual rate" below) is above 0, so not for the first resource, it takes the resource's token and GUID (`Get in Temp 1&2 - Resource GUID`, token columns 0xB and 0xA) and **CreateObject**s it.
 - Event 101 in the Start stage creates the tool prop (`Events - Start`). Event 501 in the loops only plays sounds (`Events - Loop`). Event 102 at Stop puts the prop away (`Events - Stop`).
 
-**2. Accrual: tree logic on a timer.** `Harvest - Core` (0x2007) calls `Sub - Start Resource Accrual` (0x2020) at node 1 and `Sub - Stop Resource Accrual` at node 14, so likely for every height. Start sets the source's semi-global attribute 8 to the resource index and 9 to 1, and notifies it; Stop clears them.
+**2. Accrual: tree logic on a timer.** `Harvest - Core` (0x2007) calls `Sub - Start Resource Accrual` (0x2020) at node 1 and `Sub - Stop Resource Accrual` at node 14, so likely for every height. Start sets the source's semi-global attribute 8 to the resource index and 9 to the **harvesting Sim's neighbour ID** (its person data 0xC; this used to say 1), and notifies it; Stop clears them.
 
-- While attribute 9 is set, the source's own `Function - Main SG` (0x2001) loop counts down from `Get in Temp 0 - Accrual Rate` (0x2026), which depends on the resource.
+- While attribute 9 is set, the source's own `Function - Main SG` (0x2001) loop counts down from `Get in Temp 0 - Accrual Rate` (0x2026), which depends on the resource, the harvester's skill and tool; see "Harvest: the accrual rate".
 - Each time the count runs out and the source's resource count can be decremented (`Sub - Decrement Resource Count`), it calls `Resource - Add To Inventory` (0x2004).
 - That **adds one of the resource's token straight to the family inventory** (FamilyInventory op 0, token category, count 1), shows a balloon (icon group 0xD), updates the displayed count, runs `NotifyPlans`, and gives special resources a chance at extras (`Sub - Process Special Resources`).
 
 So **climbing a palm** (heights 4 Knife High Climb, 12 Harvest Tree High Knife, 14 Knife Not-So-High Climb) yields only through accrual: tokens in the inventory over time, no object and no event. A low tree uses both: a fruit in hand on event 101 in the Grab One stage, and tokens over time.
+
+## Harvest: the accrual rate
+
+**Proven on the disc, from the trees; the skill numbers are likely (Wii).** This is how long the source's `Function - Main SG` waits between tokens while a Sim harvests it.
+
+**The countdown** (`Function - Main SG`, 0x2001). While the source's semi-global attribute 9 is above 0, the loop calls global `idle` (0x118) with 1, likely one tick, and adds 1 to local 1. When local 0 is 0, it first sets local 0 = `Get in Temp 0 - Accrual Rate` and local 1 = 1. When local 1 reaches local 0, it runs `Sub - Decrement Resource Count` and, if that succeeds, `Resource - Add To Inventory`, and then sets local 0 back to 0. So **the rate is worked out again for every token**, and a skill gained mid-harvest counts from the next one.
+
+**What it reads** (`Get in Temp 0 - Accrual Rate`, `source_sg` 0x2026), with the source as "me":
+
+- The **resource index** is my semi-global attribute 8, 0 to 2 (`Get in Temp 0 - Resource ID by Index`, 0x2016, maps 0, 1, 2 to my semi-global attributes 0, 1, 2, the three token IDs).
+- The **base time** is my private table 0x1000 ("Resource Tuning") at index 6 + resource index: "Resource 1/2/3 Base Ticks to Harvest".
+- The **harvester** is my semi-global attribute 9: `Harvest - Core` (0x2007) passes **my person data 0xC, the Sim's neighbour ID**, as parameter 1 of `Sub - Start Resource Accrual`. (This corrects "9 to 1" in the section above.)
+- The harvester's **skill**: if bit 3 of column 8 of the token's `InventoryTokens` row is set, neighbour data word 9 at 15% a point ("Time discount % per Food skill point"); otherwise neighbour data word 0x10 at 5% a point ("per Body skill point"). Wii's `PersistentData::IsSkill` treats person data 8 to 0x11 as skills, so both are skills; which is food and which body is from the tuning labels. A point is 100 of the stored value.
+- The **tool**: `Get in Temp 0 - Current Tool Level` (0x2028) minus `Get in Temp 0 - Minimum Tool Level` (0x2027). The minimum is column 4 of the resource's token row. The current level is column 1 of the best tool token the family has for that resource's tool type (column 3), found by global `Get in Temp 0 - Best Tool Resource ID` (0x1F5); no tool is level 0.
+
+**The sum**, all integer arithmetic, with the "Harvest/Resource Tuning" table 0x2003 of `source_sg`:
+
+```
+skill    = min((skill word / 100) × 15 or 5, 75)        ; 0x2003[1] or [0], cap [3]
+extra    = current tool level − minimum tool level
+tool     = extra >= 0 ? min(20 × extra, 40) : 20        ; [2], cap [4]
+discount = min(skill + tool, 90)                        ; cap [5]
+rate     = base × (100 − discount) / 100
+```
+
+The `: 20` is what the tree does: with a tool below the minimum, the per-level 20 is left unmultiplied. Likely nothing harvests then, but a port copying the tree gets the same number.
+
+**Motives don't change it.** Nothing in 0x2026, 0x2027 or 0x2028 reads a motive. Only the harvester's skill and tool do. (Motives do change *during* a harvest, through `Harvest - Core`'s SetMotiveDelta nodes, but nothing feeds them back into the rate.)
+
+**The coconut palm** (`source_tree_coconutpalm`), its Resource Tuning row:
+
+| Index | Token | Max count | Base ticks |
+|---|---|---|---|
+| 0 | 174 | 5 | 35 |
+| 1 | 152 | 4 | 40 |
+| 2 | 140 | 5 | 90 |
+
+Shed resource index 1, energy delta -60 an hour, stop at -90. So resource 0 with no skill and the minimum tool is a token every 35 ticks; at 15% a point, a Sim with 3 points takes 35 × 55 / 100 = 19; the 90% cap gives 3. Most trees use 30 to 40 base ticks for resource 1 and 90 for the others; palms use 40 for resource 2.
 
 ## Dialog (opcode 0x24)
 
