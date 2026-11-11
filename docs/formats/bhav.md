@@ -92,7 +92,9 @@ For each node, `DoNodeAction` adds one to the iteration count and then tests it.
 | 0 | Go to the false target; last result = false |
 | 2 | Stop for this tick. The node doesn't change, so it runs again next tick. This is how a primitive waits |
 | 3 | Run the same node again in this tick |
-| -1, 4, other | Failed |
+| -1, 4, other | Failed: `DoNodeAction` returns 2 and `Simulate` 0, and the node doesn't change |
+
+**What a failure without an error does. Read on PS2 and Wii, likely.** When nothing set an error (no `cXObject::Error`), a failed primitive's node runs again next tick, like 2. The only difference is that `cXObject::Simulate` skips that tick's upkeep: the countdown variable and `SpriteSlot::Tick`, which ages balloons. Dialog (below) returns 4 to wait for the player, and GenericSimCall 8 and 0x10 return 4 while they wait.
 
 - A node index of 0xFE or 0xFF pops the frame, sets the last result and takes the caller's true or false target, so a call looks like a primitive to its caller. Popping the last frame is error 0x3E9.
 
@@ -599,11 +601,16 @@ So a tree animates in a loop: the false branch handles an event, then comes back
 | `+4` | Table |
 |---|---|
 | 0 | A list of the **controlling object**: the object of the Sim's newest action (`cXPerson::GetControllingObject`, `0x1DD8E8`), or the Sim itself with none. With `+5` bit 2 the list is the stack object's, and the number is `GetParams()[+0]` |
-| 1, 2 | Two fixed lists on the global holder at `0x492410` (`+0x14`, `+0x18`). Not read further |
-| 3 | A list by Sim body code on the same holder (`+0x1C` plus 4 x code, `0x1E15A8`) |
+| 1 | **The global row's list `0x80`** (holder `+0x18`, `0x1E1520`; Wii `GetGlobalAnimRef`). 62 uses: listening, watching, reacting to art |
+| 2 | **The global row's list `0x82`** (holder `+0x14`, `0x1E1498`; Wii `GetPersonStockAnimRef`). 1 use, in `car_sg` |
+| 3 | A list by Sim type on the same holder (`+0x1C` plus 4 x type, `0x1E15A8`) |
+
+**The holder. Proven, PS2** (`0x1C00C8` on, Wii `InitSkillLookup`). It's `GlobalSkillTables` at `0x492410`. Each table is the global object's row's animation list with that set ID: `+0` `0x96`, `+4` `0x98`, `+8` `0x99`, `+0xC` `0xA4`, `+0x10` `0xA5`, `+0x14` `0x82`, `+0x18` `0x80`, then `+0x1C` six lists by Sim type (`0x9C` plus the type). This corrects the earlier reading of kinds 1 and 2, which had the two lists the other way round and called them unread. Neither kind is on the coconut's or the palm's trees: Eat, Identify (`Interaction - Taste`) and Harvest use kinds 0 and 3 only.
 | Others | No clip, and the primitive returns 1 |
 
-The lists are the `ResFile` row's `+4` vector. Its entries are 8 bytes: a vector of pointers to `AnimRefName` rows, each of which points at an `AnimRef` row, whose word is the clip's name hash, and an s16 set ID. For kind 0 the set is `0x81` plus the Sim's body code (`ESim +0xC4`; 0 for an adult), looked up on the object's own row and then its semi-global row (`0x19EFD8`, `0x19F0A8`); for kind 3 it is the global row's `0x9C` plus the code. A code of 4 falls back to 3, and an empty entry in the first list falls through to the next. So `Interaction - Eat` on a coconut plays `resources_sg`'s list `0x81`: 3 `a2o-peelfruit`, 9 `a2o-eatfruit-small`, 0xA to 0xC the large-fruit clips; and `Reach - Grab`'s `Animate` with `+4` of 3 and parameter 0 set to 10 plays `a2o_reach_floorht` from the global list `0x9C`. A clip the Sim's kind can't play (none found) is error 0x42.
+The lists are the `ResFile` row's `+4` vector. Its entries are 8 bytes: a vector of pointers to `AnimRefName` rows, each of which points at an `AnimRef` row, whose word is the clip's name hash, and an s16 set ID. For kind 0 the set is `0x81` plus the **Sim type** (see below), looked up on the object's own row and then its semi-global row (`0x19EFD8`, `0x19F0A8`); for kind 3 it is the global row's `0x9C` plus the code. A code of 4 falls back to 3, and an empty entry in the first list falls through to the next. So `Interaction - Eat` on a coconut plays `resources_sg`'s list `0x81`: 3 `a2o-peelfruit`, 9 `a2o-eatfruit-small`, 0xA to 0xC the large-fruit clips; and `Reach - Grab`'s `Animate` with `+4` of 3 and parameter 0 set to 10 plays `a2o_reach_floorht` from the global list `0x9C`. A clip the Sim's kind can't play (none found) is error 0x42.
+
+**The "body code" is the Sim type. Proven, PS2.** Both the kind 0 and kind 3 lookups call `Neighbor::GetSimType` (`0x2513A8`: `lh $v0, 0xC4($a0)` on the Sim's `Neighbor`), which is the neighbour's **person data 0x2C**, the same field as Wii's `Neighbor::GetSimType`. It isn't an `ESim` field, as this section used to say. Wii's tests give the values: 2 to 4 are pets, 3 and 4 dogs. The neighbourhood on the disc has types 0 (`pizzadude`), 1 (`officer`, `repoman`, `firefighter`, `npc_paperdelivery`) and 5 (`maid`, `thief`). The castaways are made at run time, so their type isn't on the disc: **likely** 0, an ordinary adult.
 
 **Events are the clip's notes.** An `ANIM` file ends in notes, each a time in milliseconds, a kind and a string (`docs/ASSET_FORMATS.md`). Kind 6 notes are what the tree gets: the string is the event number. `a2o_reach_floorht` has 101, 104 to 108, then 102 at 1,200 ms and 103 at 2,250 ms, and `Reach - Grab` does its `Grab` when the event in its local equals 102, the number it chose for a floor-height reach. `a2o-eatfruit-small` sends 501 at 900 ms, the bite. The 80-byte event records after the notes are empty on every clip on the disc. Kind 1 notes are footsteps (`step`, `scuf`) and kind 5 sounds.
 
