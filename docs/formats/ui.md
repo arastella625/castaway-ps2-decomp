@@ -381,6 +381,12 @@ Set 1 is the same with 00 Circle, 01 Cross, 06 Triangle and 07 Square, a swapped
 - **One word:** the splitter doesn't break at `_`, so "Big_Book_of_Survival!" is one token, and one `<COLOR_>` colours all of it.
 - **Drawn as a space:** the `frankfur` font has no glyph for `_` (`systemfont` does). A code with no glyph advances the pen by the font's `space` and draws nothing (media.md, Fonts). Likely, since which font a screen's text uses isn't read; `frankfur` is the one with the full character set.
 
+**Text size** (`0x440560`, `FlashBigFile` code; proven, PS2). Setting a text item's size S:
+- **The target size** is S × the global at `0x5A82F4`. The aspect is scaled by the ratio of `0x5A82F4` to `0x5A82F0`.
+- **Both globals are 1.0.** The engine's static initializer (`0x44F64C`) sets them and nothing else writes them. **So the target pixel size is just S.**
+- **The font size:** it then picks the font's nearest size, an exact match if there is one, else preferring a larger size up to twice the target. It records the target (`+0x4C`) and the chosen size (`+0x54`).
+- **For `frankfur`:** it has only size 24, so it's always the one chosen, and text at size 12, 13, 15 or 25 is frankfur's 24-pixel glyphs scaled by S / 24. That the draw scales by target over chosen is likely; the draw itself isn't read.
+
 ### Dialogs
 
 - **Modal** (Dialog types 0, 3 and 4):
@@ -394,12 +400,21 @@ Set 1 is the same with 00 Circle, 01 Cross, 06 Triangle and 07 Square, a swapped
   - **The path:** `H2DTarget::SpawnModelessDialog` (`0x2BBBC8`) passes the dialog to the target at HUD `+0xA8`. On Wii that's `MDITarget::SpawnModelessDialog`, and the PS2 function it calls (`0x2AA430`) sits in MDITarget's code.
   - **The record:** it copies the dialog's **message** (`+0x2C`) and **title** (`+0x30`), the two icon shaders (`+0x40`, `+0x48`), and whether it has no timeout (dialog `+0x18` = −1, type 2). It doesn't add one whose title and message are both the same as a queued one's.
   - **Not copied:** the line SetDialog builds from `+3` (`+0x34`) for types 1 and 2. **So `+3`'s line is never shown for a modeless message.**
-  - **Art:** `tsc5_comp_dialogbox.swf`, full screen (`MDI_swf` at (0, 0)), in its mode 1. `MDITarget::GetVariable` answers the movie: `MDI_swf_Type` "1", **`MDI_swf_boxWidth` 468**, **`MDI_swf_boxHeight1` 128** (the only value ever stored), `boxHeight2` and `boxHeight3` "0". Where the movie puts a 468 × 128 box is in its own ActionScript.
-  - **Pieces**, from the layout:
-    - `MDI_title` at (24, 24), 250 wide, left-aligned, font size 15, colour `0x45479E`;
-    - `MDI_body` at (24, 38), 250 wide, font size 13, colour `0x424242`;
-    - `MDI_icon_bg_shdr` and `MDI_icon_shdr` at (32, 64), 48 × 48.
+  - **Art:** `tsc5_comp_dialogbox.swf` (`MDI_swf` at (0, 0) in the screen), in its mode 1. `MDITarget::GetVariable` (`0x2AA078`) answers the movie: `MDI_swf_Type` "1", **`MDI_swf_boxWidth` 468**, `MDI_swf_boxHeight1` the field `+0x90`, `boxHeight2` and `boxHeight3` "0".
+  - **The movie** (`initBox` in its ActionScript): for type 1 it draws a `PANE_LARGE` gadget of boxWidth × boxHeight1 at its own origin, and a `PANE_MED_CONTRAST` one 16 smaller each way at (8, 8).
+  - **Where and how big** (the show step, `0x2AA5F8`; proven for the stores, the arithmetic partly likely):
+    - **Position:** the whole `MDI` screen is moved to **x = 97**. Its y stays the layout's 0, so the box's top-left is (97, 0) and it spans x 97 to 565.
+    - **Height:** `+0x90` is recomputed on every show. It's about max(message height + 22 if there's a title, 48) + 42, rounded to an even number. The message is laid out at size 12 in a 428-wide area. The 128 set when the screen loads is only a starting value.
+  - **Pieces**, as the show step places them (the layout's own values are overridden):
+    - `MDI_title` and `MDI_body` both get **font size 12**, 428 wide;
+    - the title at (24, 24); the body at (24, 24), or (24, 46) under a title;
+    - the icon frame and icon (`MDI_icon_bg_shdr` 48 × 48, `MDI_icon_shdr` 32 × 32) are placed from the same numbers. Their exact x and y aren't pinned.
   - **Show and hide:** tweens of 250 (`MDI_show_callback`, `MDI_hide_callback`).
+  - **Messages close themselves. Proven, PS2** (`MDITarget::Update`, `0x2AA1E0`):
+    - **The timer:** on show, the shown message gets a time in ms: max(a value from its laid-out paragraph × its height, **3,600**) × 0.9. It's × 0.2 instead when the dialog asked to go first (dialog `+0x28`; such messages are also queued at the front). Then × 1 for both modeless types, **capped at 14,400**, or a flat 500 while global `0x5150F0` is set.
+    - **Counting down:** each update takes the frame's real time × 1,000 off. The count stops while the UI object at `0x514F1C` has `+0x88` set (likely a full-screen menu up).
+    - **At zero:** the message is deleted and the next queued one is shown, or the screen hides.
+    - **So every modeless message is gone within 3.2 to 14.4 seconds of showing** unless something keeps adding it. GenericSimCall 0x2C only closes them sooner. Opening the inventory or another screen doesn't close them; it may pause the count.
   - **Not used:** the `HUD_modeless_dialog_title`, `_text` and `_continue_text` names belong to `HUDTarget`. No movie on the disc reads them, so the port shouldn't rely on them.
 - **Thought balloon** (type 5): `SpawnIntroThoughtBalloon` (`0x2BBB68`), likely the `ITB` screen.
 

@@ -112,6 +112,29 @@ A frame also has a word at `+8`. When a callee returns and it's set, the caller 
 
 **What an error does. Likely, from both builds:** `cXObject::Error` sets bit 0x100 of the object's flags (`+0xE4`) and a flag in `ObjectModule`. It doesn't stop anything itself; the tree stops because the primitive returns -1. `cXObject::HandleError` runs later: if the flag is set and an error is recorded, it clears the flag, calls `ObjectModule::CleanupPeople` and then the object's `Cleanup(0)`. If the object has a tree for entry point 3, `Cleanup` runs it, sets object data 0x3E to 0, clears bit 5 of data 8, and resets the stack to the tree for entry point 1, on every tile of a multi-tile object. With no such tree it picks the object up, resets it and puts it back. Both paths then set the idle status and quiet the object's sounds. So one error resets that object rather than ending the game.
 
+**What an error does to a Sim and its actions.** Read on Wii (`cXPerson::Cleanup(cXObject*)`); PS2 `cXPerson::Cleanup` (`0x1B0D68`) makes the same calls (`TreeSim::Reset`, `RunTree`, `ActionQueue::Remove` `0x1A69B0`, `0x1DD210`, `0x1DD2B8`). Likely.
+
+- **Cleanup(0) on the Sim**, after the Sim's own tree errored, does all of this:
+  - drops and cleans up what it holds, popping its stack;
+  - person data 0, 0x1B and data 0x22, 9 to 0;
+  - stops all its animation tracks and balloons;
+  - clears its routes and its places in other Sims' routing and trapped queues;
+  - finds it a good location if it's out of bounds;
+  - **resets its stack to the main tree** (entry point 1), and **runs its cleanup tree** (entry point 3).
+- **The running action is completed** (`CompleteCurrentAction`, PS2 `0x1DD210`): removed from the queue with `ActionQueue::Remove`. **Nothing else runs for it, no entry point 4.**
+- **Person data 0xE** goes to 0 (−100 if the Sim is the immediate-action Sim).
+- **Every waiting action** is then deleted with `DeleteTopAction` (PS2 `0x1DD2B8`) until the queue is empty. That's **`ActionSkipped`**, so **each one's entry point 4 runs**.
+- **When another object errors**, `CleanupPeople(object)` calls each Sim's `Cleanup(object)`:
+  - **Tied to the object** (holding it, routing to it, or its current action's icon object): the Sim gets the full reset above.
+  - **Otherwise:**
+    - if the running action's stack object is that object, the action is completed as above;
+    - if only its icon is, the icon is cleared;
+    - every waiting action whose stack or icon object is that object is removed with `ActionQueue::Remove`, **without** entry point 4;
+    - routes that were moving that object (a Sim, type 2) are marked done.
+- **For a port:**
+  - a Sim's error ends its running action **silently**, runs entry point 4 for each waiting one, empties the queue, and restarts the Sim on its main tree after its cleanup tree;
+  - "ended by an error" for the running action matches the first part.
+
 Error codes seen so far:
 
 | Code | Meaning |
