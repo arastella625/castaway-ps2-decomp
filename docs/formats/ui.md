@@ -327,7 +327,59 @@ The movie reads `HUD_meter`, `HUD_tod`, `HUD_moon`, `HUD_cloudy`, `HUD_warning_i
 - 3 `H2D_pause_swf`;
 - 0 none.
 
-All three sit at (128, 344). Who passes which state is `DisplayFastForwardState` (Wii name), not read here.
+All three sit at (128, 344).
+
+**Who passes the state. Proven, PS2:** H2DTarget's speed input step (`0x2A0578`). It turns its speed request (HUD `+0x224`) into an icon, and when the request changes, writes it to the simulator's speed `+0x58` (bhav.md, "Game speed"):
+
+| Request | Game speed | Icon state |
+|---|---|---|
+| −4 (controller command 0x27) | Paused | 3, `H2D_pause_swf` |
+| −2 (command 0x28 held, fast-forward allowed) | 5× | 1, `H2D_fastforward_swf` |
+| −3 (no family member awake and visible) | 30× | 2, `H2D_veryfastforward_swf` |
+| 0 | 1× | None |
+
+- **0.5× (−1)** is never requested here, so it has no icon.
+- **Refreshing:** passing the state already shown just restarts a 6-update countdown (`+0x250`). When it runs out, `H2DTarget::Update` passes 0, so the icon goes when the request stops coming.
+
+### Text markup (`AptParagraph::Build`, `0x3045D8`)
+
+**Proven on PS2.** When text is laid out, it's split into word tokens at whitespace (space, 9 to 13), `|`, `<` and `>`. A token that starts with a tag name is a tag. The tags are `<COLOR_`, `<FONT_`, `<BUTTON_`, `<WT>`, `<PULSE_`, `<ROCK_`, `<ROTATE_`, `<BLINK_`, `<PARTICLE_`, `<RUMBLE_`, `<WAVE_`, `<OUTLINE_`, `<SEARCHLIGHT_`, `<BULGE_`, `<TIPSY>` and `<REVEAL_`.
+
+**`<BUTTON_xx>`** must be exactly 11 characters. `xx` is two hex digits, below 0x23. It becomes an inline picture, the shader from a 35-entry table at `+4 × xx` in the UI object at `0x492F38` (filled by `0x278530`), its width from a float table at `+0x118`.
+
+- **The table depends on a controller set** at `+0x1A8`: 3 is the GameCube buttons (`Button_NGC_*`) and 2 Xbox (`Button_XBX_*`).
+- **The PS2 uses set 0.** The constructor (`0x27FC58`) sets `+0x1A8` to 0, and nothing else writes it.
+- **The pictures:** each name is both a shader in `SHADERS.ARC` and a texture in `TEXTURES.ARC`. Matched by `name_hash`.
+- **Widths:** all 28 except 05, 08 and 0D, which are 48.
+
+| `xx` | PS2 picture (shader) | The button |
+|---|---|---|
+| 00 | `Xs` | Cross |
+| 01 | `triangles` | Triangle |
+| 02 | `cntr_PS2_Lanl` | Left stick |
+| 03 | `cntr_PS2_Dpad` | D-pad |
+| 04 | `cntr_PS2_Ranl` | Right stick |
+| 05 | `cntr_PS2_strt` | Start |
+| 06 | `squares` | Square |
+| 07 | `Os` | Circle |
+| 08 | `cntr_PS2_slct` | Select |
+| 09 | `L2` | L2 |
+| 0A | `R2` | R2 |
+| 0B | `L1` | L1 |
+| 0C | `R1` | R1 |
+| 0D | `cntr_PS2_slct` | Select again |
+| 0E | `L2` | L2 again |
+| 0F to 22 | `empty` | Nothing |
+
+Set 1 is the same with 00 Circle, 01 Cross, 06 Triangle and 07 Square, a swapped layout the PS2 doesn't use. The tutorial's wording fits set 0: "press `<BUTTON_00>`" to act, `<BUTTON_05>` for the menu, `<BUTTON_06>` for the motives, "hold `<BUTTON_0C>`" to fast-forward.
+
+**`<COLOR_AARRGGBB>`** must be exactly 16 characters, four pairs of hex digits each divided by 255.
+- **It colours one word:** the tag token is unlinked, and the colour goes to the next token only.
+- There's no closing form, and no line or span scope. Each coloured word needs its own tag, as in step 3's "`<COLOR_FF0B0077> Moneywell's\r\n<COLOR_FF0B0077> Big_Book_of_Survival!`".
+
+**Underscores.** Nothing in the game's code swaps `_` for a space.
+- **One word:** the splitter doesn't break at `_`, so "Big_Book_of_Survival!" is one token, and one `<COLOR_>` colours all of it.
+- **Drawn as a space:** the `frankfur` font has no glyph for `_` (`systemfont` does). A code with no glyph advances the pen by the font's `space` and draws nothing (media.md, Fonts). Likely, since which font a screen's text uses isn't read; `frankfur` is the one with the full character set.
 
 ### Dialogs
 
@@ -338,17 +390,37 @@ All three sit at (128, 344). Who passes which state is `DisplayFastForwardState`
   - Message `G2D_body` at (170, 145), font 12, colour `0x424242`.
   - Up to three buttons `G2D_button0` to `2`, 128 × 36, 36 apart, labelled `G2D_sel0` to `2`.
   - An icon at (144, 160), 48 × 48.
-- **Modeless** (types 1 and 2):
-  - `H2DTarget::SpawnModelessDialog` (`0x2BBBC8`) copies the title and message into a new record.
-  - The `MDI` layout (dialog box, title at (24, 24), body at (24, 38), icon at (32, 64)) fits, but the link isn't proven.
+- **Modeless** (types 1 and 2): the **`MDI` screen**. Proven on PS2, with Wii for the names.
+  - **The path:** `H2DTarget::SpawnModelessDialog` (`0x2BBBC8`) passes the dialog to the target at HUD `+0xA8`. On Wii that's `MDITarget::SpawnModelessDialog`, and the PS2 function it calls (`0x2AA430`) sits in MDITarget's code.
+  - **The record:** it copies the dialog's **message** (`+0x2C`) and **title** (`+0x30`), the two icon shaders (`+0x40`, `+0x48`), and whether it has no timeout (dialog `+0x18` = −1, type 2). It doesn't add one whose title and message are both the same as a queued one's.
+  - **Not copied:** the line SetDialog builds from `+3` (`+0x34`) for types 1 and 2. **So `+3`'s line is never shown for a modeless message.**
+  - **Art:** `tsc5_comp_dialogbox.swf`, full screen (`MDI_swf` at (0, 0)), in its mode 1. `MDITarget::GetVariable` answers the movie: `MDI_swf_Type` "1", **`MDI_swf_boxWidth` 468**, **`MDI_swf_boxHeight1` 128** (the only value ever stored), `boxHeight2` and `boxHeight3` "0". Where the movie puts a 468 × 128 box is in its own ActionScript.
+  - **Pieces**, from the layout:
+    - `MDI_title` at (24, 24), 250 wide, left-aligned, font size 15, colour `0x45479E`;
+    - `MDI_body` at (24, 38), 250 wide, font size 13, colour `0x424242`;
+    - `MDI_icon_bg_shdr` and `MDI_icon_shdr` at (32, 64), 48 × 48.
+  - **Show and hide:** tweens of 250 (`MDI_show_callback`, `MDI_hide_callback`).
+  - **Not used:** the `HUD_modeless_dialog_title`, `_text` and `_continue_text` names belong to `HUDTarget`. No movie on the disc reads them, so the port shouldn't rely on them.
 - **Thought balloon** (type 5): `SpawnIntroThoughtBalloon` (`0x2BBB68`), likely the `ITB` screen.
 
 ### The action queue
 
-**Likely, partly read:**
-- **Source:** the Sim's `ActionQueue` sends each visible action to `H2DTarget::AddAction` (`ActionQueue::AddActionToHUD`, Wii names). Each action carries its text and an icon shader, the object's `*_action_queue` texture (see "The icon box" above).
-- **No movie:** no movie on the disc names an action queue, so the HUD likely draws the icons itself.
-- **Not read:** where they go and how many show.
+- **Source:** the Sim's `ActionQueue` sends each visible action to `H2DTarget::AddAction` (`ActionQueue::AddActionToHUD`, Wii names). Each action carries its text and an icon shader, the object's `*_action_queue` texture (see "The icon box" above). Likely.
+- **The target:** `H2DTarget::AddAction` (`0x2BBC60`) passes it to the `ACTTarget` at HUD **`+0xA0`** (Wii `+0xBC`). Its `AddAction` is `0x295E50`. Proven.
+- **The screen is `AQU`**, from the layout table. Proven:
+  - `AQU_queue_container` at **(146, 375)**, 350 × 40, hidden at start;
+  - 18 items `AQU_item0` to `17`, each a 38 × 38 frame (`AQU_frameN`) and a 32 × 32 icon (`AQU_shdrN`), **with no positions of their own**;
+  - `AQU_SelectorIcon`, the text `<BUTTON_00>`.
+- **Slot positions** (`ReOrderActionQueue`, PS2 `0x296530`; proven):
+  - each record in the list gets a slot, and the slot's x and y are the floats at **`ACTTarget +0x88 + 8 × slot`** and `+0x8C + 8 × slot`, truncated to whole numbers;
+  - slots run 0 to 8, and everything past the ninth shares slot 8;
+  - slot 0 gets the frame shader `0x3EF13377`, the others `0xDD35680E`.
+- **Who fills the table isn't found.** The base constructor (`0x296958`) zeroes `+0x88` to `+0x9C`, and nothing in ACTTarget's code (PS2 `0x294000` to `0x298800`, `0x2B8E38` on; Wii `ACTTarget` methods) stores into it.
+- **A RAM read settles it.** With a few actions queued, in live mode:
+  1. Read the word at **`0x00514C04`**: the HUD (`H2DTarget`).
+  2. Read the word at **HUD + `0xA0`**: the `ACTTarget`.
+  3. Read **18 floats from ACTTarget + `0x88`**: (x, y) for slots 0 to 8, in the 640 × 448 stage.
+  - Also note ACTTarget + `0xE0`, the list head. Each record's `+0x14` and `+0x18` are the placed x and y, and `+0x48` is the next record. Comparing them with the table checks the reading.
 
 ## Not read
 
@@ -356,5 +428,5 @@ All three sit at (128, 344). Who passes which state is `DisplayFastForwardState`
   the title, count and icon sit, and how the movie offsets the box from the point it's given and
   keeps it on screen. These are in `tsc5_interaction_menu`'s ActionScript and timeline. The
   game's code doesn't do any of them.
-- **HUD:** what each `<BUTTON_xx>` number in a string draws; the bar groups' looks; `hudMoon`'s value;
-  who calls `DisplayFastForwardState`; where the action queue draws; the `WAF` and `RSP` panels.
+- **HUD:** the bar groups' looks; `hudMoon`'s value; the action queue's slot table (see its RAM
+  read); where `tsc5_comp_dialogbox` puts its box; the `WAF` and `RSP` panels.

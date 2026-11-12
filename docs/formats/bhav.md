@@ -594,6 +594,22 @@ The primitive runs again each tick until it returns something other than 2. In o
 8. Otherwise, if the animation has finished, deliver any end event the same way, or stop and **return 1**, the true branch.
 9. Otherwise **return 2** and wait.
 
+**Behaviour 4, an overlay ("effect") animation.** `SAnimator2::FXAnimationBehavior` (PS2 `0x10CCF8`). Read on Wii, where it has names, and likely.
+- **Operands:** `+3` = 1 picks it.
+- **What it does:** it plays the clip on a separate animation track (`EAnimController` track flag `0x8000`), on top of whatever the Sim's main animation is doing. It never waits for the clip and never delivers events.
+- **Animation 0:**
+  - sets that track's intensity to the constant at Wii `lbl_805D9238` (likely 0, fading it out);
+  - finishes any events still owed;
+  - **returns 1**.
+- **Another animation:**
+  1. resolves the clip as above, and loads it. A lookup or load that isn't done returns its own value, so 2 while loading, or the error;
+  2. starts it on the overlay track at the speed the Sim uses (negative with `+5` bit 1);
+  3. **returns 1** at once.
+- **Example: `Motive Check - Hygiene` (`person_sg` 0x201C).**
+  - Node 4 preloads animation 1 (`+5` bit 7). Node 6 starts it as an overlay (`01 00 00 01 00 20 00 00`). **Node 20 turns it off** (`00 00 00 01 00 20 00 00`): animation 0, behaviour 4, both branches 254.
+  - For a castaway with no action, kind 0 resolves animation 1 to `template_person`'s list 0x81 entry 1, **`a_idle_lowhygiene`**.
+- **For a port:** return 1. Start or stop an overlay if it can play one, and leave the Sim's main animation alone.
+
 So a tree animates in a loop: the false branch handles an event, then comes back to the same node, and the true branch means it finished. With no events to deliver, one play is many ticks of 2 and then a 1. A port without real animation can return 1 at once, or after the animation's length, and trees that wait for events will just see none. The event target is `+2`'s local or parameter 0, and a tree with neither is error 8. End events are negative in the animator (`+0x194`), and with `+5` bit 1 set they're stored as `-1 - value`.
 
 **Which clip Animate's number means. Proven, read on PS2** (`resolveSkillForPrimitive`, `0x1038D8`, and what it calls). Operand `+4`, read as a signed byte, picks the table:
@@ -1144,7 +1160,7 @@ I didn't find PS2's copy.
 | -3 | 30.0 | 714 |
 | Anything else | 1.0 | 23.8 |
 
-**How the player sets it** (`H2DTarget::UpdateSpeedControls`, `0x2A0408`, state at HUD `+0x224`):
+**How the player sets it** (H2DTarget's speed input step, `0x2A0578`, request at HUD `+0x224`; it calls `UpdateSpeedControls`, `0x2A0408`, for the icon, as ui.md says):
 - **-3 (30×)** when no family member is awake and visible (`0x2550D8`, Wii `IsFamilyMemberAwakeAndVisible`), unless a check on `0x514EF4` holds it at 0. **So time races while everyone sleeps.**
 - **-2 (5×)** while controller command 0x28 is held, and only if fast-forward is enabled (`0x514F3C`).
 - **-4** (command 0x27) pauses.
@@ -1636,7 +1652,7 @@ Shed resource index 1, energy delta -60 an hour, stop at -90. So resource 0 with
    - This settles world.md's open question: **language image 0 is the US English text**.
 6. **Tokens:** if the text isn't empty, `cXObject::ParseUIString` (`0x227200`) fills in its `$` tokens (below).
    - The `<COLOR_…>`, `<BUTTON_xx>` and `<FONT_…>` tags aren't tokens: `AptParagraph::Build` (`0x3045D8`) reads them when the text is laid out.
-   - Which picture each `<BUTTON_xx>` number draws isn't read.
+   - What each `<BUTTON_xx>` draws, and how far `<COLOR_>` reaches, are in ui.md, "Text markup".
 
 ### Buttons and types
 
@@ -1645,7 +1661,7 @@ Shed resource index 1, energy delta -60 an hour, stop at -90. So resource 0 with
 | Type | Uses on the disc | Shown by (Wii names) | Buttons | TryDialog returns |
 |---|---|---|---|---|
 | 0 | 51 | `UIDialog::SpawnDialog`, modal | 1 (OK); 2 if `+4` isn't 0xFE; 3 if `+0` isn't 0xFE either. So `+4` and `+0` left at 0 give Yes, No and Cancel | **4 until answered** |
-| 1 | 168 | `H2DTarget::SpawnModelessDialog` | None. `+3` is a line under the message | 1, at once |
+| 1 | 168 | `H2DTarget::SpawnModelessDialog` (the `MDI` screen, ui.md) | None. SetDialog builds a line from `+3`, but the modeless record doesn't copy it, so it's never shown | 1, at once |
 | 2 | 21 | The same, with no timeout (`+0x18` = −1) | None | 1, at once |
 | 3 | 226 | `UIDialog::SpawnDialog`, modal | 1: `+3`, default "OK" | **4 until answered** |
 | 4 | 37 | `UIDialog::SpawnDialog`, modal | 2: `+3` default "Yes", `+4` default "No" | **4 until answered** |
@@ -1711,6 +1727,7 @@ None of the opening's dialog strings uses a token.
 | Step 6 `Learn Harvesting` n1 | 9, type 1 | "Gather supplies! Walk up to something and press <BUTTON_00>. If there is more than one action, use the <BUTTON_03>  to select one." |
 | Step 7 `Inventory` n1 | 0xA, type 1 | "See what your sim has gathered. Press <BUTTON_05> and choose "Inventory"" |
 | **Step 10 `Survival Basic 3: eat` n2** | **0x18, type 3** | **"Survival Tip 3: Eat! This is your Hunger motive. \r\n\r\nEating will keep it filled. If it reaches empty, the Sim will starve. Check your Hunger by pressing  <BUTTON_06> then find something to eat."** |
+| Harvesting a clam (step 6 or later): `source_sg` 0x203F `Sub - Process Special Resources` n8, n11, n15, n19, n25 | 1 to 5, type 1, `+7` 0x80 (the clam's semi-global strings, `source_sg`'s own `+0x14` set) | A random find, one of "You have found gold inside one of the clams!", "…a pearl…", "…a piece of jade…", "…a moonstone…", each with a FamilyInventory add; and once, "You've Found a piece to a Treasure Map!" |
 | Step 11 `Basic - Eat` n5 | 0x19, type 1 | "Eat something. Try walking up to a coconut and selecting EAT, or go to the Inventory and see what food you already have." |
 
 - **Buttons.** All of these leave `+0`, `+3` and `+4` at 0, and `+6` too except for Intro Camera's titles. So the buttons are the defaults: OK for type 3, and Yes and No for step 3's type 4.
