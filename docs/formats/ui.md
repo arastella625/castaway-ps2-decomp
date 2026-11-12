@@ -415,6 +415,7 @@ Set 1 is the same with 00 Circle, 01 Cross, 06 Triangle and 07 Square, a swapped
   - each record in the list gets a slot, and the slot's x and y are the floats at **`ACTTarget +0x88 + 8 × slot`** and `+0x8C + 8 × slot`, truncated to whole numbers;
   - slots run 0 to 8, and everything past the ninth shares slot 8;
   - slot 0 gets the frame shader `0x3EF13377`, the others `0xDD35680E`.
+- **Cancelling isn't done here.** The player cancels with a button, not by picking an icon. ACTTarget's cancel cursor is never set, so its cancel mode never opens. See bhav.md, "How the player cancels an action".
 - **Who fills the table isn't found.** The base constructor (`0x296958`) zeroes `+0x88` to `+0x9C`, and nothing in ACTTarget's code (PS2 `0x294000` to `0x298800`, `0x2B8E38` on; Wii `ACTTarget` methods) stores into it.
 - **A RAM read settles it.** With a few actions queued, in live mode:
   1. Read the word at **`0x00514C04`**: the HUD (`H2DTarget`).

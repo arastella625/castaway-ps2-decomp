@@ -2496,6 +2496,28 @@ Flag bits: 0 available to visitors, 1 can join, 2 immediate, 3 allow consecutive
 
 **The queue.** `PushAction` and the pie menu put an `Interaction` on the Sim's ring of 12 at `+0x21C` (`AddAction`, above). `Interaction +0x34` holds its flags: bit 1 continuation, 5 push to head, 10 must run, 15 run as a sub-action. `+0x28` is its priority and `+0x38` its action tree. Sim `+0x538` says the first entry is running, `+0x564` is the running priority, and `+0x586` non-zero stops every interrupt.
 
+**How the player cancels an action. Proven on PS2** (with Wii for the names).
+
+1. **The input.** `H2DTarget::Update` (`0x29F8D8` on) watches **controller command 6**, and acts when it's **released**. It needs a selected Sim (`_globals +0x174`) and the HUD's ActionMenu (HUD `+0x90`). Then it calls the Sim's virtual **`cXPerson::CancelLastAction`** (`0x1AE928`, vtable `+0x1C8`).
+   - On success it sets the menu's backdrop, plays sound `0x48AE94F`, and tells the player interactor (`0x176698`).
+   - Which pad button command 6 is isn't read here. The tutorial's "To stop press `<BUTTON_01>`. This will cancel any action." makes it **Triangle**, likely.
+   - The Wii's `SimInteractor::OnCommandPressed` does the same on its command 4.
+2. **Which action** (`CancelLastAction`):
+   - **the newest waiting action**, the last in the ring that isn't running;
+   - with none waiting, **the running one**;
+   - if the action before the newest runs as a sub-action (flag bit 15), nothing, and it returns 0. A sub-action can't be split from its parent.
+   - It passes the action's ID (`+0x30`) to `cXPerson::RemoveAction`.
+3. **`cXPerson::RemoveAction(id)`** (`0x1AE7C8`) finds the ID in the ring; an unknown ID returns 0.
+   - **A waiting action:**
+     - flag bit 10 (must run) set: it only gets bit 8 (cancelled), stays, and runs anyway;
+     - otherwise **`ActionSkipped`**: removed from the ring, and the object's **entry point 4** runs at once, as for a refused check tree (below).
+   - **The running action** (the head, while `+0x538` says it's running):
+     - it gets **bit 8, cancelled** (Wii `Interaction::SetCancelled`), with bit 10 set it stops there and runs on;
+     - otherwise person data 0xE goes to 0, and `ShouldInterrupt` is asked.
+   - **Not removed, no entry point 4.** The running action isn't removed, and entry point 4 doesn't run. Its tree is **interrupted**: `ShouldInterrupt` is yes for a running head with bit 8 and not bit 10, before its other tests. Every routing state then ends with **result 4 (interrupted)**, and `IdleForInput` takes its interrupt. The tree ends through its own interrupted paths, and the queue moves on.
+   - **Interrupts locked** (`+0x586` set, so `ShouldInterrupt` says no): it queues a new interaction on the Sim itself (`Interaction(me, me, 0x21, 0x32)` then `AddAction`). What that one is isn't read.
+4. **The action queue's cancel mode isn't reachable.** `ACTTarget` has a cursor (`+0x68C`; Wii `CancelCurrentObject`, `ExitCancelMode`). `H2D_SELECT` cancels the item under it (PS2 `0x296668`, through the same `RemoveAction`). But nothing ever sets the cursor to an item, on PS2 or Wii. The only stores advance an existing cursor or clear it. So the PS2 player can't pick a queued icon to cancel. Proven by the absence of any other store.
+
 **How a queued action starts. Read on PS2, likely.** The Sim's main tree idles in `Wait For Notify` (global `0x119`), on `IdleForInput`. Each tick that primitive first asks `cXPerson::ShouldInterrupt` (`0x1AEAD0`): yes when the next action waiting, after the running one if any, has a higher priority than the running priority or is a continuation; when any of the motives at Sim `+0x194`, `+0x19C` or `+0x1A4` is below -99; and otherwise only for a head that runs as a sub-action. Then `executeInterruptOnIdlePrimitve` (`0x1AEFD0`):
 
 1. Sets bit 6 (value 0x40) of my variable 8, which `Wait For Notify` tests and clears as "notified".
