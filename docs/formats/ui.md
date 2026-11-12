@@ -404,10 +404,11 @@ Set 1 is the same with 00 Circle, 01 Cross, 06 Triangle and 07 Square, a swapped
   - **The movie** (`initBox` in its ActionScript): for type 1 it draws a `PANE_LARGE` gadget of boxWidth × boxHeight1 at its own origin, and a `PANE_MED_CONTRAST` one 16 smaller each way at (8, 8).
   - **Where and how big** (the show step, `0x2AA5F8`; proven for the stores, the arithmetic partly likely):
     - **Position:** the whole `MDI` screen is moved to **x = 97**. Its y stays the layout's 0, so the box's top-left is (97, 0) and it spans x 97 to 565.
-    - **Height:** `+0x90` is recomputed on every show. It's about max(message height + 22 if there's a title, 48) + 42, rounded to an even number. The message is laid out at size 12 in a 428-wide area. The 128 set when the screen loads is only a starting value.
+    - **Height:** `+0x90` is recomputed on every show. It's about max(message height + 22 if there's a title, 48) + 42, rounded to an even number. The message is laid out at size 12 in a 412-wide area. The 128 set when the screen loads is only a starting value.
   - **Pieces**, as the show step places them (the layout's own values are overridden):
-    - `MDI_title` and `MDI_body` both get **font size 12**, 428 wide;
-    - the title at (24, 24); the body at (24, 24), or (24, 46) under a title;
+    - the step starts from x 24 and width 428, then (`0x2AA910` to `0x2AA940`) adds 16 to both x values and takes 16 off both widths before anything is laid out or stored;
+    - `MDI_title` and `MDI_body` both get **font size 12**, **412 wide**;
+    - the title at **(40, 24)**; the body at **(40, 24)**, or **(40, 46)** under a title;
     - the icon frame and icon (`MDI_icon_bg_shdr` 48 × 48, `MDI_icon_shdr` 32 × 32) are placed from the same numbers. Their exact x and y aren't pinned.
   - **Show and hide:** tweens of 250 (`MDI_show_callback`, `MDI_hide_callback`).
   - **Messages close themselves. Proven, PS2** (`MDITarget::Update`, `0x2AA1E0`):
