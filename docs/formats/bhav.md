@@ -970,6 +970,74 @@ The result is true unless an operation below says otherwise.
 
 **One quirk, Wii:** removing an object by object ID (op 1, category 0, bit 5) finds the object's place in the **tribe's** inventory, then removes that place from the target inventory. A port that keeps one inventory won't notice. With no tribe it's false. Operations 4, 5, 6 and 0xC don't check that the item exists.
 
+## The family inventory: what's in it, what the screen shows, and what its actions run
+
+**The items.** The family's `InventoryItems` holds `InventoryItem`s of four kinds (the `+1` category above): object, ownable, token and clothing.
+- **Fields:** each has an instance ID, a count (1 for everything but tokens), attributes, an owner and a status byte.
+- **A token item** points at its `InventoryTokens` row (`TokenItem +0xC`, Wii `GetToken`).
+- **Opcode 0x46:** Port's INVENTORY_ADD, REMOVE, FIND, COUNT and NON_TOKEN_COUNT are operations 0, 1, 2, 3 and 0xB in the table above.
+
+**`InventoryTokens` rows** (0x24 bytes, 214 on the disc). Proven, PS2 and disc:
+
+| Offset | Holds | Expression column (scope 0x42) |
+|---|---|---|
+| `+0` u32 | The object GUID the token stands for, 0 for none (gold, pearls and other finds have none) | 0xA (low half), 0xB (high half) |
+| `+4` | **Flags** (below) | 8 |
+| `+8` | Pointer to the token's **`TokenCatalogData`** row | — |
+| `+0xC` u16 | Token ID | — |
+| `+0xE`, `+0x10`, `+0x14`, `+0x18` to `+0x22` | Other columns | 7, 2, 5, 13, 14, 0, 3, 1, 4 |
+
+- Column 12 is the token's place in the tribe inventory (`GetTokenItemIndex`), and column 16 whether it was ever collected.
+- **Flags** (bit masks; an expression's "bit N" is `1 << (N − 1)`). From Wii's `TokenItem` tests:
+
+| Mask | Meaning |
+|---|---|
+| 0x1 | tool |
+| 0x2 | resource |
+| 0x4 | food |
+| 0x10 | can be put in the hand (with 0x100) |
+| 0x20 | fast tool |
+| 0x80 | **fast food** (can be eaten from the inventory) |
+| 0x100 | hand object |
+| 0x200 | needs identifying |
+| 0x400 | can be planted |
+
+- **`TokenCatalogData`** (0x18 bytes, 570 rows): `+4` the **name** and `+8` the **description**, both language strings; `+0xC` and `+0x10` the **icon** shader's name hash; `+0x14` a small number, likely a sort group.
+
+| Token | ID | GUID | Flags | Icon |
+|---|---|---|---|---|
+| Coconut | 0xAE | `0xA78125FE` | 0x1096: resource, food, 0x10, fast food | `ocs_food_coconut` |
+| Clam Meat | 0x130 | — | 0x1006 | `resource_shell_clam` |
+| Large Clam Shell | 0x5E | `0xCC155766` | 0x1012 | `resource_shell_clam` |
+| Gold | 0x133 | — | 0x1002 | `ocs_resource_gold` |
+| Pearl | 0x136 | — | 0x1002 | `ocs_resource_pearls` |
+| Jade, Moonstone | 0x135, 0x134 | — | 0x1002, 0x1000 | — |
+| Treasure Map Piece | 0x32 | `0xDEC81937` | 0x1012 | — |
+
+**What the opening adds.**
+- **A palm harvest** adds one coconut token (0xAE) through `Sub - Add Resources` (FamilyInventory op 0, token, count 1). See "Harvest" above.
+- **A clam harvest** adds the clam's own resource token, then may run `source_sg` 0x203F `Sub - Process Special Resources`. That adds **one** of Gold 0x133, Pearl 0x136, Jade 0x135 or Moonstone 0x134, each with its message, or once a Treasure Map Piece 0x32.
+- **Putting a coconut away** (`Interaction - Put in Inventory`, `resources_sg` 0x2008) adds it as its token, since its GUID is the coconut token's.
+
+**The screen.** The Inventory screen is **`NV5Target`** (movie `tsc6_inventory`); Frontend is building it.
+- **Each entry** is a `UIInventoryItem`: the item's count, its name, description and icon from the token's catalogue row, and owner and status lines.
+- **Tabs** come from the flags: any food (food or an ingredient), any tool (tool or fast tool), resource, object, clothing. Ingredient sub-tests (fruit, fish, meat and so on) go through the `IngredientManager`. Read on Wii, likely.
+
+**The actions on an entry. Proven, PS2** (`0x2E5188` Eat, `0x2E5238` Put in hand; Wii `NV5Target::DoEatFromInventory`, `DoPutInHand`).
+- **How they run:** each runs tree **0x20A0, `id_perform_inventory_action`**, on the selected Sim (`_globals +0x174`) through the Sim's TreeSim virtual (vtable `+0x50`), with the Sim's own behaviour and itself as the stack object.
+  - **Eat:** parameters **{1, token ID, 0, 0}**.
+  - **Put in hand:** **{0, token ID, 0, 0}**.
+  - Wii also has `DoWearFromInventory`, which puts on a clothing item directly (`InventoryItems::PutOnClothingItem`), with no tree. The PS2 copy isn't read.
+- **What the tree does:**
+  1. **Make the object:** a token ID ≤ 0 is false. Otherwise it reads the token's GUID (columns 0xB and 0xA) and **CreateObject**s it out of the world. A failed create is false.
+  2. **Eat** (parameter 0 ≠ 0) needs **food (0x4) and fast food (0x80)**, else false. It then:
+     - snaps the new object to the Sim (SnapObject);
+     - **pushes the object's interaction 0** on the Sim, priority 3, with the object as the queue icon. For a coconut, interaction 0 is **Eat** (check tree `resources_sg` 0x200D, action tree **0x200C `Interaction - Eat`**);
+     - **removes one of the token** from the family inventory (FamilyInventory op 1, token, by its place from column 12), and returns true.
+     - So the Sim eats a fresh coconut, and `Interaction - Eat` calls `Tutorial - Task Complete`, which is what step 11 waits for.
+  3. **Put in hand** (parameter 0 = 0) needs **0x10 and hand object (0x100)**, else false. It runs the named check tree **`ct_fast_tool`** (`person_sg` STR# 0x12F, string 8) on the Sim with the new object as stack object. Tools have their own `ct_fast_tool` (for example `tool_spear_simple` 0x1009).
+  4. **A coconut** has 0x10 but not 0x100, so it can be eaten from the inventory but not put in the hand. Gold, pearls and the other finds have no GUID, so neither action does anything for them.
+
 ## SetMotiveDelta (opcode 0x1D)
 
 **Proven**: `cXObject::TrySetMotiveDelta` and `cXPerson::TrySetMotiveDelta` match the game byte for byte. 401 uses.
@@ -1512,7 +1580,7 @@ Its CameraControl nodes 1 to 4 can't be reached from node 0.
 | 4 | `Basic - Teach Navigation` (0x1036) | PS2: **modeless** Dialog 5 (type 1, it doesn't wait), `Tutorial - Wait for Complete Idle Loop` (either result), GenericSimCall 0x2C (close modeless dialogs), true. The seven Dialogs are Wii's path | The wait |
 | 5 | `Survival Basic 2: Gather Supplies` (0x1007) | **`sub - Create Coconut`**, then modal Dialog 7 (type 3; 0x20 on Wii), true | The Dialog |
 | 6 | `Basic - Learn Harvesting` (0x102A) | **Modeless** Dialog 9 (type 1; 0x20 on Wii), then `Tutorial - Wait for Complete Idle Loop`. Done: `Idle With Motive Floor`, true. Timed out: **false**, so step 6 runs again | A harvest's `Task Complete` |
-| 7 | `Basic - Inventory` (0x102E) | **Modeless** Dialog 0xA (type 1; 6 on Wii), `Tutorial - Idle - No input`, true either way | The wait |
+| 7 | `Basic - Inventory` (0x102E) | **Modeless** Dialog 0xA (type 1; 6 on Wii), `Tutorial - Idle - No input` (0x1011), true. **Nothing waits for the inventory screen**: from node 0, 0x1011 only sets t0 = constant 0x1001[4] (20, "Dialog Wait - No Reminder (seconds)") × 24 = 480 ticks, runs `Idle With Motive Floor` for that, and returns true. Its attribute-6 loop can't be reached | A fixed 480 ticks (about 20 s at 1×) |
 | 8 | `Basic - Pause Menu` (0x1008) | **Only node 0**: `idle`, true | One idle |
 | 9 | `Basic - Inventory Screen` (0x100A) | **Only node 0**: `idle`, true | One idle |
 | 10 | `Survival Basic 3: eat` (0x1009) | **`sub - Create Coconut`**, modal Dialog 0x18 (type 3; 2 on Wii), **unlock 10, hunger**, true | The Dialog |
