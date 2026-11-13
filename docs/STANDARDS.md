@@ -106,7 +106,7 @@ functions, LF line endings.
 Run it from WSL:
 
 ```bash
-CASTAWAY_COMPILERS=/mnt/d/tools/castaway_work/compilers CASTAWAY_SLUS=/mnt/d/tools/castaway_work/game/SLUS_216.64 python3 tools/verify.py -v
+CASTAWAY_COMPILERS=<path to the compilers> CASTAWAY_SLUS=<path to SLUS_216.64> python3 tools/verify.py -v
 ```
 
 ## Tools (`tools/`, `pkg/tools/`)

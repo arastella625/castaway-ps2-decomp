@@ -5,11 +5,11 @@ saves what it needs while you play, so nothing has to be written down.
 
 ## Before you start
 
-Run these from `D:\castaway_assets`, in two terminals, with the paths for your machine. The watcher
+Run these from the assets worktree, in two terminals, with the paths for your machine. The watcher
 waits for the game and stops by itself 15 minutes after the game closes.
 
-    python -I tools/livecheck.py watch D:/tools/castaway_work/ram_snaps
-    D:\tools\castaway_work\pcsx2_test\pcsx2-qt.exe -fastboot -- "<path to iso>"
+    python -I tools/livecheck.py watch <folder for RAM snapshots>
+    <path to pcsx2-qt.exe> -fastboot -- "<path to iso>"
 
 Keys: Cross `X`, Circle `C`, Square `Z`, Triangle `S`, Start `Enter`, Select `Backspace`, D-pad
 arrows, left stick `I` `J` `K` `L`, L1 `Q`, R1 `E`, L2 `1`, R2 `3`. `F8` takes a screenshot.
@@ -55,6 +55,6 @@ Confirm each look before moving on.
 
 Run this for each snapshot:
 
-    python -I tools/livecheck.py compare "<path to iso>" D:/tools/castaway_work/ram_snaps/snap_01.bin
+    python -I tools/livecheck.py compare "<path to iso>" <folder for RAM snapshots>/snap_01.bin
 
 Snapshots and screenshots are game data, so keep them out of the repo.
