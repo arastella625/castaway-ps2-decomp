@@ -1,6 +1,6 @@
 #include "game/simulator/core/OwnableItem.h"
 
-int OwnableItem::GetCategory() const
+s8 OwnableItem::GetCategory() const
 {
     return 1;
 }

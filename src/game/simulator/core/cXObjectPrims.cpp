@@ -2243,25 +2243,9 @@ long cXObject::TrySnap(StackElem *elem, XPrimParam *primParam)
 }
 #endif
 
-// Not matched: 2 words differ. The game loads the lead into a temporary and copies it, and every
-// form tried here loads it straight into the saved register.
-#ifdef NON_MATCHING
-// Only what LotTransition reads.
-class EHouse {
-public:
-    u32 pad_0x0[0xf];
-    int mLot; // 0x3c
-
-    s8 GetLotNum() const { return mLot; } // Wii: GetLotNum; GenericSimCall 0x40 reads a byte
-};
-
-class LotTransitionParam {
-public:
-    u8 mDestination; // 0x00  an operand code, see GetShortComboValue
-    u8 mType;        // 0x01  the same
-    u8 mListOnly;    // 0x02
-};
-
+// An operand given as one byte, shared by LotTransition and FamilyInventory: 0 is my ID, 1 the
+// stack object's ID, 2 to 9 temps 0 to 7, 0xA to 0x11 scope 0x19 0 to 7, 0x12 to 0x19 scope 9
+// 0 to 7, and anything else is scope 7 (the number code) at code - 0x7E.
 inline void GetShortComboValue(u8 code, s16 *scope, s16 *data)
 {
     if (code == 0) {
@@ -2284,6 +2268,26 @@ inline void GetShortComboValue(u8 code, s16 *scope, s16 *data)
         *data = code - 0x7E;
     }
 }
+
+
+// Not matched: 2 words differ. The game loads the lead into a temporary and copies it, and every
+// form tried here loads it straight into the saved register.
+#ifdef NON_MATCHING
+// Only what LotTransition reads.
+class EHouse {
+public:
+    u32 pad_0x0[0xf];
+    int mLot; // 0x3c
+
+    s8 GetLotNum() const { return mLot; } // Wii: GetLotNum; GenericSimCall 0x40 reads a byte
+};
+
+class LotTransitionParam {
+public:
+    u8 mDestination; // 0x00  an operand code, see GetShortComboValue
+    u8 mType;        // 0x01  the same
+    u8 mListOnly;    // 0x02
+};
 
 long cXObject::TryLotTransition(StackElem *elem, XPrimParam *primParam)
 {
@@ -2351,6 +2355,292 @@ long cXObject::TryLotTransition(StackElem *elem, XPrimParam *primParam)
         return 1;
     }
     return -1;
+}
+#endif
+
+// Not matched: 2 of 2,020 words, with the logic complete and every register the game's. The game
+// loads the neighbour that FindNeighborByID finds into v0 and copies it to s4 (TryLotTransition
+// parks on the same copy of its lead), and the alignment nop after the error block that follows
+// moves with it. Tried for the copy: FindNeighborByIDInline and Joined, with and without the
+// `neighbor = 0`; the lookup written out by hand; a nested index inline; a local in the lookup
+// set on both paths (copies on both paths and rotates s2, s3 and s4); the result named before
+// the assignment (copies, rotates the registers and moves the zero onto the fail path); and
+// bitfields for the flags, which GCC reads with lw and a mask. What did match and is worth
+// keeping: the flags byte is signed (see FamilyInventoryParam), each add and remove sets the
+// result with an if/else (RESULT_IF), and GetItem's early return is written with >= so that
+// the load sits at the branch target.
+#ifdef NON_MATCHING
+// Primitive 0x46: FamilyInventory. docs/formats/bhav.md has the operations, whose inventory is
+// used and where each error comes from. Wii's TryFamilyInventory names everything it calls; the
+// InventoryItems calls that Wii keeps as functions are inlined here, with their bodies in
+// Inventory.h.
+class FamilyInventoryParam {
+public:
+    s8 mOperation; // 0x00  0 to 0xD
+    s8 mFlags;     // 0x01  bits 0 to 2 the category; 5 by object ID; 6 the neighbour's inventory; 7 by place
+    u8 mA;         // 0x02  an operand code, see GetShortComboValue
+    u8 mB;         // 0x03  the same
+    s32 mValue;    // 0x04  a GUID, or a token's or clothing item's ID
+
+    // The byte is signed and the top bit is read with a shift: that is what gives the game's
+    // mix of idioms, a plain shift where the compiler still knows the byte's extension and a
+    // sign test (sll 24, bgez) in the ownable and clothing cases where it has lost it. Masks
+    // for bits 5 and 6 give the 64-bit shift (dsrl) and the 32-bit one the game has for those.
+    s8 GetItemCategory() const { return mFlags & 7; }
+    bool GetFromObjectID() const { return mFlags & 0x20; }
+    bool GetUseNeigborIDsInventory() const { return mFlags & 0x40; }
+    bool GetFromInstanceID() const { return (mFlags >> 7) & 1; }
+};
+
+inline s16 cXObject::GetValueFromShortOwnerCombo(u8 code)
+{
+    s16 scope;
+    s16 data;
+    s16 value;
+    GetShortComboValue(code, &scope, &data);
+    InterpValue(scope, data, 0, 0, &value, 0);
+    return value;
+}
+
+inline void cXObject::SetValueInShortOwnerCombo(u8 code, s16 value)
+{
+    s16 scope;
+    s16 data;
+    const s16 *ref = 0;
+    GetShortComboValue(code, &scope, &data);
+    InterpValue(scope, data, &ref, 0, 0, 0);
+    InterpWriteValue(scope, data, &ref, value);
+}
+
+// The result of an add or a remove. Written as an if/else so that a call's result becomes a
+// movz on the 64-bit result and an inlined constant folds to a plain store; `call() != 0`
+// gives sltu instead.
+#define RESULT_IF(call) \
+    if (call)           \
+        result = 1;     \
+    else                \
+        result = 0
+
+long cXObject::TryFamilyInventory(StackElem *elem, XPrimParam *primParam)
+{
+    FamilyInventoryParam *param = (FamilyInventoryParam *)primParam;
+    long result = 1;
+    Neighbor *neighbor = 0;
+    if (param->GetUseNeigborIDsInventory()) {
+        neighbor = GetNeighborhood()->FindNeighborByIDInline(elem->mStackObject);
+        OBJECT_ERROR_CHECK(neighbor, 0x38);
+    } else {
+        cXObject *object = GetObjectModule()->GetObjectFromIDInline(elem->mStackObject);
+        OBJECT_ERROR_CHECK(object, 0x15);
+        cXPerson *person = object->GetPerson();
+        OBJECT_ERROR_CHECK(person, 0x1c);
+        neighbor = person->GetNeighbor();
+    }
+    InventoryItems *inventory = neighbor->GetFamilyInline()->GetInventory();
+
+    switch (param->mOperation) {
+    case 0: {
+        s16 value = GetValueFromShortOwnerCombo(param->mA);
+        switch (param->GetItemCategory()) {
+        case 0:
+            if (param->GetFromInstanceID()) {
+                cXObject *object = GetObjectModule()->GetObjectFromIDInline(value);
+                OBJECT_ERROR_CHECK(object, 0x33);
+                RESULT_IF(inventory->AddObjectItem(object));
+            } else {
+                RESULT_IF(inventory->AddObjectItem(param->mValue));
+            }
+            break;
+        case 1:
+            if (param->GetFromInstanceID()) {
+                cXObject *object = GetObjectModule()->GetObjectFromIDInline(value);
+                OBJECT_ERROR_CHECK(object, 0x33);
+                RESULT_IF(inventory->AddOwnableItem(object));
+            } else {
+                RESULT_IF(inventory->AddOwnableItem((u32)param->mValue));
+            }
+            break;
+        case 2: {
+            s16 count = GetValueFromShortOwnerCombo(param->mB);
+            if (param->GetFromInstanceID())
+                inventory->AddTokenItem(value, count);
+            else
+                inventory->AddTokenItem(param->mValue, count);
+            break;
+        }
+        case 3:
+            if (param->GetFromInstanceID())
+                inventory->AddClothingItem(value);
+            else
+                inventory->AddClothingItem(param->mValue);
+            break;
+        }
+        break;
+    }
+    case 1: {
+        s16 value = GetValueFromShortOwnerCombo(param->mA);
+        switch (param->GetItemCategory()) {
+        case 0:
+            if (param->GetFromInstanceID()) {
+                inventory->RemoveItem(value, 1);
+            } else if (param->GetFromObjectID()) {
+                cXObject *object = GetObjectModule()->GetObjectFromIDInline(value);
+                InventoryItems *tribe = InventoryItems::GetTribeInventory();
+                if (object && tribe) {
+                    // BUG: the place comes from the tribe's inventory and is removed from this one.
+                    int index = tribe->GetObjectItemIndex(*(int *)&object->GetDef()[0xe]);
+                    if (index >= 0)
+                        inventory->RemoveItem(index, 1);
+                    else
+                        result = 0;
+                } else {
+                    result = 0;
+                }
+            } else {
+                RESULT_IF(inventory->RemoveObjectItem(param->mValue));
+            }
+            break;
+        case 1:
+            if (param->GetFromInstanceID()) {
+                inventory->RemoveItem(value, 1);
+            } else {
+                s16 owner = GetValueFromShortOwnerCombo(param->mB);
+                RESULT_IF(inventory->RemoveOwnableItem(owner, param->mValue));
+            }
+            break;
+        case 2: {
+            s16 count = GetValueFromShortOwnerCombo(param->mB);
+            if (param->GetFromInstanceID())
+                inventory->RemoveItem(value, count);
+            else
+                RESULT_IF(inventory->RemoveTokenItem(param->mValue, count));
+            break;
+        }
+        case 3:
+            if (param->GetFromInstanceID())
+                inventory->RemoveItem(value, 1);
+            else
+                RESULT_IF(inventory->RemoveClothingItem(param->mValue));
+            break;
+        }
+        break;
+    }
+    case 2: {
+        s16 index;
+        switch (param->GetItemCategory()) {
+        case 0:
+            index = inventory->GetObjectItemIndex(param->mValue);
+            break;
+        case 1: {
+            s16 owner = GetValueFromShortOwnerCombo(param->mB);
+            index = inventory->GetOwnableItemIndex(owner, param->mValue);
+            break;
+        }
+        case 2:
+            index = inventory->GetTokenItemIndex(param->mValue);
+            break;
+        case 3:
+            index = inventory->GetClothingItemIndex(param->mValue);
+            break;
+        default:
+            index = -1;
+            break;
+        }
+        SetValueInShortOwnerCombo(param->mA, index);
+        result = index >= 0;
+        break;
+    }
+    case 3: {
+        s16 count = inventory->CountItems();
+        SetValueInShortOwnerCombo(param->mA, count);
+        break;
+    }
+    case 4: {
+        s16 place = GetValueFromShortOwnerCombo(param->mA);
+        InventoryItem *item = inventory->GetItem(place);
+        s16 value = GetValueFromShortOwnerCombo(param->mB);
+        item->AddAtribute(value);
+        break;
+    }
+    case 5: {
+        s16 temp = mTemps[0];
+        s16 place = GetValueFromShortOwnerCombo(param->mA);
+        InventoryItem *item = inventory->GetItem(place);
+        s16 value = item->GetAttribute(temp);
+        SetValueInShortOwnerCombo(param->mB, value);
+        break;
+    }
+    case 6: {
+        s16 place = GetValueFromShortOwnerCombo(param->mA);
+        InventoryItem *item = inventory->GetItem(place);
+        s16 count = item->GetNumAttributes();
+        SetValueInShortOwnerCombo(param->mB, count);
+        break;
+    }
+    case 7: {
+        s16 place = GetValueFromShortOwnerCombo(param->mA);
+        InventoryItem *item = inventory->GetItem(place);
+        // BUG: the owner is read before the item is checked, so a place past the end reads null.
+        s16 owner = item->GetOwnerID();
+        OBJECT_ERROR_CHECK(item, 0x6c);
+        SetValueInShortOwnerCombo(param->mB, owner);
+        break;
+    }
+    case 8: {
+        s16 place = GetValueFromShortOwnerCombo(param->mA);
+        InventoryItem *item = inventory->GetItem(place);
+        OBJECT_ERROR_CHECK(item, 0x6c);
+        s16 category = item->GetCategory();
+        SetValueInShortOwnerCombo(param->mB, category);
+        break;
+    }
+    case 9: {
+        s16 place = GetValueFromShortOwnerCombo(param->mA);
+        InventoryItem *item = inventory->GetItem(place);
+        OBJECT_ERROR_CHECK(item, 0x6c);
+        s16 count = item->GetCount();
+        SetValueInShortOwnerCombo(param->mB, count);
+        break;
+    }
+    case 0xa: {
+        s16 place = GetValueFromShortOwnerCombo(param->mA);
+        InventoryItem *item = inventory->GetItem(place);
+        OBJECT_ERROR_CHECK(item, 0x6c);
+        item->SetStatusText(param->mValue);
+        break;
+    }
+    case 0xb: {
+        u8 count = inventory->GetNonTokenCount();
+        SetValueInShortOwnerCombo(param->mA, count);
+        break;
+    }
+    case 0xc: {
+        s16 temp = mTemps[0];
+        s16 place = GetValueFromShortOwnerCombo(param->mA);
+        s16 value = GetValueFromShortOwnerCombo(param->mB);
+        InventoryItem *item = inventory->GetItem(place);
+        item->SetAttribute(temp, value);
+        break;
+    }
+    case 0xd: {
+        s16 value;
+        switch (param->GetItemCategory()) {
+        case 0:
+        case 1:
+            value = 0;
+            break;
+        case 2:
+        case 3:
+            value = param->mValue;
+            break;
+        default:
+            OBJECT_ERROR_CHECK(false, 0x18);
+        }
+        SetValueInShortOwnerCombo(param->mA, value);
+        break;
+    }
+    }
+    return result;
 }
 #endif
 

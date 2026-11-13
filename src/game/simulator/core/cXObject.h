@@ -381,11 +381,16 @@ public:
         return &mObjectSlots[index + 1];
     }
     cXObject *GetObjectFromID(s16 id) { return mModule->GetObjectFromID(id); }
+    s16 *GetDef() { return mDef; }
 
     // Reads and writes one operand of an instruction: bhav.md lists the scopes. InterpValue
     // returns 1, or -1 once it has stopped the tree with an error.
     long InterpValue(s16 scope, s16 data, const s16 **ref, f32 **floatRef, s16 *value, s16 **a);
     int InterpWriteValue(s16 scope, s16 data, const s16 **ref, s16 value);
+    // Read and write an operand given as LotTransition's one-byte code (see GetShortComboValue
+    // in cXObjectPrims.cpp). Wii keeps both as functions; PS2 inlines them.
+    inline s16 GetValueFromShortOwnerCombo(u8 code);
+    inline void SetValueInShortOwnerCombo(u8 code, s16 value);
     long TryExpression(ExpressionParam *param);
     inline void TryParticleEffect(ParticleEffectParam effect, long &result);
 

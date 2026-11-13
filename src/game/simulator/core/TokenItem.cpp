@@ -10,12 +10,12 @@ s16 TokenItem::GetCount() const
     return field_0xa;
 }
 
-int TokenItem::GetCategory() const
+s8 TokenItem::GetCategory() const
 {
     return 2;
 }
 
-int TokenItem::GetOwnerID() const
+s16 TokenItem::GetOwnerID() const
 {
     return -1;
 }
@@ -30,7 +30,7 @@ int TokenItem::GetNumAttributes() const
     return -1;
 }
 
-int TokenItem::GetAttribute(int a)
+s16 TokenItem::GetAttribute(int a)
 {
     return 0;
 }

@@ -906,10 +906,10 @@ So this is how entry points 14, 16, 18 to 29, 32 and 33 are reached, which "Entr
 
 ## FamilyInventory (opcode 0x46)
 
-`TryFamilyInventory`, PS2 `0x23A9D0`, about 2,000 instructions with the inventory calls inlined. Not matched.
+`TryFamilyInventory`, PS2 `0x23A9D0`, 2,020 instructions with the inventory calls inlined. Parked 2 words off with the logic complete (`cXObjectPrims.cpp`, under `NON_MATCHING`): the game copies the looked-up neighbour through a temporary, and nothing else differs.
 
-- **Proven on PS2:** the 14 operations, where each error comes from, and the operands being read through `InterpValue`.
-- **Likely, read on Wii:** the detail of each operation (`TryFamilyInventory__8cXObject`, which names everything it calls).
+- **Proven on PS2:** everything in this section. The 14 operations, where each error comes from, the operands read through `InterpValue`, and the detail of each operation, which was read on Wii first (`TryFamilyInventory__8cXObject` names everything it calls) and then written and compared with the PS2 code word for word.
+- **Corrections to the Wii reading, from PS2:** the ownable Find and Remove pick the item with the most ownership points for the owner, not the first with the GUID; removing a token can unlock something; what a remove returns depends on the category (op 1); op 7 reads the owner before it checks the item.
 
 | Operand | Meaning |
 |---|---|
@@ -954,8 +954,8 @@ The result is true unless an operation below says otherwise.
 | Op | What it does |
 |---|---|
 | 0 | **Add**, by category. Object or ownable with bit 7: the object whose ID is `+2` (none is error 0x33), added as itself. Without bit 7: the GUID in `+4`. An object whose GUID is a token's adds one of that token instead (see the table above). True if the add worked. Token: ID `+2` with bit 7, else `+4`, count `+3`. Clothing: ID `+2` with bit 7, else `+4`. Tokens and clothing are always true |
-| 1 | **Remove**, by category. With bit 7, the item at place `+2`: one of it, or `+3` of a token. Otherwise: an object by GUID `+4`, or with bit 5 the object whose ID is `+2`, found by GUID (see below); an ownable by owner `+3` and GUID `+4`; a token by ID `+4`, count `+3`; clothing by ID `+4`. True if something was removed |
-| 2 | **Find**: the place of the object with GUID `+4`, the ownable with owner `+3` and GUID `+4`, the token with ID `+4`, or the clothing with ID `+4`. It's written to `+2`, -1 if there's none, and the result is true only if found |
+| 1 | **Remove**, by category. With bit 7, the item at place `+2`: one of it, or `+3` of a token. Otherwise: an object by GUID `+4`, or with bit 5 the object whose ID is `+2`, found by GUID (see below); an ownable by owner `+3` and GUID `+4` (the one with the most ownership points for that owner, see op 2); a token by ID `+4`, count `+3`; clothing by ID `+4`. The result: by place, always true; an object by GUID or an ownable, always true, found or not; an object by object ID, false when the object, the tribe inventory or the item is missing; a token or clothing by ID, false when there is none. Removing a token with an ID from 0xD5 to 0x112 also unlocks goal-and-unlock entry 0x70 of kind 2 |
+| 2 | **Find**: the place of the first object with GUID `+4`, the ownable with GUID `+4` whose ownership points for owner `+3` are the highest and above 0, the first token with ID `+4`, or the first clothing with ID `+4`. It's written to `+2`, -1 if there's none, and the result is true only if found |
 | 3 | **Count**: `+2` = the number of items |
 | 4 | Item at place `+2` gets a new attribute `+3` |
 | 5 | `+3` = attribute temp 0 of item `+2` |
@@ -968,7 +968,7 @@ The result is true unless an operation below says otherwise.
 | 0xC | Item `+2`: attribute temp 0 = `+3` |
 | 0xD | `+2` = 0 for an object or ownable, or `+4` for a token or clothing item. Any other category is error 0x18 |
 
-**One quirk, Wii:** removing an object by object ID (op 1, category 0, bit 5) finds the object's place in the **tribe's** inventory, then removes that place from the target inventory. A port that keeps one inventory won't notice. With no tribe it's false. Operations 4, 5, 6 and 0xC don't check that the item exists.
+**Quirks, proven on PS2:** removing an object by object ID (op 1, category 0, bit 5) finds the object's place in the **tribe's** inventory, by the GUID in words 0xE and 0xF of its definition, then removes that place from the target inventory. A port that keeps one inventory won't notice. With no tribe, no object or no such item it's false. Operations 4, 5, 6 and 0xC don't check that the item exists, and op 7 reads the item's owner before it checks the item, so a place past the end reads through a null pointer before error 0x6C.
 
 ## The family inventory: what's in it, what the screen shows, and what its actions run
 

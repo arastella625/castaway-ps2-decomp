@@ -15,12 +15,12 @@ u32 ClothingItem::GetGuid() const
     return 0;
 }
 
-int ClothingItem::GetCategory() const
+s8 ClothingItem::GetCategory() const
 {
     return 3;
 }
 
-int ClothingItem::GetOwnerID() const
+s16 ClothingItem::GetOwnerID() const
 {
     return field_0xc;
 }
@@ -35,7 +35,7 @@ int ClothingItem::GetNumAttributes() const
     return -1;
 }
 
-int ClothingItem::GetAttribute(int a)
+s16 ClothingItem::GetAttribute(int a)
 {
     return 0;
 }
