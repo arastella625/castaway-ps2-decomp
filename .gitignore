@@ -31,3 +31,7 @@ wii_function_reference.csv
 venv/
 __pycache__/
 *.pyc
+
+# Claude Code: machine-specific notes and local settings
+CLAUDE.local.md
+.claude/settings.local.json
