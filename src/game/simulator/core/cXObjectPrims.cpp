@@ -2530,7 +2530,7 @@ inline void EnableBuyAndBuild(ObjectModule *module, cXObject *object)
 // Primitive 1: GenericSimCall, a switch on the s16 at +0 with its operands in my temps.
 // Not matched, but every call is written. The cases are in the game's order, which is proven:
 // GCC lays the bodies out as the source has them, and the jump table at 0x4BA900 sorted by
-// address gives that order. 2,349 words against the game's 2,388, 1,955 of them lined up.
+// address gives that order. 2,357 words against the game's 2,388, 1,956 of them lined up.
 // docs/formats/bhav.md has what each call does, and Wii's TryGenericSimCall names nearly every
 // function they call.
 long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
@@ -2906,7 +2906,8 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
         bool block = mTemps[0] != 0;
         int width = mTemps[1];
         int depth = mTemps[2];
-        OBJECT_ERROR_CHECK(width > 0 && depth > 0, 0x14);
+        OBJECT_ERROR_CHECK(width > 0, 0x14);
+        OBJECT_ERROR_CHECK(depth > 0, 0x14);
         result = 0;
         int direction = object->mVars[1];
         CTilePt start;
