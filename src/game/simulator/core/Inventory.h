@@ -51,7 +51,9 @@ public:
 
     IngredientManager();
 
-    const IngredientToken *FindIngredientToken(s16 id) const
+    // 0x24F898; the body under the second name is what InterpValue inlines.
+    const IngredientToken *FindIngredientToken(s16 id) const;
+    const IngredientToken *FindIngredientTokenInline(s16 id) const
     {
         const ERQTable *rows;
         GetTableOf(GetObjectFolder()->mDatabase, "Ingredient", &rows);
@@ -66,7 +68,9 @@ public:
 
 extern IngredientManager *spIngredientManager;
 
-inline IngredientManager *GetIngredientManager()
+IngredientManager *GetIngredientManager(); // 0x24F688
+
+inline IngredientManager *GetIngredientManagerInline()
 {
     if (spIngredientManager == 0)
         spIngredientManager = new IngredientManager;
@@ -76,10 +80,9 @@ inline IngredientManager *GetIngredientManager()
 // One row of the "InventoryTokens" quickdata table, 0x24 bytes. The fields are scope 0x42's
 // columns.
 struct InventoryTokens {
-    s16 field_0x0;  // 0x00
-    s16 field_0x2;  // 0x02
-    s16 field_0x4;  // 0x04
-    s16 field_0x6;  // 0x06
+    u32 mGuid;      // 0x00  the object GUID the token stands for, 0 for none
+    u32 mFlags;     // 0x04  bit masks: 1 tool, 2 resource, 4 food, 0x20 fast tool, 0x80 fast food,
+                    //       0x100 hand object, 0x400 can be planted, 0x4000 dye (TokenItem's tests)
     u32 pad_0x8;    // 0x08
     u16 mID;        // 0x0c
     s16 field_0xe;  // 0x0e
@@ -95,6 +98,9 @@ struct InventoryTokens {
     s16 field_0x22; // 0x22
 
     int GetHarvestTool() const;
+    // TokenItem's tests go through this: written as (mFlags & mask) != 0 in each, the compiler
+    // turns a single-bit test into a shift, and the game has andi then sltu.
+    bool HasFlag(u32 mask) const { return (mFlags & mask) != 0; }
 };
 STATIC_ASSERT(InventoryTokens_size, sizeof(InventoryTokens) == 0x24);
 
@@ -138,7 +144,7 @@ inline s16 InventoryItems::GetTokenIDFromGUID(int guid)
         return 0;
     for (u32 i = 0; i < table->count; i++) {
         const InventoryTokens *token = &((const InventoryTokens *)table->rows)[i];
-        if (*(const int *)&token->field_0x0 == guid)
+        if (token->mGuid == (u32)guid)
             return token->mID;
     }
     return 0;

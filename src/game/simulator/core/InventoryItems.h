@@ -10,6 +10,7 @@ class Family;
 class ReconBuffer;
 class cXObject;
 struct InventoryTokens;
+struct IngredientToken;
 
 // Wii: InventoryItem. Its vptr comes after the first word. The slots are named from the game's
 // ObjectItem, TokenItem and ClothingItem vtables (0x4BB460, 0x4BB570 and 0x4BB230), which
@@ -38,7 +39,7 @@ public:
     virtual void IncrementCount(s16 count);           // 12
     virtual void DecrementCount(s16 count);           // 13
     virtual const InventoryTokens *GetToken();        // 14
-    virtual int GetIngredientToken();                 // 15
+    virtual const IngredientToken *GetIngredientToken(); // 15
     virtual void DoStream(ReconBuffer *buffer, int a); // 16
     virtual void LoadItemInfo(cXObject *object, Family *family, s16 a); // 17
     virtual int MakeObject(Family *family, s16 a);    // 18

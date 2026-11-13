@@ -53,7 +53,7 @@ const InventoryTokens *ObjectItem::GetToken()
     return 0;
 }
 
-int ObjectItem::GetIngredientToken()
+const IngredientToken *ObjectItem::GetIngredientToken()
 {
     return 0;
 }
@@ -110,4 +110,29 @@ bool ObjectItem::IsDyable()
 
 void ObjectItem::SetupOwnershipInfo(cXObject *a)
 {
+}
+
+int ObjectItem::GetNumAttributes() const
+{
+    return mAttributes.size();
+}
+
+s16 ObjectItem::GetAttribute(int index)
+{
+    return mAttributes[index];
+}
+
+void ObjectItem::SetAttribute(int index, s16 value)
+{
+    mAttributes[index] = value;
+}
+
+void ObjectItem::AddAtribute(s16 value)
+{
+    mAttributes.push_back(value);
+}
+
+void ObjectItem::ClearAttributes()
+{
+    mAttributes.erase(mAttributes.begin(), mAttributes.end());
 }

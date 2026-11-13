@@ -2784,7 +2784,7 @@ inline void InventoryItems::GimmeAllFood(s16 count)
         return;
     for (int i = 0; i < (int)table->count; i++) {
         const InventoryTokens *token = &((const InventoryTokens *)table->rows)[i];
-        if (*(const u32 *)&token->field_0x4 & 4)
+        if (token->mFlags & 4)
             AddTokenItem(token->mID, count);
     }
 }
@@ -2796,7 +2796,7 @@ inline void InventoryItems::GimmeAllResources(s16 count)
         return;
     for (int i = 0; i < (int)table->count; i++) {
         const InventoryTokens *token = &((const InventoryTokens *)table->rows)[i];
-        if ((*(const u32 *)&token->field_0x4 & 6) == 2 && (u16)(token->mID - 0x32) >= 4)
+        if ((token->mFlags & 6) == 2 && (u16)(token->mID - 0x32) >= 4)
             AddTokenItem(token->mID, count);
     }
 }

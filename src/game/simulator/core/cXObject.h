@@ -279,7 +279,7 @@ public:
     f32 field_0xcc;            // 0xcc
     u8 mRect[0x10];            // 0xd0  an FTileRect
     int mLevel;                // 0xe0
-    u32 field_0xe4;            // 0xe4
+    u32 mMiscFlags;            // 0xe4  Wii: SetMiscFlag; Error sets 0x100
     s16 *mDef;                 // 0xe8  a word of it is scope 0x15; word 9 is the object's type
     ObjSelector *mSelector;    // 0xec
     eastl::vector<ObjectSlot, eastl::allocator> mObjectSlots; // 0xf0
@@ -299,8 +299,8 @@ public:
     virtual void Error(s16 code);
     virtual int HandleBreakpoint(StackElem *elem, BehaviorNode *node);
     virtual int Simulate(int a);
-    virtual u32 GetSpriteSlot();
-    virtual u32 GetSpriteSlot(u32 index);
+    virtual SpriteSlot *GetSpriteSlot();
+    virtual SpriteSlot *GetSpriteSlot(u32 index);
     virtual void TransitionToNewHouse(s16 a, s16 b, s16 c);
     virtual void Cleanup(cXObject *object);
     virtual int GosubObjectTree(cXObject *object, s16 *params, s16 treeID, bool a);
@@ -324,7 +324,7 @@ public:
     virtual void ForceLocation();
     virtual int ContainsData(int index);
     virtual u8 GetColorIndex() const;
-    virtual void SetColorIndex(u8 index);
+    virtual u8 SetColorIndex(u8 index); // returns the old index
     virtual int IsInteractionTile(bool a);
     virtual void GetNumTiles(int &a, int &b);
     virtual int HaveGraphicsBeenTagged();

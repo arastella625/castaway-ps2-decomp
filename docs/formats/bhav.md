@@ -988,7 +988,7 @@ The result is true unless an operation below says otherwise.
 | `+0xE`, `+0x10`, `+0x14`, `+0x18` to `+0x22` | Other columns | 7, 2, 5, 13, 14, 0, 3, 1, 4 |
 
 - Column 12 is the token's place in the tribe inventory (`GetTokenItemIndex`), and column 16 whether it was ever collected.
-- **Flags** (bit masks; an expression's "bit N" is `1 << (N − 1)`). From Wii's `TokenItem` tests:
+- **Flags** (bit masks; an expression's "bit N" is `1 << (N − 1)`). Proven on PS2: `TokenItem`'s tests match (`IsTool` to `IsDye`, `0x24F070` to `0x24F150`):
 
 | Mask | Meaning |
 |---|---|
@@ -1001,6 +1001,7 @@ The result is true unless an operation below says otherwise.
 | 0x100 | hand object |
 | 0x200 | needs identifying |
 | 0x400 | can be planted |
+| 0x4000 | dye |
 
 - **`TokenCatalogData`** (0x18 bytes, 570 rows): `+4` the **name** and `+8` the **description**, both language strings; `+0xC` and `+0x10` the **icon** shader's name hash; `+0x14` a small number, likely a sort group.
 

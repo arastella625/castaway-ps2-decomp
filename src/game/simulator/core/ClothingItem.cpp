@@ -70,7 +70,7 @@ const InventoryTokens *ClothingItem::GetToken()
     return 0;
 }
 
-int ClothingItem::GetIngredientToken()
+const IngredientToken *ClothingItem::GetIngredientToken()
 {
     return 0;
 }

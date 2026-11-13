@@ -38,7 +38,7 @@ int TreeSim::GetLastResult()
 TreeSim::TreeSim()
     : mObject(0), mPerson(0), mMTObject(0), mPortal(0), mISimInstance(0), mESimPerson(0), mIterations(0),
       mStack(*this), mLastTransition(0xfd), mLastResult(0), mDefaultParams(0), mError(0),
-      field_0x4c(0)
+      mNoMainTreeSim(0)
 {
 }
 
@@ -374,4 +374,14 @@ int TreeSim::RunCheckTree(Behavior *behavior, s16 stackObject, s16 treeID, s16 *
     mStack.Pop();
     StackJustPopped();
     return 0;
+}
+
+int TreeSim::HasMainTreeSim()
+{
+    return mNoMainTreeSim == 0;
+}
+
+void TreeSim::SetNoMainTreeSim(bool none)
+{
+    mNoMainTreeSim = none;
 }

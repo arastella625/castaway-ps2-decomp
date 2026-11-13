@@ -41,7 +41,7 @@ public:
     void IncrementCount(s16 a);
     void DecrementCount(s16 a);
     const InventoryTokens *GetToken();
-    int GetIngredientToken();
+    const IngredientToken *GetIngredientToken();
     void LoadItemInfo(cXObject *a, Family *b, s16 c);
     int MakeObject(Family *a, s16 b);
     bool IsFood();

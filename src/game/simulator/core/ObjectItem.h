@@ -14,8 +14,12 @@ class cXObject;
 class ObjectItem : public InventoryItem {
 public:
     u32 field_0x8; // 0x08  the GUID
-    s8 field_0xc; // 0x0c
-    u8 pad_0xd[0x17]; // 0x24 bytes in all: InventoryItems::AddObjectItem allocates that
+    s8 field_0xc; // 0x0c  the status text
+    u8 pad_0xd;
+    s16 field_0xe; // 0x0e  the constructor zeroes these three
+    s16 field_0x10; // 0x10
+    s16 field_0x12; // 0x12
+    eastl::vector<s16, eastl::allocator> mAttributes; // 0x14  0x24 bytes in all: InventoryItems::AddObjectItem allocates that
 
     ObjectItem(int guid);
     ObjectItem(cXObject *object);
@@ -31,7 +35,7 @@ public:
     void IncrementCount(s16 a);
     void DecrementCount(s16 a);
     const InventoryTokens *GetToken();
-    int GetIngredientToken();
+    const IngredientToken *GetIngredientToken();
     bool IsFood();
     bool IsFastFood();
     bool IsTool();
@@ -43,6 +47,13 @@ public:
     bool IsDye();
     bool IsDyable();
     void SetupOwnershipInfo(cXObject *a);
+
+    // The attribute list, written from the PS2 code.
+    int GetNumAttributes() const;
+    s16 GetAttribute(int index);
+    void SetAttribute(int index, s16 value);
+    void AddAtribute(s16 value);
+    void ClearAttributes();
 };
 
 #endif

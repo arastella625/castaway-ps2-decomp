@@ -104,6 +104,14 @@ inline T **copy(T **first, T **last, T **result)
     return end + count;
 }
 
+// The same for a vector of s16 (ObjectItem's attributes).
+inline short *copy(short *first, short *last, short *result)
+{
+    const unsigned int count = last - first;
+    short *const end = (short *)memcpy(result, first, count * sizeof(short));
+    return end + count;
+}
+
 template <class T, class Allocator>
 class vector {
 public:
