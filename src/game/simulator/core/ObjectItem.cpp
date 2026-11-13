@@ -10,7 +10,7 @@ u32 ObjectItem::GetGuid() const
     return field_0x8;
 }
 
-int ObjectItem::GetCategory() const
+s8 ObjectItem::GetCategory() const
 {
     return 0;
 }
@@ -20,7 +20,7 @@ s16 ObjectItem::GetCount() const
     return 1;
 }
 
-int ObjectItem::GetOwnerID() const
+s16 ObjectItem::GetOwnerID() const
 {
     return -1;
 }
@@ -53,7 +53,7 @@ const InventoryTokens *ObjectItem::GetToken()
     return 0;
 }
 
-int ObjectItem::GetIngredientToken()
+const IngredientToken *ObjectItem::GetIngredientToken()
 {
     return 0;
 }
@@ -110,4 +110,29 @@ bool ObjectItem::IsDyable()
 
 void ObjectItem::SetupOwnershipInfo(cXObject *a)
 {
+}
+
+int ObjectItem::GetNumAttributes() const
+{
+    return mAttributes.size();
+}
+
+s16 ObjectItem::GetAttribute(int index)
+{
+    return mAttributes[index];
+}
+
+void ObjectItem::SetAttribute(int index, s16 value)
+{
+    mAttributes[index] = value;
+}
+
+void ObjectItem::AddAtribute(s16 value)
+{
+    mAttributes.push_back(value);
+}
+
+void ObjectItem::ClearAttributes()
+{
+    mAttributes.erase(mAttributes.begin(), mAttributes.end());
 }

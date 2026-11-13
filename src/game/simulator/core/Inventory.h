@@ -8,6 +8,7 @@
 #include "game/simulator/core/ClothingItem.h"
 #include "game/simulator/core/InventoryItems.h"
 #include "game/simulator/core/Neighborhood.h"
+#include "game/simulator/core/OwnableItem.h"
 #include "game/simulator/core2/cXPerson.h"
 #include "game/simulator/objectdata/XObjLang.h"
 
@@ -50,7 +51,9 @@ public:
 
     IngredientManager();
 
-    const IngredientToken *FindIngredientToken(s16 id) const
+    // 0x24F898; the body under the second name is what InterpValue inlines.
+    const IngredientToken *FindIngredientToken(s16 id) const;
+    const IngredientToken *FindIngredientTokenInline(s16 id) const
     {
         const ERQTable *rows;
         GetTableOf(GetObjectFolder()->mDatabase, "Ingredient", &rows);
@@ -65,7 +68,9 @@ public:
 
 extern IngredientManager *spIngredientManager;
 
-inline IngredientManager *GetIngredientManager()
+IngredientManager *GetIngredientManager(); // 0x24F688
+
+inline IngredientManager *GetIngredientManagerInline()
 {
     if (spIngredientManager == 0)
         spIngredientManager = new IngredientManager;
@@ -75,10 +80,9 @@ inline IngredientManager *GetIngredientManager()
 // One row of the "InventoryTokens" quickdata table, 0x24 bytes. The fields are scope 0x42's
 // columns.
 struct InventoryTokens {
-    s16 field_0x0;  // 0x00
-    s16 field_0x2;  // 0x02
-    s16 field_0x4;  // 0x04
-    s16 field_0x6;  // 0x06
+    u32 mGuid;      // 0x00  the object GUID the token stands for, 0 for none
+    u32 mFlags;     // 0x04  bit masks: 1 tool, 2 resource, 4 food, 0x20 fast tool, 0x80 fast food,
+                    //       0x100 hand object, 0x400 can be planted, 0x4000 dye (TokenItem's tests)
     u32 pad_0x8;    // 0x08
     u16 mID;        // 0x0c
     s16 field_0xe;  // 0x0e
@@ -94,6 +98,9 @@ struct InventoryTokens {
     s16 field_0x22; // 0x22
 
     int GetHarvestTool() const;
+    // TokenItem's tests go through this: written as (mFlags & mask) != 0 in each, the compiler
+    // turns a single-bit test into a shift, and the game has andi then sltu.
+    bool HasFlag(u32 mask) const { return (mFlags & mask) != 0; }
 };
 STATIC_ASSERT(InventoryTokens_size, sizeof(InventoryTokens) == 0x24);
 
@@ -137,7 +144,7 @@ inline s16 InventoryItems::GetTokenIDFromGUID(int guid)
         return 0;
     for (u32 i = 0; i < table->count; i++) {
         const InventoryTokens *token = &((const InventoryTokens *)table->rows)[i];
-        if (*(const int *)&token->field_0x0 == guid)
+        if (token->mGuid == (u32)guid)
             return token->mID;
     }
     return 0;
@@ -170,6 +177,122 @@ inline bool InventoryItems::HasTokenEverBeenCollected(s16 id) const
     if (word <= mCollectedWords && mCollectedBits)
         collected = (mCollectedBits[word] >> bit) & 1;
     return collected;
+}
+
+// Wii: CountItems, GetNonTokenCount and GetItem. A place past the end is null.
+inline int InventoryItems::CountItems()
+{
+    return mItems.size();
+}
+
+inline u8 InventoryItems::GetNonTokenCount() const
+{
+    return mNonTokenCount;
+}
+
+inline InventoryItem *InventoryItems::GetItem(int index)
+{
+    if (index >= (int)mItems.size())
+        return 0;
+    return mItems[index];
+}
+
+// Wii: GetObjectItemIndex, GetOwnableItemIndex and GetClothingItemIndex. The place of the first
+// object with this GUID; of the ownable with this GUID whose ownership points for the owner are
+// the highest above 0; of the first clothing item with this ID. -1 when there is none.
+inline int InventoryItems::GetObjectItemIndex(int guid)
+{
+    int index = 0;
+    for (InventoryItem **i = mItems.begin(); i != mItems.end(); ++i, ++index) {
+        InventoryItem *item = *i;
+        if (item->GetGuid() == guid)
+            return index;
+    }
+    return -1;
+}
+
+inline int InventoryItems::GetOwnableItemIndex(s16 owner, int guid)
+{
+    int best = 0;
+    int index = 0;
+    int result = -1;
+    for (InventoryItem **i = mItems.begin(); i != mItems.end(); ++i, ++index) {
+        InventoryItem *item = *i;
+        if (item->GetGuid() == guid) {
+            int points = item->GetOwnershipPoints(owner);
+            if (points > best) {
+                best = points;
+                result = index;
+            }
+        }
+    }
+    return result;
+}
+
+inline int InventoryItems::GetClothingItemIndex(s16 id)
+{
+    int index = 0;
+    for (InventoryItem **i = mItems.begin(); i != mItems.end(); ++i, ++index) {
+        InventoryItem *item = *i;
+        if (item->GetCategory() == 3 && item->GetID() == id)
+            return index;
+    }
+    return -1;
+}
+
+// Wii: RemoveObjectItem, RemoveOwnableItem, RemoveTokenItem and RemoveClothingItem. Each finds
+// the item's place and removes one of it (count of a token). Removing an object or an ownable
+// is always true; a token or clothing remove is false when there was none. Removing a token
+// with an ID from 0xD5 to 0x112 also unlocks goal-and-unlock entry 0x70 of kind 2.
+inline int InventoryItems::RemoveObjectItem(int guid)
+{
+    int index = GetObjectItemIndex(guid);
+    if (index != -1)
+        RemoveItem(index, 1);
+    return 1;
+}
+
+inline int InventoryItems::RemoveOwnableItem(s16 owner, u32 guid)
+{
+    int index = GetOwnableItemIndex(owner, guid);
+    if (index != -1)
+        RemoveItem(index, 1);
+    return 1;
+}
+
+inline int InventoryItems::RemoveTokenItem(s16 id, s16 count)
+{
+    int index = GetTokenItemIndex(id);
+    if (index != -1) {
+        RemoveItem(index, count);
+        if (id >= 0xD5 && id <= 0x112)
+            GetNeighborhood()->GetGoalAndUnlockData()->Unlock(2, 0x70);
+        return 1;
+    }
+    return 0;
+}
+
+inline int InventoryItems::RemoveClothingItem(s16 id)
+{
+    int index = GetClothingItemIndex(id);
+    if (index != -1) {
+        RemoveItem(index, 1);
+        return 1;
+    }
+    return 0;
+}
+
+// Wii: AddOwnableItem by GUID. Unlike the add by object, no on-add tree runs.
+inline int InventoryItems::AddOwnableItem(u32 guid)
+{
+    if (CanHoldMoreNonTokens()) {
+        mNonTokenCount++;
+        OwnableItem *item = new OwnableItem(guid);
+        SetInstanceID(item);
+        mItems.push_back(item);
+        return 1;
+    }
+    return 0;
 }
 
 #endif

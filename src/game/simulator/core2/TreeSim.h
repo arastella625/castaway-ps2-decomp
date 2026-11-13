@@ -70,7 +70,7 @@ public:
     int mLastResult;                 // 0x40  1 if the last primitive took its true branch
     s16 *mDefaultParams;             // 0x44  used by Gosub when a call passes none
     s16 mError;                      // 0x48
-    int field_0x4c;                  // 0x4c
+    int mNoMainTreeSim;              // 0x4c  HasMainTreeSim is its negation
 
     static s16 sMaxIterations;
     static int sInMainSim;

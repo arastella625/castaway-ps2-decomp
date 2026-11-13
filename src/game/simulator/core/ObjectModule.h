@@ -33,6 +33,9 @@ public:
     cXObject *mSpecialObjects[0x10]; // 0x2098  numbered from 0x4000
 
     cXObject *GetObjectFromID(int id);
+    // Wii: SimFlag. Only the value cXObject::Error passes is known; the name is ours.
+    enum SimFlag { kSimFlagError = 4 };
+    void SetSimFlag(int id, SimFlag flag, bool set); // 0x255688
 
     // The game has this as a function and also inlines it in TryAnimate.
     cXObject *GetObjectFromIDInline(int id)

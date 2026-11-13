@@ -19,15 +19,30 @@ public:
     u8 pad_0xc[0x4];
     const InventoryTokens *mToken; // 0x10  its "InventoryTokens" row. 0x14 bytes in all: InventoryItems::AddTokenItem allocates that
 
+    // Written from the PS2 code; vtable 0x4BB570 puts each in its slot.
+    u32 GetGuid() const;
+    void IncrementCount(s16 count);
+    void DecrementCount(s16 count);
+    const IngredientToken *GetIngredientToken();
+    void DoStream(ReconBuffer *buffer, int a);
+    bool IsFood();
+    bool IsFastFood();
+    bool IsTool();
+    bool IsFastTool();
+    bool IsResource();
+    bool CanBePlanted();
+    bool IsHandObject();
+    bool IsDye();
+
     TokenItem(s16 id, s16 count);
 
     s16 GetID() const;
     s16 GetCount() const;
-    int GetCategory() const;
-    int GetOwnerID() const;
+    s8 GetCategory() const;
+    s16 GetOwnerID() const;
     int GetOwnershipPoints(s16 a) const;
     int GetNumAttributes() const;
-    int GetAttribute(int a);
+    s16 GetAttribute(int a);
     void SetAttribute(int a, s16 b);
     void AddAtribute(s16 a);
     s8 GetStatusText();

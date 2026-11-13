@@ -112,6 +112,29 @@ A frame also has a word at `+8`. When a callee returns and it's set, the caller 
 
 **What an error does. Likely, from both builds:** `cXObject::Error` sets bit 0x100 of the object's flags (`+0xE4`) and a flag in `ObjectModule`. It doesn't stop anything itself; the tree stops because the primitive returns -1. `cXObject::HandleError` runs later: if the flag is set and an error is recorded, it clears the flag, calls `ObjectModule::CleanupPeople` and then the object's `Cleanup(0)`. If the object has a tree for entry point 3, `Cleanup` runs it, sets object data 0x3E to 0, clears bit 5 of data 8, and resets the stack to the tree for entry point 1, on every tile of a multi-tile object. With no such tree it picks the object up, resets it and puts it back. Both paths then set the idle status and quiet the object's sounds. So one error resets that object rather than ending the game.
 
+**What an error does to a Sim and its actions.** Read on Wii (`cXPerson::Cleanup(cXObject*)`); PS2 `cXPerson::Cleanup` (`0x1B0D68`) makes the same calls (`TreeSim::Reset`, `RunTree`, `ActionQueue::Remove` `0x1A69B0`, `0x1DD210`, `0x1DD2B8`). Likely.
+
+- **Cleanup(0) on the Sim**, after the Sim's own tree errored, does all of this:
+  - drops and cleans up what it holds, popping its stack;
+  - person data 0, 0x1B and data 0x22, 9 to 0;
+  - stops all its animation tracks and balloons;
+  - clears its routes and its places in other Sims' routing and trapped queues;
+  - finds it a good location if it's out of bounds;
+  - **resets its stack to the main tree** (entry point 1), and **runs its cleanup tree** (entry point 3).
+- **The running action is completed** (`CompleteCurrentAction`, PS2 `0x1DD210`): removed from the queue with `ActionQueue::Remove`. **Nothing else runs for it, no entry point 4.**
+- **Person data 0xE** goes to 0 (−100 if the Sim is the immediate-action Sim).
+- **Every waiting action** is then deleted with `DeleteTopAction` (PS2 `0x1DD2B8`) until the queue is empty. That's **`ActionSkipped`**, so **each one's entry point 4 runs**.
+- **When another object errors**, `CleanupPeople(object)` calls each Sim's `Cleanup(object)`:
+  - **Tied to the object** (holding it, routing to it, or its current action's icon object): the Sim gets the full reset above.
+  - **Otherwise:**
+    - if the running action's stack object is that object, the action is completed as above;
+    - if only its icon is, the icon is cleared;
+    - every waiting action whose stack or icon object is that object is removed with `ActionQueue::Remove`, **without** entry point 4;
+    - routes that were moving that object (a Sim, type 2) are marked done.
+- **For a port:**
+  - a Sim's error ends its running action **silently**, runs entry point 4 for each waiting one, empties the queue, and restarts the Sim on its main tree after its cleanup tree;
+  - "ended by an error" for the running action matches the first part.
+
 Error codes seen so far:
 
 | Code | Meaning |
@@ -439,7 +462,7 @@ The stack object is the frame's object ID. A call passes it on to the called tre
 | Budget | `+4` bit 0 just test, bit 1 clear means subtract |
 | CallNamedTree | See its own section |
 | CreateObject | See its own section |
-| Dialog | `+1` icon index; `+7` bits 1-3 icon type, bits 4-6 result temp, bit 7 semi-global strings |
+| Dialog | `+0`, `+3`, `+4` button strings, `+2` message, `+6` title; `+1` icon index; `+5` bits 0-3 the type; `+7` bits 1-3 icon type, bits 4-6 result temp, bit 7 semi-global strings. See its own section |
 | DirectionTo, DistanceTo | A flag byte (`+4`, `+2`), bit 0 set: the "from" value is the scope in the next byte and the data after it. Clear: scope 3, data 0xB. DistanceTo bit 1 returns sixteenths of a tile |
 | FindGoodLocation | `+2` flags: bit 0 start at relative object, 1 not prefer empty tiles, 2 editable tiles only (tile flag 0x20 clear, as `MayEditTile` in world.md), 3 orientation in temp 0, 4 prefer under roof |
 | Grab | `+0` bit 0 parenting prop bone |
@@ -593,6 +616,22 @@ The primitive runs again each tick until it returns something other than 2. In o
 7. If an animation event is waiting, store its number in the event target and **return 0**, the false branch.
 8. Otherwise, if the animation has finished, deliver any end event the same way, or stop and **return 1**, the true branch.
 9. Otherwise **return 2** and wait.
+
+**Behaviour 4, an overlay ("effect") animation.** `SAnimator2::FXAnimationBehavior` (PS2 `0x10CCF8`). Read on Wii, where it has names, and likely.
+- **Operands:** `+3` = 1 picks it.
+- **What it does:** it plays the clip on a separate animation track (`EAnimController` track flag `0x8000`), on top of whatever the Sim's main animation is doing. It never waits for the clip and never delivers events.
+- **Animation 0:**
+  - sets that track's intensity to the constant at Wii `lbl_805D9238` (likely 0, fading it out);
+  - finishes any events still owed;
+  - **returns 1**.
+- **Another animation:**
+  1. resolves the clip as above, and loads it. A lookup or load that isn't done returns its own value, so 2 while loading, or the error;
+  2. starts it on the overlay track at the speed the Sim uses (negative with `+5` bit 1);
+  3. **returns 1** at once.
+- **Example: `Motive Check - Hygiene` (`person_sg` 0x201C).**
+  - Node 4 preloads animation 1 (`+5` bit 7). Node 6 starts it as an overlay (`01 00 00 01 00 20 00 00`). **Node 20 turns it off** (`00 00 00 01 00 20 00 00`): animation 0, behaviour 4, both branches 254.
+  - For a castaway with no action, kind 0 resolves animation 1 to `template_person`'s list 0x81 entry 1, **`a_idle_lowhygiene`**.
+- **For a port:** return 1. Start or stop an overlay if it can play one, and leave the Sim's main animation alone.
 
 So a tree animates in a loop: the false branch handles an event, then comes back to the same node, and the true branch means it finished. With no events to deliver, one play is many ticks of 2 and then a 1. A port without real animation can return 1 at once, or after the animation's length, and trees that wait for events will just see none. The event target is `+2`'s local or parameter 0, and a tree with neither is error 8. End events are negative in the animator (`+0x194`), and with `+5` bit 1 set they're stored as `-1 - value`.
 
@@ -867,10 +906,10 @@ So this is how entry points 14, 16, 18 to 29, 32 and 33 are reached, which "Entr
 
 ## FamilyInventory (opcode 0x46)
 
-`TryFamilyInventory`, PS2 `0x23A9D0`, about 2,000 instructions with the inventory calls inlined. Not matched.
+`TryFamilyInventory`, PS2 `0x23A9D0`, 2,020 instructions with the inventory calls inlined. Parked 2 words off with the logic complete (`cXObjectPrims.cpp`, under `NON_MATCHING`): the game copies the looked-up neighbour through a temporary, and nothing else differs.
 
-- **Proven on PS2:** the 14 operations, where each error comes from, and the operands being read through `InterpValue`.
-- **Likely, read on Wii:** the detail of each operation (`TryFamilyInventory__8cXObject`, which names everything it calls).
+- **Proven on PS2:** everything in this section. The 14 operations, where each error comes from, the operands read through `InterpValue`, and the detail of each operation, which was read on Wii first (`TryFamilyInventory__8cXObject` names everything it calls) and then written and compared with the PS2 code word for word.
+- **Corrections to the Wii reading, from PS2:** the ownable Find and Remove pick the item with the most ownership points for the owner, not the first with the GUID; removing a token can unlock something; what a remove returns depends on the category (op 1); op 7 reads the owner before it checks the item.
 
 | Operand | Meaning |
 |---|---|
@@ -915,8 +954,8 @@ The result is true unless an operation below says otherwise.
 | Op | What it does |
 |---|---|
 | 0 | **Add**, by category. Object or ownable with bit 7: the object whose ID is `+2` (none is error 0x33), added as itself. Without bit 7: the GUID in `+4`. An object whose GUID is a token's adds one of that token instead (see the table above). True if the add worked. Token: ID `+2` with bit 7, else `+4`, count `+3`. Clothing: ID `+2` with bit 7, else `+4`. Tokens and clothing are always true |
-| 1 | **Remove**, by category. With bit 7, the item at place `+2`: one of it, or `+3` of a token. Otherwise: an object by GUID `+4`, or with bit 5 the object whose ID is `+2`, found by GUID (see below); an ownable by owner `+3` and GUID `+4`; a token by ID `+4`, count `+3`; clothing by ID `+4`. True if something was removed |
-| 2 | **Find**: the place of the object with GUID `+4`, the ownable with owner `+3` and GUID `+4`, the token with ID `+4`, or the clothing with ID `+4`. It's written to `+2`, -1 if there's none, and the result is true only if found |
+| 1 | **Remove**, by category. With bit 7, the item at place `+2`: one of it, or `+3` of a token. Otherwise: an object by GUID `+4`, or with bit 5 the object whose ID is `+2`, found by GUID (see below); an ownable by owner `+3` and GUID `+4` (the one with the most ownership points for that owner, see op 2); a token by ID `+4`, count `+3`; clothing by ID `+4`. The result: by place, always true; an object by GUID or an ownable, always true, found or not; an object by object ID, false when the object, the tribe inventory or the item is missing; a token or clothing by ID, false when there is none. Removing a token with an ID from 0xD5 to 0x112 also unlocks goal-and-unlock entry 0x70 of kind 2 |
+| 2 | **Find**: the place of the first object with GUID `+4`, the ownable with GUID `+4` whose ownership points for owner `+3` are the highest and above 0, the first token with ID `+4`, or the first clothing with ID `+4`. It's written to `+2`, -1 if there's none, and the result is true only if found |
 | 3 | **Count**: `+2` = the number of items |
 | 4 | Item at place `+2` gets a new attribute `+3` |
 | 5 | `+3` = attribute temp 0 of item `+2` |
@@ -929,7 +968,76 @@ The result is true unless an operation below says otherwise.
 | 0xC | Item `+2`: attribute temp 0 = `+3` |
 | 0xD | `+2` = 0 for an object or ownable, or `+4` for a token or clothing item. Any other category is error 0x18 |
 
-**One quirk, Wii:** removing an object by object ID (op 1, category 0, bit 5) finds the object's place in the **tribe's** inventory, then removes that place from the target inventory. A port that keeps one inventory won't notice. With no tribe it's false. Operations 4, 5, 6 and 0xC don't check that the item exists.
+**Quirks, proven on PS2:** removing an object by object ID (op 1, category 0, bit 5) finds the object's place in the **tribe's** inventory, by the GUID in words 0xE and 0xF of its definition, then removes that place from the target inventory. A port that keeps one inventory won't notice. With no tribe, no object or no such item it's false. Operations 4, 5, 6 and 0xC don't check that the item exists, and op 7 reads the item's owner before it checks the item, so a place past the end reads through a null pointer before error 0x6C.
+
+## The family inventory: what's in it, what the screen shows, and what its actions run
+
+**The items.** The family's `InventoryItems` holds `InventoryItem`s of four kinds (the `+1` category above): object, ownable, token and clothing.
+- **Fields:** each has an instance ID, a count (1 for everything but tokens), attributes, an owner and a status byte.
+- **A token item** points at its `InventoryTokens` row (`TokenItem +0xC`, Wii `GetToken`).
+- **Opcode 0x46:** Port's INVENTORY_ADD, REMOVE, FIND, COUNT and NON_TOKEN_COUNT are operations 0, 1, 2, 3 and 0xB in the table above.
+
+**`InventoryTokens` rows** (0x24 bytes, 214 on the disc). Proven, PS2 and disc:
+
+| Offset | Holds | Expression column (scope 0x42) |
+|---|---|---|
+| `+0` u32 | The object GUID the token stands for, 0 for none (gold, pearls and other finds have none) | 0xA (low half), 0xB (high half) |
+| `+4` | **Flags** (below) | 8 |
+| `+8` | Pointer to the token's **`TokenCatalogData`** row | — |
+| `+0xC` u16 | Token ID | — |
+| `+0xE`, `+0x10`, `+0x14`, `+0x18` to `+0x22` | Other columns | 7, 2, 5, 13, 14, 0, 3, 1, 4 |
+
+- Column 12 is the token's place in the tribe inventory (`GetTokenItemIndex`), and column 16 whether it was ever collected.
+- **Flags** (bit masks; an expression's "bit N" is `1 << (N − 1)`). Proven on PS2: `TokenItem`'s tests match (`IsTool` to `IsDye`, `0x24F070` to `0x24F150`):
+
+| Mask | Meaning |
+|---|---|
+| 0x1 | tool |
+| 0x2 | resource |
+| 0x4 | food |
+| 0x10 | can be put in the hand (with 0x100) |
+| 0x20 | fast tool |
+| 0x80 | **fast food** (can be eaten from the inventory) |
+| 0x100 | hand object |
+| 0x200 | needs identifying |
+| 0x400 | can be planted |
+| 0x4000 | dye |
+
+- **`TokenCatalogData`** (0x18 bytes, 570 rows): `+4` the **name** and `+8` the **description**, both language strings; `+0xC` and `+0x10` the **icon** shader's name hash; `+0x14` a small number, likely a sort group.
+
+| Token | ID | GUID | Flags | Icon |
+|---|---|---|---|---|
+| Coconut | 0xAE | `0xA78125FE` | 0x1096: resource, food, 0x10, fast food | `ocs_food_coconut` |
+| Clam Meat | 0x130 | — | 0x1006 | `resource_shell_clam` |
+| Large Clam Shell | 0x5E | `0xCC155766` | 0x1012 | `resource_shell_clam` |
+| Gold | 0x133 | — | 0x1002 | `ocs_resource_gold` |
+| Pearl | 0x136 | — | 0x1002 | `ocs_resource_pearls` |
+| Jade, Moonstone | 0x135, 0x134 | — | 0x1002, 0x1000 | — |
+| Treasure Map Piece | 0x32 | `0xDEC81937` | 0x1012 | — |
+
+**What the opening adds.**
+- **A palm harvest** adds one coconut token (0xAE) through `Sub - Add Resources` (FamilyInventory op 0, token, count 1). See "Harvest" above.
+- **A clam harvest** adds the clam's own resource token, then may run `source_sg` 0x203F `Sub - Process Special Resources`. That adds **one** of Gold 0x133, Pearl 0x136, Jade 0x135 or Moonstone 0x134, each with its message, or once a Treasure Map Piece 0x32.
+- **Putting a coconut away** (`Interaction - Put in Inventory`, `resources_sg` 0x2008) adds it as its token, since its GUID is the coconut token's.
+
+**The screen.** The Inventory screen is **`NV5Target`** (movie `tsc6_inventory`); Frontend is building it.
+- **Each entry** is a `UIInventoryItem`: the item's count, its name, description and icon from the token's catalogue row, and owner and status lines.
+- **Tabs** come from the flags: any food (food or an ingredient), any tool (tool or fast tool), resource, object, clothing. Ingredient sub-tests (fruit, fish, meat and so on) go through the `IngredientManager`. Read on Wii, likely.
+
+**The actions on an entry. Proven, PS2** (`0x2E5188` Eat, `0x2E5238` Put in hand; Wii `NV5Target::DoEatFromInventory`, `DoPutInHand`).
+- **How they run:** each runs tree **0x20A0, `id_perform_inventory_action`**, on the selected Sim (`_globals +0x174`) through the Sim's TreeSim virtual (vtable `+0x50`), with the Sim's own behaviour and itself as the stack object.
+  - **Eat:** parameters **{1, token ID, 0, 0}**.
+  - **Put in hand:** **{0, token ID, 0, 0}**.
+  - Wii also has `DoWearFromInventory`, which puts on a clothing item directly (`InventoryItems::PutOnClothingItem`), with no tree. The PS2 copy isn't read.
+- **What the tree does:**
+  1. **Make the object:** a token ID ≤ 0 is false. Otherwise it reads the token's GUID (columns 0xB and 0xA) and **CreateObject**s it out of the world. A failed create is false.
+  2. **Eat** (parameter 0 ≠ 0) needs **food (0x4) and fast food (0x80)**, else false. It then:
+     - snaps the new object to the Sim (SnapObject);
+     - **pushes the object's interaction 0** on the Sim, priority 3, with the object as the queue icon. For a coconut, interaction 0 is **Eat** (check tree `resources_sg` 0x200D, action tree **0x200C `Interaction - Eat`**);
+     - **removes one of the token** from the family inventory (FamilyInventory op 1, token, by its place from column 12), and returns true.
+     - So the Sim eats a fresh coconut, and `Interaction - Eat` calls `Tutorial - Task Complete`, which is what step 11 waits for.
+  3. **Put in hand** (parameter 0 = 0) needs **0x10 and hand object (0x100)**, else false. It runs the named check tree **`ct_fast_tool`** (`person_sg` STR# 0x12F, string 8) on the Sim with the new object as stack object. Tools have their own `ct_fast_tool` (for example `tool_spear_simple` 0x1009).
+  4. **A coconut** has 0x10 but not 0x100, so it can be eaten from the inventory but not put in the hand. Gold, pearls and the other finds have no GUID, so neither action does anything for them.
 
 ## SetMotiveDelta (opcode 0x1D)
 
@@ -1144,7 +1252,7 @@ I didn't find PS2's copy.
 | -3 | 30.0 | 714 |
 | Anything else | 1.0 | 23.8 |
 
-**How the player sets it** (`H2DTarget::UpdateSpeedControls`, `0x2A0408`, state at HUD `+0x224`):
+**How the player sets it** (H2DTarget's speed input step, `0x2A0578`, request at HUD `+0x224`; it calls `UpdateSpeedControls`, `0x2A0408`, for the icon, as ui.md says):
 - **-3 (30×)** when no family member is awake and visible (`0x2550D8`, Wii `IsFamilyMemberAwakeAndVisible`), unless a check on `0x514EF4` holds it at 0. **So time races while everyone sleeps.**
 - **-2 (5×)** while controller command 0x28 is held, and only if fast-forward is enabled (`0x514F3C`).
 - **-4** (command 0x27) pauses.
@@ -1165,15 +1273,362 @@ I didn't find PS2's copy.
 
 ## Goals: what GenericSimCall 0x42 returns
 
-**Read on Wii; PS2 calls the same vtable slot.** Likely. Every action ends in `person_sg`'s `Update Goals and Unlocks` (0x20A1), which calls GenericSimCall 0x42 with a goal book in t0. That is `GoalUnlock::TryEvaluateGoals(book)`:
+**Proven, PS2**, with Wii's names. The `GoalUnlock` vtable is at `0x4BC0B0`; its slots are listed at the end. Each PS2 function below was compared with Wii's, and they use the same goal numbers, dialog keys, lot numbers and calls, in the same order. PS2 inlines `UIAUDIO::Instance` (a singleton at `0x49292C`), `EHouse::GetLotNum` (house `+0x3C`) and `cXPerson::GetNeighbor`.
 
-1. No `PlanManager`: 0.
+| Function | PS2 | Wii |
+|---|---|---|
+| `ClearGoalsAndUnlocks` | `0x1EF7A8` | `8010FAD8` |
+| `GetUnlockIndex(type, number)` | `0x1EFB40` | `8010FF44` |
+| `TryEvaluateGoals` | `0x1EFC80` | `80110830` |
+| `PlanMade` | `0x1EFD98` | `80110950` |
+| `ResourceHarvested` | `0x1F0010` | `80110C20` |
+| `CheckBook1` to `CheckBook6` | `0x1F03D0`, `0x1F0DF0`, `0x1F1698`, `0x1F1D90`, `0x1F22D8`, `0x1F2D90` | `80110FE0` on |
+| `CheckMiscGoals` | `0x1F36C8` | `80113370` |
+
+### The goal data in the save
+
+These are the 128 bytes world.md describes under "`GoalUnlock`" (neighbourhood data, goal data `+4`):
+
+| Bytes | Holds |
+|---|---|
+| 0 to 5 | Books 1 to 6 |
+| 6 to 0x17 | Pages: book × 10 + page, pages 1 to 3 |
+| 0x18 to 0x5F | Goals: book × 100 + page × 10 + goal, goals 1 to 4 |
+| 0x60 to 0x67 | Unlocks 0 to 63, one bit each: unlock n is bit n % 8 of byte 0x60 + n / 8 |
+| 0x68 to 0x7F | Goals 1000 to 1023, the "misc" goals. Byte 0x7F is also `DoStream`'s marker |
+
+Each byte is a signed status:
+
+| Status | Book or page | Goal |
+|---|---|---|
+| -1 | Not used | Not used |
+| 0 | Locked. Every book and page starts here | Not used by the checks |
+| 1 | Open | Open, not achieved. Every goal starts here |
+| 2 | Not used | **Achieved**, reward not given yet |
+| 3 | Finished | **Rewarded** |
+
+- **`ClearGoalsAndUnlocks`** (new game) zeroes all 128 bytes. It sets every goal, 0x18 to 0x5F and 0x68 to 0x7E, to 1. Then it marks these as unused (-1): page 12, page 43, and goals 134, 213, 214, 233, 234, 324, 414, 423, 424, 532, 533, 534, 613, 614, 632, 633 and 634.
+- **Unlocks all start clear.** So a new game has every motive locked (see "Motives over time").
+- **`GrantUnlock(type, n)`** (slot 9):
+  - a goal goes from 1 to 2 only;
+  - a book or page goes from 0 to 1 only;
+  - an unlock sets its bit.
+- **`IsCompleted`** is status 3, or the bit set for an unlock. **`IsLocked`** is status 0, or the bit clear.
+
+### Who marks a goal achieved (1 to 2)
+
+Something outside the checks does it, and the checks only reward it. The callers found:
+
+- **Trees**, through CompleteGoal operation 2 on type 2 (see "CompleteGoal"). Some examples:
+  - `resources_sg` `Interaction - Eat` and `food_carry_sg` `Interaction - Eat SG`: goal 1014;
+  - `bed_sg` `Interaction - Sleep`: goal 1012;
+  - sitting in a chair (`Motives - Comfort Inc`), relaxing on a bed or sitting by a fire: goal 1010;
+  - `social_sim2sim` `Greet - Person A`: goals 121 and 1011;
+  - `art_painting_sg` `SG_I_View`: goal 1013;
+  - `global` `Skill - Show Level Gain`: goal 1017;
+  - `crafting_sg` `Repair - Rock Workbench`: goal 111;
+  - the airplane radio: goals 131 and 132.
+- **`PlanMade(plan)`** (slot 16), when a plan is made:
+  - plans 0xD6 to 0xE6: goals 114 and 1010;
+  - 0x6C: goal 231;
+  - 0xC to 0x13: goal 222;
+  - 0x49 to 0x55: goal 223;
+  - 0x185 to 0x188: goal 623;
+  - 0x15: goal 111;
+  - 0x16: goals 111 and 1006;
+  - 0x32: goal 622;
+  - 0x38, 0x3C, 0x40 or 0x44: the first one sets unlock 27, and a second one, with unlock 27 already set, achieves goal 612;
+  - plans 0x12C to 0x1CD whose token is clothing for body part 0x1E: goal 224.
+- **`ResourceHarvested(token)`** (slot 17), when a resource is harvested:
+  - 0x7B: goal 1001;
+  - 0x9A: goal 1002;
+  - 0x8F: goal 1003;
+  - 0x6F: goal 1004;
+  - 0x99: goal 1005;
+  - 0x12C: goal 321;
+  - 0x12E: goal 413;
+  - 0xD9, 0x102, 0x10A or 0x10E: goal 323.
+- **The checks themselves**, for goals whose condition is in code. They are listed per book below.
+
+### `TryEvaluateGoals(book)`
+
+1. No `PlanManager`: returns 0.
 2. Book 0: `CheckMiscGoals`.
-3. Books 1 to 6: the book's own status (`GetUnlockIndex(0, book)`, a byte at `+4` on the goal data) must be neither 0 nor 3, or it's 0. Then `CheckBook1` to `CheckBook6`. Any other book is 0.
+3. Books 1 to 6: returns 0 if the book's status is 0 or 3. Otherwise it runs `CheckBook1` to `CheckBook6`. Any other book returns 0.
 
-Each check walks its goals. A goal with status 0 can move to 1 when its condition starts to apply (for example, being on a lot past 1). The first goal found at status 2 gets its plan group unlocked (`PlanManager::UnlockGroupPlan`) and a sound, and moves to 3. Its number (0x6D, 0x85, 0x86 and so on) is returned at once. So the statuses are likely 0 hidden, 1 active, 2 achieved and 3 rewarded, and **the call reports at most one newly finished goal**: t1 is its number and the branch is true, or false when nothing finished.
+**The value returned is a dialog key, not a goal number.** GenericSimCall 0x42 puts it in t1 and takes the true branch when it isn't 0. `person_sg` `Process Unlock Dialogs` (0x20A3) then picks the dialog from parameter 0, the book, and parameter 1, this key. One call gives at most one key, since each check returns as soon as it rewards something.
 
-The `GoalUnlock` vtable, from Wii's `__vt__10GoalUnlock`, names the slots our `GoalAndUnlockData` stubs: 0 `ClearGoalsAndUnlocks`, 1 `GetUnlockCount`, 2 `IsUsed`, 3 `IsLocked`, 4 `IsUnlocked`, 5 `IsCompleted`, 6 to 8 the same three by number, 9 `GrantUnlock`, 10 `GetStatus`, 11 `SetStatus`, 12 `IsRecentlyUnlocked`, 13 `SetRecentlyUnlocked`, 14 `DoStream`, 15 `TryEvaluateGoals`, 16 `PlanMade`, 17 `ResourceHarvested`, 18 `AreAnyMotivesLocked`, 19 `IsMotiveUnlocked`, 20 `OpenAllBooksAndPages`, then the destructor.
+**Who calls it.** `person_sg` `Update Goals and Unlocks` (0x20A1) runs at the end of every action. Node 0 goes on only when my object variable 0xB equals global 3, the selected Sim's ID (likely: that variable is the Sim's own ID):
+
+1. **Book 1 still locked:** if tutorial flag 0 (`House Complete`, unlock 0) is set, it opens book 1 (CompleteGoal operation 1).
+2. **Each open book** (status 1), 1 to 6 in order: GenericSimCall 0x42 with t0 = the book. The first one that returns true goes straight to `Process Unlock Dialogs`.
+3. **None did:** t0 = 0, the misc goals. True goes to `Process Unlock Dialogs`.
+
+### How each check works
+
+Every check walks its pages in order:
+
+- **An open page** (status 1) walks its goals in order. The first goal at status 2 is rewarded:
+  - `PlanManager::UnlockGroupPlan(goal number, 0)`;
+  - if that moved no plan, sound `0xF72F0A3C` (`UnlockGroupPlan` plays its own when it does);
+  - status 3;
+  - **return the goal's dialog key at once.**
+- **A page whose goals are all 3**, or unused, is finished the same way. Its plan group is the page number, it gets its own key, and its status becomes 3.
+- **A book with no open page left** is set to 3, and the check returns 0.
+- **Opening a page.** A locked page (0) is opened by its own condition, and that also returns a key.
+- **Unused pages and goals** (-1) never block a page or a book.
+
+**What a reward unlocks.** `UnlockGroupPlan(g)` (Wii `800D2D48`) moves every locked plan whose group (`Plan +0x10`) is g into the unlocked list and marks it unlocked. It plays the unlock sound `0x8335FCBB` unless its second argument is set, and returns whether any plan moved. **So a finished goal's plan group unlocks crafting plans, not motives.** Motives are unlocks 8 to 15, and only two things set them: a tree's CompleteGoal, and `CheckMiscGoals` (below).
+
+**Book 1** (`CheckBook1`):
+
+| Step | Condition and result | Key |
+|---|---|---|
+| Open page 11 | Page 11 locked. Opens 11 and 13, and 12 too if more than one person is on the islands (`GetNumberOfPeopleOnIslands`). Returns a key only on lot 1 or below, after sound `0xFC510AC7`. Otherwise the walk goes on | 0x14 |
+| Goal 111 | Achieved by plans 0x15 and 0x16, or by `Repair - Rock Workbench` | 0x16 |
+| Goal 112 | Achieved outside the check | 0x18 |
+| Goal 113 | Achieved by the check **on lot 3** | 0x1E |
+| Goal 114 | Achieved by plans 0xD6 to 0xE6 | 0x24 |
+| Page 11 done | Plan group 11 | 0x19 |
+| Goal 121 | The selected Sim's neighbour has a relationship of type 0 (`CountRelationshipsOfType(0, 1)` above 0), or `Greet` | 0x3A |
+| Goal 122 | A relationship of type 6 | 0x3B |
+| Goal 123 | The family has more than one member | 0x3C |
+| Goal 124 | Type 0 relationships = people on the islands − 1 | 0x3D |
+| Page 12 done | Plan group 12 | 0x3E |
+| Goals 131, 132, 133 | Outside the check (131 and 132 are the airplane radio) | 0x40, 0x41, 0x42 |
+| Page 13 done | Plan group 13 | 0x6D |
+
+**Books 2 to 6** follow the same pattern. Each first opens its page 1 with a key, and that returns only up to a lot number: book 2 lot 5 or below (0x21), book 3 lot 7 (0x2F), book 4 lot 11 (0x3F), book 5 lot 17 (0x4E). Book 6 opens page 61 with key 0x5C at once. Then:
+
+- **In-code goals:**
+  - goal 211: `CountRelationshipsOfType(6, false)` is more than `CountRelationshipsOfType(6, true)`;
+  - goal 232: on lot 7;
+  - goals 311 to 314: on lots 8, 9, 11 and 14;
+  - goal 422: on lot 17;
+  - goals 512 to 514: on lots 22, 21 and 26;
+  - goal 521: unlocks 20 to 23, the four statues, all set;
+  - goal 531: on lot 16 with the selected Sim's motive 15 at or above a constant (likely: the float compare isn't read further);
+  - goals 611 and 621: a room meeting a size condition (`RoomManager`, words `+0` and `+4`).
+- **Pages that open on something other than the previous page:**
+  - page 22 opens when goal 114 is rewarded (plan group 0x336);
+  - page 23 on unlock 16 ("Unlock Page 23", group 0x337);
+  - page 42 on unlock 19 ("Unlock Page 42", group 0x34A);
+  - page 52 on the four statue unlocks, with lot checks against 21 and 24 that aren't read in detail;
+  - page 53 on lot 16 or above (group 0x355);
+  - pages 62 and 63 on the tribe's inventory.
+- **What finishing page 11 of book 2 also does:** if page 12 is unused (a single castaway), it unlocks page 12's plan groups 0x79 to 0x7C and 0xC, so nothing is lost.
+
+The keys run 0x21 to 0x2E and 0x36 to 0x38 (book 2), 0x2F to 0x34, 0x6F to 0x71, 0x79 (book 3), 0x3F to 0x4D (book 4), 0x4E to 0x5B, 0x72 (book 5) and 0x5C to 0x67 (book 6). This is **likely** for the per-goal detail of books 2 to 6. It's read on Wii, and PS2 was compared by its goal numbers, keys and calls, not line by line.
+
+**The misc goals** (`CheckMiscGoals`, book 0) run every time:
+
+1. **Opening books by lot.** It opens any still-locked book on reaching a lot:
+   - book 1 above lot 1;
+   - book 2 at lot 4 or above;
+   - book 3 at lot 7;
+   - book 4 at lot 11;
+   - book 5 at lot 17;
+   - book 6 on lot 18.
+2. **Goal 1009** is achieved by the check when the selected Sim has a type 0 relationship (`CountRelationshipsOfType(0, 0)` above 0).
+3. **Goals 1009 to 1014 unlock a motive each** when rewarded. These are the only goals that do. The reward is plan group 1009 to 1014, status 3, then `GrantUnlock(4, n)`. The key is returned only on lots up to 8; past that, the walk goes on.
+
+| Goal | Achieved by | Unlock | Motive | Key |
+|---|---|---|---|---|
+| 1009 | A type 0 relationship (the check) | 14 Social | 14 | 0x7E |
+| 1010 | Sitting, relaxing on a bed, sitting by a fire; plans 0xD6 to 0xE6 | 9 Comfort | 6 | 0x7F |
+| 1011 | `Greet` | 12 Hygiene | 8 | 0x80 |
+| 1012 | Sleeping in a bed | 13 Fun | 15 | 0x81 |
+| 1013 | Viewing a painting | 15 Room | 13 | 0x82 |
+| 1014 | Eating, after the tutorial; pulling toilet paper; inspecting the catamaran | 11 Bladder | 9 | 0x83 |
+
+4. **Goals 1001 to 1008, 1015, 1016 and 1017** give only a plan group and a key: 0x75, 0x76, 0x77, 0x78, 0x7A, 0x7B, 0x7C, 0x7D, then 0x84, 0x85, 0x86. Goals 1007, 1008 and 1015 play sound `0xB22C2A90` themselves; they and 1016 and 1017 pass 1, so `UnlockGroupPlan` plays none.
+
+The unlock names are the global constant table 0x116, `Tutorial Flags`: 8 energy, 9 comfort, 10 hunger, 11 bladder, 12 hygiene, 13 fun, 14 social, 15 room. The motive each one guards is `IsMotiveUnlocked`'s table (`0x804199B8` on Wii): motives 5 to 9 → 8, 9, 10, 12, 11, and 13, 14, 15 → 15, 14, 13.
+
+### The eat goal and hunger
+
+**Proven on the disc and PS2.** Hunger (motive 7, unlock 10) is **not** unlocked by a goal check. The tutorial object's own trees do it.
+
+- **Where the state is kept.** The tutorial runs `Tutorial - Tutorial House` (0x1001) from `Function - Main`. Its state is **the tutorial object's attribute 1**, matched against global constant table 0x12C, `Tutorial State`: 10 is "Survival Basic 3: eat", 11 is "Basic - Eat".
+- **How a step advances.** The tree picks the step's subtree by that number. When the subtree returns true, it adds 1 to attribute 1 and returns false.
+- **Step 10 is `Basic - Survival Basic 3: eat`** (0x1009):
+  1. `sub - Create Coconut`;
+  2. a modal Dialog, string 0x18 (string 2 on Wii);
+  3. **CompleteGoal operation 3, type 4, constant `0x4B0A`**, which is table 0x116 entry 10, so `GrantUnlock(4, 10)`: hunger unlocked;
+  4. return true, so step 11, `Basic - Eat` (0x1046), starts.
+- **So hunger unlocks when the player closes the eat step's message, before the Sim eats.** From then on `SimMotives` no longer holds motive 7 at 0.
+- **The other motives' tutorial unlocks:**
+  - step 12, `Survival Basic 4: sleep`, unlocks energy (8);
+  - `Tutorial - End`, from node 0, unlocks energy, hunger and tutorial flag 0. Its nodes for hygiene (12) and bladder (11) can't be reached from node 0;
+  - the rest come from the misc goals above.
+- **When eating counts as goal 1014.** `Interaction - Eat` marks goal 1014 only when tutorial flag 0 (`House Complete`) is set: node 40 tests it, and node 41 sets goal 1014. During the tutorial, eating marks no goal. Bladder unlocks through goal 1014 after it, for example by eating.
+- **For a port to do this on the beach:**
+  - keep the tutorial object's attribute 1 as the step;
+  - run step 10's three actions when it is reached: make a coconut, show the message, set unlock bit 10;
+  - then advance to 11.
+  - Book 1 stays locked while tutorial flag 0 is clear and the lot is 1. So `Update Goals and Unlocks` evaluates only book 0, the misc goals, until then.
+
+### The vtable
+
+PS2 `0x4BC0B0`, with 8-byte entries from `+8`. The slots are:
+
+| Slots | Functions |
+|---|---|
+| 0 to 5 | `ClearGoalsAndUnlocks`, `GetUnlockCount`, `IsUsed`, `IsLocked`, `IsUnlocked`, `IsCompleted` |
+| 6 to 8 | The same three by book, page and goal |
+| 9 to 13 | `GrantUnlock`, `GetStatus`, `SetStatus`, `IsRecentlyUnlocked`, `SetRecentlyUnlocked` |
+| 14 to 17 | `DoStream`, `TryEvaluateGoals` (`+0x80`), `PlanMade`, `ResourceHarvested` |
+| 18 to 21 | `AreAnyMotivesLocked`, `IsMotiveUnlocked`, `OpenAllBooksAndPages`, the destructor |
+
+`GetStatus` on an unlock returns its bit, and `SetStatus(4, n, 1)` grants it.
+
+## CameraControl (opcode 0x28)
+
+**Proven, PS2** (`0x232378`) for what it returns, with Wii's names (`cXObject::TryCameraControl`). The camera work itself (which animation, cuts, interpolation, letterbox) is **not read** in detail. 57 uses.
+
+It's **presentation**: it drives the `CameraDirector` (`_globals +0x1D0`) and keeps its own progress in the frame word `+8`. What a tree sees:
+
+| Case | Returns |
+|---|---|
+| `_globals +0x464` set (Wii `+0x3B4`; what sets it isn't read) | Frame `+8` = 0, **false** |
+| The camera animation it asked for is still loading | 2: wait |
+| **`+4` bit 6, the test:** the director isn't in control, or it's in its hold state (state `+0x2B0` 0, 2 or 8) | **true**, otherwise **false**. Nothing is started |
+| The director's state `+0x2AC` is 2 | false |
+| I'm the selected Sim, `+4` bit 7 set, `+6` bit 2 clear, and a player interactor exists | false |
+| A target object (`+4` bit 4) that doesn't exist | Error 0x15, -1 |
+| Started, **`+4` bit 5 set** | **true at once** |
+| Started, bit 5 clear | 2 (wait) every tick until the director is done (state `+0x2B0` back to 0 or 8), then **true** |
+
+`+4` bit 0 also enables cancelling (`CameraDirector::CancelEnable`).
+
+**Who branches on it.** 12 of the 57 nodes have different true and false targets:
+
+- **Four are the test** (`00 00 00 00 ef 01 20 00`), in `Intro Camera` (three scenarios) and `scenario_sg` `Release to Game Camera`. They loop on `idle` until the camera is free.
+- **Seven are portal arrivals and the flood reaction.** They start a shot with bit 5 set and take a different path when it fails.
+- **One is `Interaction - Intro Sequence` node 9** (below).
+
+**For a port with no camera:** return true. The test then means "the camera is free", and every started shot counts as done. The tree's flow is the same as when the camera works, minus the waits.
+
+## The opening on the beach
+
+**Proven on the disc** (the trees as written, followed from node 0). The primitives are the ones documented in this file.
+
+### The scenario: `scenario_first_playable`
+
+**`F_Main` (0x1001):**
+
+1. My attribute 4 = 0; `idle`.
+2. **`Setup Start Sequence`** (0x1004). With the selected Sim (global 3) as the stack object, it calls `Hold Sim`, which pushes an action on it. Then `CheckObject`, and three `FamilyInventory` operations on the tribe.
+3. If that returns true:
+   - stack object = global 3, local 0 = it, local 1 = 0;
+   - **PushAction** `21 00 01 03 01`: likely `Interaction - Intro Sequence` on the Sim;
+   - then `Function - Main Loop`.
+
+   If it returns false, it calls `Intro Camera` and then the main loop.
+4. **`Function - Main Loop`** (`scenario_sg` 0x2029) is reached only at node 0, which calls `idle` forever. The rest of that tree (`Release to Game Camera`, `Set Selection Flags`) can't be reached.
+
+**`Interaction - Intro Sequence` (0x100F), on the Sim:**
+
+1. Node 0: if neighbourhood variable 6 bit 16 is set, return true at once. **The intro runs only once.**
+2. Set that bit. Local 1 = my stack object.
+3. `Animate` (`02 …`, then `01 …`). The second's false path loops through `idle`.
+4. **`Sub - Go to Start Position`** (0x1000), the one CreateObject here:
+   - SetToNext type 4 for GUID `0x50323DB5`, the start marker;
+   - only if there's none, **CreateObject** it out of the world (place 6), then `FindGoodLocation`;
+   - mark it (its variable 0x22 = 1) and `GotoRelative` to it.
+5. My person data 0x22 bit 1. t0 = me. **GenericSimCall 0x1F** selects me.
+6. **IdleAnimate** `01 00 00 00 00 10 00 00`. True goes on. **False is error 253**, which resets the Sim's action.
+7. `Animate` (`02 … 80`). Its false path loops through `idle`.
+8. **CameraControl node 9** (`00 00 09 01 2a 01 04 00`, bit 5 set): true calls `idle` once, false skips it.
+9. **GenericSimCall 0x09** (`LoadFinishing`).
+10. `Animate` (`02 00 …`). Its false target is itself.
+11. **CameraControl node 10** (`03 00 09 00 0a 0a 00 00`, bit 5 clear) waits for the shot, then continues either way.
+12. Stack object = local 1. **Its attribute 4 = 1**: this tells `Intro Camera` the intro is done. Return true.
+
+Nodes 2 and 13 to 21 (a neighbour count and two Dialogs) can't be reached.
+
+**`Intro Camera` (0x1003):**
+
+1. Node 0: `idle` until my attribute 4 is 1, set by the Intro Sequence.
+2. It counts the neighbours with Neighbor data 0x2C = constant 0x137[0] and data 0x28 from 1 to 6 (SetToNext type 5).
+3. A **modal Dialog** (type 3, one OK button): message string 3 under title string 2 with more than one castaway, message 6 under title 5 otherwise. It waits for the player. The text is in "Dialog (opcode 0x24)" below.
+4. **`Tutorial - Task Complete` (2)**.
+5. **CompleteGoal op 3 on unlock 26** ("Start Tutorial", constant `0x4B20`).
+
+Its CameraControl nodes 1 to 4 can't be reached from node 0.
+
+### The tutorial object: `tutorial`
+
+- **`Function - Init` (0x1015).** It kills any other tutorial object (GUID `0x1A692C11`). Unless attribute 5 (set by `Handle Reset`) is 1, it sets attribute 1, the step, to -1, and attribute 7 to 0.
+- **`Function - Main` (0x1000):**
+  1. `idle`, then `CheckObject`, then `Get Sim in Temp 0`.
+  2. Tutorial flag 0 (`House Complete`) set: the tutorial is over, and it kills itself (a `KillObject`/`idle` loop).
+  3. Otherwise it goes on only if global 0x1A or global 0xA is 1; if neither is, it kills itself.
+  4. **It waits (`idle`) for unlock 26, "Start Tutorial"**, from `Intro Camera`.
+  5. Then it calls `Tutorial - Tutorial House` again and again: **a false result calls it again in the same tick** (node 1's false target is node 1), and true goes to `Tutorial - End`.
+- **`Tutorial - Tutorial House` (0x1001):**
+  - **Node 0:** if unlock 1 ("Basic 1 - Environment") is set, return true, which ends the tutorial.
+  - **Otherwise** it selects the step's tree by attribute 1, using constant table 0x12C.
+  - **When the step's tree returns true**, it adds 1 to attribute 1 and returns false, so the next step starts in the same tick.
+  - **When the step's tree returns false** (its false target 255), it returns false without moving on, so the same step runs again.
+
+| Step | Tree | Reached from node 0 | Waits on |
+|---|---|---|---|
+| 0 | `Lock Everything` (0x1002) | Selected Sim's motives 9, 6, 5, 15, 7, 8, 14, 13 = 100. Then a neighbour's (`Get in Temp 0 - Neighbor's instance ID`) = 80, `FindGoodLocation` and a `PushAction` on it. Marks every object of five GUIDs, from SetToNext type 4: start marker attribute 0, and others' attributes 0x12, 8, 3, 0xD | Nothing |
+| 1 | `Basic - Start` (0x1023) | If unlock 2 is set, true. Otherwise `Idle With Motive Floor` for constant 0x1001[2] × 24 ticks | That idle |
+| 2 | `Basic - Find Survival Book` (0x1005) | **Only node 0**: CompleteGoal op 3 on unlock 2, true. The book-finding nodes can't be reached | Nothing |
+| 3 | `Basic - Read Survival Book` (0x1006) | Unlock 2 set: modal Dialog 4 (type 4, yes and no). Button 1 sets unlock 1, which ends the tutorial on the next pass. Then true. Without unlock 2: `Sub - Create Survival Book` and `sub - Force Read Tutorial Book` (a PushAction) | The Dialog |
+| 4 | `Basic - Teach Navigation` (0x1036) | PS2: **modeless** Dialog 5 (type 1, it doesn't wait), `Tutorial - Wait for Complete Idle Loop` (either result), GenericSimCall 0x2C (close modeless dialogs), true. The seven Dialogs are Wii's path | The wait |
+| 5 | `Survival Basic 2: Gather Supplies` (0x1007) | **`sub - Create Coconut`**, then modal Dialog 7 (type 3; 0x20 on Wii), true | The Dialog |
+| 6 | `Basic - Learn Harvesting` (0x102A) | **Modeless** Dialog 9 (type 1; 0x20 on Wii), then `Tutorial - Wait for Complete Idle Loop`. Done: `Idle With Motive Floor`, true. Timed out: **false**, so step 6 runs again | A harvest's `Task Complete` |
+| 7 | `Basic - Inventory` (0x102E) | **Modeless** Dialog 0xA (type 1; 6 on Wii), `Tutorial - Idle - No input` (0x1011), true. **Nothing waits for the inventory screen**: from node 0, 0x1011 only sets t0 = constant 0x1001[4] (20, "Dialog Wait - No Reminder (seconds)") × 24 = 480 ticks, runs `Idle With Motive Floor` for that, and returns true. Its attribute-6 loop can't be reached | A fixed 480 ticks (about 20 s at 1×) |
+| 8 | `Basic - Pause Menu` (0x1008) | **Only node 0**: `idle`, true | One idle |
+| 9 | `Basic - Inventory Screen` (0x100A) | **Only node 0**: `idle`, true | One idle |
+| 10 | `Survival Basic 3: eat` (0x1009) | **`sub - Create Coconut`**, modal Dialog 0x18 (type 3; 2 on Wii), **unlock 10, hunger**, true | The Dialog |
+| 11 | `Basic - Eat` (0x1046) | `Get Sim in Temp 0`. If the Sim holds an object of one of five food GUIDs (coconut among them; TestObjectType on the object in its slot 0), it goes straight to `Tutorial - Wait for Complete Idle Loop`; otherwise **modeless** Dialog 0x19 (type 1) first. Done: true. Timed out: false, so step 11 runs again. Node 1's Dialog 0x16 can't be reached | Eating's `Task Complete` |
+
+**How a step waits.** `Tutorial - Wait for Complete Idle Loop` (0x103C) and `Tutorial - Idle - No input` (0x1011) loop through `Idle With Motive Floor`, a countdown of 15-tick idles from constant 0x1001[3] or [4], doubled.
+
+- **Done:** they stop when the tutorial's **attribute 6 is 1**. `Tutorial - Task Complete` (global 0x1F0) sets it on the tutorial object whose attribute 1 equals its parameter 0. Then GenericSimCall 0x2C closes modeless dialogs, attribute 6 = 0, and they return true.
+- **Timed out:** false.
+- **Who calls `Task Complete`:**
+  - `Intro Camera`, with 2;
+  - eating (`resources_sg` `Interaction - Eat`), putting a resource in the inventory, harvesting (`source_sg` `Harvest - Core`), sleeping on the ground and placing the mat, and building and lighting the fire pit;
+  - each survival book's catch-up;
+  - all with the caller's default parameters (not read here).
+
+**What only the real UI or camera can answer:**
+
+- **Every modal Dialog waits for a button**: Intro Camera's and steps 3, 5 and 10. Read Survival Book's Dialog 4 also branches on it: button 1 skips the tutorial. Steps 4, 6, 7 and 11 show a modeless message (type 1) that doesn't wait; the step's wait loop does the waiting, and GenericSimCall 0x2C closes the message.
+- **The CameraControl waits** in the Intro Sequence.
+- **Steps 6 and 11 finish only when the player does the action,** which calls `Task Complete`. Otherwise they time out and run again.
+
+### The objects the opening creates
+
+**Proven on the disc.** There are three CreateObject trees on this path, and each creates **one object, only when SetToNext type 4 finds none of that GUID**:
+
+| Tree | Object (GUID) | Place | Reached from |
+|---|---|---|---|
+| `Sub - Go to Start Position` | Start marker `0x50323DB5` | 6, then `FindGoodLocation` | The Intro Sequence, once |
+| `sub - Create Coconut` | Coconut `0xA78125FE` | 6, then `FindGoodLocation` | Steps 5 and 10 |
+| `Sub - Create Survival Book` | Survival book `0x1FC2477B` | 6, then `FindGoodLocation` | Step 3, only without unlock 2 |
+
+**SetToNext type 4 walks every object ID** (`GetObject(index)` for all of `GetNumObjects`), placed or not, and matches the selector. It doesn't test whether the object is in the world: `IsInteractionTile` is only checked with skipping on, and these nodes have it off. So an object made out of the world and never placed is still found next time.
+
+**In the game, the opening makes at most one marker, one coconut (until it's eaten) and one book.** Nothing on this path creates objects in a loop.
+
+**What would make a port create without stopping.** These things repeat:
+
+- **`Function - Main` calls `Tutorial House` again in the same tick** each time it returns false. That's after every finished step, and after every step that returns false.
+- **The only things that end a tick** on this path are an Idle primitive (`idle`, `Idle With Motive Floor`), a Dialog waiting (4), Animate, IdleAnimate or CameraControl waiting (2), and a CreateObject whose object isn't loaded yet.
+- **25,000 nodes in one tick is error 0x44D.** An error resets the tutorial object. It has `Handle Reset` (0x1033), which sets attribute 5 so that `Function - Init` keeps the step. Likely, since which entry point that tree is isn't checked here.
+
+So a port gets a new coconut or book on every pass if both of these hold:
+
+1. its SetToNext type 4 misses objects it made itself, for example ones still out of the world, or ones not in the ID list the search walks;
+2. a step keeps running again without waiting, for example because a Dialog returns at once instead of 4, or a CompleteGoal test of unlock 2 reads false so step 3 takes its book path.
+
+Stubbing IdleAnimate to return true lets the Intro Sequence finish. That sets scenario attribute 4, and `Intro Camera` then grants unlock 26, which is what starts the tutorial loop. So stubbing IdleAnimate is likely what first let the port reach the creating steps.
 
 ## Identify: the "identified" marker
 
@@ -1245,16 +1700,131 @@ Shed resource index 1, energy delta -60 an hour, stop at -90. So resource 0 with
 
 ## Dialog (opcode 0x24)
 
-**Read on Wii** (`cXObject::TryDialog`), with PS2 (`0x2306E0`) checked for the same shape: its two `EdithDialogPrimitive::SetDialog` calls (`0x1EDBC8`), the waiting code 4 and the answer code at `0x4928A8`. Likely. 505 uses. The dialog type is `+5` bits 4 to 7 (operand `+7` bits 4 to 6 the result temp, bit 7 semi-global strings).
+**Proven on PS2:** `cXObject::TryDialog` (`0x2306E0`), its operand helper (`0x230658`), `EdithDialogPrimitive::SetDialog` (`0x1EDBC8`), `StringSet::Load` and `GetLocString` (`0x263A40`, `0x263848`), read call by call, with Wii for the names. The strings below were read from the disc. 505 uses.
 
-1. An end-of-game slide show is up: returns 4, so it waits.
-2. **The player has answered** (the answer code isn't 4): the button pressed (`GetModalDialogResult`) goes into the result temp, and the primitive returns the answer code, then resets it to 4. The UI's `EndDialog(bool)` sets it to 1 or 0, so a yes or OK takes the true branch and a no the false.
-3. A flow request is pending: returns 1 at once.
-4. Some dialogs are skipped when no family member is awake and visible, or the camera director has the letterbox up: type 4, and type 0 unless operands `+0` and `+3` are both 0xFE, set temp 0 to 0 and return 1; types 1, 2 and 5 return 1.
-5. Types 0 to 5 are **modal**: unless a global flag (`+0x36D` on the end-of-round globals) says not to, `SetDialog` shows it. Then types 0, 3 and 4 **return 4** and the node runs again each tick until the player answers (step 2); 1, 2 and 5 return 1 and don't wait. A `SetDialog` that fails returns 1.
-6. Other types are shown **without waiting** and return 1.
+**Correction.** This section used to say the dialog type is `+5` bits 4 to 7. That's the Wii's layout. The type is a 4-bit bitfield, and a big-endian compiler puts the first bitfield in a byte's high bits, a little-endian one in its low bits. The Wii reads `(+5 >> 4) & 0xF`, the PS2 **`+5 & 0xF`**, and the PS2 disc's data is laid out for the PS2: its 505 Dialogs have low nibbles 0 to 5 (51, 168, 21, 226, 37 and 2 of them), and 470 have high nibble 0. Nothing in TryDialog or SetDialog reads the high nibble. `+7`'s fields below are the PS2's.
 
-So `Sub - Add Resources`' Dialog (`+5` 0x01, type 0) shows a modal message after an Identify and waits for the player to close it. For a port: show the message, return "wait" until it's dismissed, then put the button in the result temp and take the true branch for OK or yes.
+### Operands
+
+| Operand | Meaning |
+|---|---|
+| `+0` u8 | Third button's label (Cancel) |
+| `+1` u8 | Icon number, for `+7` icon types 2 to 4 |
+| `+2` u8 | **Message** |
+| `+3` u8 | First button's label (OK or Yes). For types 1, 2 and 5, a line under the message |
+| `+4` u8 | Second button's label (No) |
+| `+5` bits 0-3 | **Type**, below |
+| `+6` u8 | **Title** |
+| `+7` bits 1-3 | Icon type: 0 and 1 none, 2 a neighbour's picture, 3 an object's thumbnail, 4 row `+1` of the `DialogIconTable` quickdata table. For 2 and 3, the neighbour or object ID is my local `+1` |
+| `+7` bits 4-6 | The temp that gets the button pressed |
+| `+7` bit 7 | Take strings from my semi-global row instead of my own |
+
+**String numbers.** Every string operand is a number in `STR#` 0x12D, counting from 1.
+- **0 means the default**: a button's built-in label, or nothing for the message and title.
+- **0xFE means empty.**
+- **0xFF means "from a temp".** Before anything else, TryDialog replaces a 0xFF in `+2` with temp 0 + 1, `+6` with temp 1 + 1, `+3` temp 2 + 1, `+4` temp 3 + 1 and `+0` temp 4 + 1. 16 Dialogs on the disc do this, all in `+2` or `+0`.
+- A number past the set's end, or a string of length 0, also gives the default.
+
+### Where the text comes from
+
+1. **The string set is always `STR#` 0x12D** (301, the dialog strings). SetDialog asks the smart-data factory for a `StringSet` (type `0x6BC37BC5`) and loads ID 0x12D.
+2. **Whose:** the namespace of the stack frame's `Behavior` (`StackElem +0x10`).
+   - That's its `ObjSelector +4`, my own `ResFile` row, or `+8`, my semi-global row, when `+7` bit 7 is set.
+   - Subroutine calls keep the caller's Behavior (`TreeSim::Gosub` copies it when it's given none). So a Dialog in a global or semi-global tree still reads the strings of the object whose tree started the stack.
+   - For the tutorial's steps that's the `tutorial` row; for `Intro Camera`, `scenario_first_playable`.
+3. **Where in the row:** `StringSet::Load` ignores the namespace it's handed. It asks the object folder (`0x21D8E8`) for the namespace's `ResFile` row: row number × 0x48 in the `ResFile` quickdata table, or the global row for the global namespace.
+   - It then finds the ID in **the row's `+0x14` vector**. Its 12-byte entries are like `+0x10`'s: a `VECTOR` of string pointers, a tag, and the ID in the low 16 bits.
+   - `+0x10` holds the other sets: 0x100 to 0x104, 0x12C, 0x12F and 0x1F5 to 0x1FC. **0x12D is only ever in `+0x14`.**
+   - On the disc, `tutorial`'s `+0x14` holds just 0x12D, with 47 strings; `scenario_first_playable`'s holds 20.
+4. **The string:** `GetLocString(n)` returns entry n − 1, or a null string for n ≤ 0 or past the end. An entry points into the **language image** (see world.md's QUICKDAT.ARC), and that slot points to the UTF-16 text, so a reader follows two pointers.
+5. **The language: always 0.**
+   - `ESimsApp::Init` (PS2, around `0x2FD510`) stores 0 at the quickdata manager's `+0xD38`, right after `InitManagerArcOffsets1`.
+   - That's the Wii's `SetCurrentLanguage(GetDefaultLanguage())` inlined. The Wii's `GetDefaultLanguage` returns 0, and its manager keeps the language at `+0xD44`.
+   - `EDatasetManager::AllocateAndLoadResource` (`0x4114F8`) passes `+0xD38` to every load, and no other code writes it.
+   - This settles world.md's open question: **language image 0 is the US English text**.
+6. **Tokens:** if the text isn't empty, `cXObject::ParseUIString` (`0x227200`) fills in its `$` tokens (below).
+   - The `<COLOR_…>`, `<BUTTON_xx>` and `<FONT_…>` tags aren't tokens: `AptParagraph::Build` (`0x3045D8`) reads them when the text is laid out.
+   - What each `<BUTTON_xx>` draws, and how far `<COLOR_>` reaches, are in ui.md, "Text markup".
+
+### Buttons and types
+
+**Default labels** come from the `NewUIStrings` quickdata table, by key (`EGlobal::GetNewUIString`): `ok` "OK", `yes` "Yes", `no` "No", `cancel` "Cancel". Type 6 and up shows the title "WARNING: DEPRECATED DIALOG" and no message.
+
+| Type | Uses on the disc | Shown by (Wii names) | Buttons | TryDialog returns |
+|---|---|---|---|---|
+| 0 | 51 | `UIDialog::SpawnDialog`, modal | 1 (OK); 2 if `+4` isn't 0xFE; 3 if `+0` isn't 0xFE either. So `+4` and `+0` left at 0 give Yes, No and Cancel | **4 until answered** |
+| 1 | 168 | `H2DTarget::SpawnModelessDialog` (the `MDI` screen, ui.md) | None. SetDialog builds a line from `+3`, but the modeless record doesn't copy it, so it's never shown | 1, at once |
+| 2 | 21 | The same, with no timeout (`+0x18` = −1) | None | 1, at once |
+| 3 | 226 | `UIDialog::SpawnDialog`, modal | 1: `+3`, default "OK" | **4 until answered** |
+| 4 | 37 | `UIDialog::SpawnDialog`, modal | 2: `+3` default "Yes", `+4` default "No" | **4 until answered** |
+| 5 | 2 | `H2DTarget::SpawnIntroThoughtBalloon`, timeout 10,000 | None | 1, at once |
+
+**What TryDialog does**, in order:
+
+1. Replace the 0xFF operands from temps.
+2. **The player has answered** (the answer code at `0x4928A8` isn't 4):
+   - the button pressed goes into the `+7` result temp;
+   - the primitive returns the answer code, and the code goes back to 4;
+   - the UI's `EndDialog(bool)` sets the code to 1 or 0, so OK or Yes takes the true branch and No the false.
+3. A flow request is pending: return 1.
+4. **Skipped dialogs.** It first looks for a family member who is awake and visible.
+   - No one is, or the camera director's letterbox is up: type 4, and type 0 unless `+0` and `+3` are both 0xFE, set temp 0 to 0 and return 1.
+   - Types 1, 2 and 5 return 1 when no one is.
+5. Types 0 to 5 return 1 without showing anything when a global flag (`+0x37C` on the object at `0x50A6A8`) is set.
+6. Otherwise SetDialog shows it.
+   - Types 0, 3 and 4 **return 4**, and the node runs again every tick until the player answers (step 2).
+   - Types 1, 2 and 5 return 1.
+   - A SetDialog that fails returns 1.
+
+**For a port:**
+- Read the type as `+5 & 0xF`.
+- Show types 0, 3 and 4 as a box with buttons that waits.
+- Show types 1, 2 and 5 as a message that stays up while the tree carries on. It goes when GenericSimCall 0x2C (close modeless dialogs) runs or the player closes it.
+
+### Tokens
+
+`ParseUIString`'s tokens come from the PS2 string table at `0x4BA3E0`. What each becomes is read on Wii (`ParseUIString` and its helper `ParseOneString`), so it's likely.
+- A token can be followed by `:N`, and then by `:M` or `,M`. These are decimal numbers, −1 when absent.
+- "Local N" is the stack frame's local N.
+
+| Token | Becomes |
+|---|---|
+| `$Me` | My name: the Sim's first name, or the object's catalogue name |
+| `$Object` | The stack object's name, the same way |
+| `$Neighbor` | A neighbour's name, from the neighbourhood's selector |
+| `$NameLocal:N`, `$LastNameLocal:N` | The first or last name of the object whose ID is local N |
+| `$Local:N` | Local N as a number |
+| `$MoneyLocal:N`, `$PlayerFunds` | Local N, or the household's funds, as money |
+| `$TokenNameLocal:N` | The name of inventory token local N |
+| `$FoodName` | A food name, from two temps (`get_food_replacement_string`) |
+| `$LocationName`, `$LocationNameLocal:N` | A lot's name from `HouseData`: the current one, or number local N |
+| `$PlayerName` | The selected neighbour's name |
+| `$TimeLocal` | A time of day (`GetTimeString`) |
+| `$GS…` | A key's male or female form (`EGlobal::GetGenderString`), by whether the Sim is male |
+| `$JobName`, `$JobDesc`, `$JobTrackName` | Placeholders, such as "Temp name for Job.  Add code support." |
+
+None of the opening's dialog strings uses a token.
+
+### The opening's dialogs
+
+**Proven on the disc.** The text is exact; `\r\n` is the string's own line break.
+
+| Tree, node | `+2` message, `+6` title, type | Text |
+|---|---|---|
+| `Intro Camera` (scenario) n11, one castaway | 6, title 5, type 3 | Title "Your Sim has shipwrecked!"; message "Learn to survive.\r\nFind your way home." |
+| `Intro Camera` n10, more than one | 3, title 2, type 3 | Title "The Sims have shipwrecked!"; message "Find and unite your lost crew.\r\nHelp them get home." |
+| Step 3 `Read Survival Book` n1 | 4, type 4 | "It's <COLOR_FF0B0077> Moneywell's\r\n<COLOR_FF0B0077> Big_Book_of_Survival! This will help your Sim survive. \r\n\r\nDo you want to read it and play the tutorial?" |
+| Step 4 `Teach Navigation` n1 | 5, type 1 | "Survival Tip 1: Survey your Environment\r\n\r\nLook around using <BUTTON_04>. This will move the camera" |
+| Step 5 `Gather Supplies` n2 | 7, type 3 | "Survival Tip 2: Gather Supplies. Nature is bountiful. Find and harvest anything you can on the beach or off nearby trees." |
+| Step 6 `Learn Harvesting` n1 | 9, type 1 | "Gather supplies! Walk up to something and press <BUTTON_00>. If there is more than one action, use the <BUTTON_03>  to select one." |
+| Step 7 `Inventory` n1 | 0xA, type 1 | "See what your sim has gathered. Press <BUTTON_05> and choose "Inventory"" |
+| **Step 10 `Survival Basic 3: eat` n2** | **0x18, type 3** | **"Survival Tip 3: Eat! This is your Hunger motive. \r\n\r\nEating will keep it filled. If it reaches empty, the Sim will starve. Check your Hunger by pressing  <BUTTON_06> then find something to eat."** |
+| Harvesting a clam (step 6 or later): `source_sg` 0x203F `Sub - Process Special Resources` n8, n11, n15, n19, n25 | 1 to 5, type 1, `+7` 0x80 (the clam's semi-global strings, `source_sg`'s own `+0x14` set) | A random find, one of "You have found gold inside one of the clams!", "…a pearl…", "…a piece of jade…", "…a moonstone…", each with a FamilyInventory add; and once, "You've Found a piece to a Treasure Map!" |
+| Step 11 `Basic - Eat` n5 | 0x19, type 1 | "Eat something. Try walking up to a coconut and selecting EAT, or go to the Inventory and see what food you already have." |
+
+- **Buttons.** All of these leave `+0`, `+3` and `+4` at 0, and `+6` too except for Intro Camera's titles. So the buttons are the defaults: OK for type 3, and Yes and No for step 3's type 4.
+- **The Wii-path twins** (step 10 n4 string 2, step 5 n3 string 0x20 and so on) say "point the Wii_Remote" instead.
+- **Later tips:** the tutorial's 47 strings also include them, for example sleep (0xC), the fire pit (0x10) and "Basic Survival Complete!" (0x14).
 
 ## SetBalloon (opcode 0x29)
 
@@ -1975,7 +2545,7 @@ For `+5` 2, the primitive sets frame `+8` to 1 and returns 3, so the same node r
 | 0x3D | 0 | t1 = the first word of the plan made from token t0. No such plan is error 0x6B. **Proven, PS2.** No tree uses it |
 | 0x40 | 2 | Neighbour t0's way here (`LotManager::CanSimGetToLot`). t1 = 0 first. Already on this lot, or no lot (-1): true. Otherwise false unless the lot graph exists, this lot has been visited and a route is found. The route is up to 30 lot numbers, and t1 = the last one; a route of 0 or 30 lots is false. No neighbour is error 0x38. **Proven, PS2** |
 | 0x41 | 3 | **Proven, PS2 and Wii; corrects an earlier reading.** True if there's a player tribe inventory and t0 is an ID in the `InventoryTokens` table. It doesn't check that the tribe has the token. No player Sim is false |
-| 0x42 | 7 | **Evaluates goal book t0** (`GoalUnlock::TryEvaluateGoals`, vtable slot 15; PS2 calls `+0x80`). t1 = the number of a goal it has just completed, and true; false if none. See "Goals: what GenericSimCall 0x42 returns" |
+| 0x42 | 7 | **Evaluates goal book t0** (`GoalUnlock::TryEvaluateGoals`, vtable slot 15; PS2 calls `+0x80`). If a goal or page was just rewarded, t1 = its dialog key and true; false if none. **Proven, PS2.** See "Goals: what GenericSimCall 0x42 returns" |
 
 ## Grab (opcode 4)
 
@@ -2017,6 +2587,28 @@ Flag bits: 0 available to visitors, 1 can join, 2 immediate, 3 allow consecutive
 `ObjSelector::GetTreeTab` (`0x1DA440`) caches the object's table at selector `+0x3C`, made by `ObjectFolder::GetTreeTable` (`0x21F700`). On First Beach a coconut offers Eat, Identify and Put in Inventory (check trees `0x200D`, `0x200E`, `0x200B` and action trees `0x200C`, `0x200A`, `0x2008` in `resources_sg`); a palm offers three harvests and Identify.
 
 **The queue.** `PushAction` and the pie menu put an `Interaction` on the Sim's ring of 12 at `+0x21C` (`AddAction`, above). `Interaction +0x34` holds its flags: bit 1 continuation, 5 push to head, 10 must run, 15 run as a sub-action. `+0x28` is its priority and `+0x38` its action tree. Sim `+0x538` says the first entry is running, `+0x564` is the running priority, and `+0x586` non-zero stops every interrupt.
+
+**How the player cancels an action. Proven on PS2** (with Wii for the names).
+
+1. **The input.** `H2DTarget::Update` (`0x29F8D8` on) watches **controller command 6**, and acts when it's **released**. It needs a selected Sim (`_globals +0x174`) and the HUD's ActionMenu (HUD `+0x90`). Then it calls the Sim's virtual **`cXPerson::CancelLastAction`** (`0x1AE928`, vtable `+0x1C8`).
+   - On success it sets the menu's backdrop, plays sound `0x48AE94F`, and tells the player interactor (`0x176698`).
+   - Which pad button command 6 is isn't read here. The tutorial's "To stop press `<BUTTON_01>`. This will cancel any action." makes it **Triangle**, likely.
+   - The Wii's `SimInteractor::OnCommandPressed` does the same on its command 4.
+2. **Which action** (`CancelLastAction`):
+   - **the newest waiting action**, the last in the ring that isn't running;
+   - with none waiting, **the running one**;
+   - if the action before the newest runs as a sub-action (flag bit 15), nothing, and it returns 0. A sub-action can't be split from its parent.
+   - It passes the action's ID (`+0x30`) to `cXPerson::RemoveAction`.
+3. **`cXPerson::RemoveAction(id)`** (`0x1AE7C8`) finds the ID in the ring; an unknown ID returns 0.
+   - **A waiting action:**
+     - flag bit 10 (must run) set: it only gets bit 8 (cancelled), stays, and runs anyway;
+     - otherwise **`ActionSkipped`**: removed from the ring, and the object's **entry point 4** runs at once, as for a refused check tree (below).
+   - **The running action** (the head, while `+0x538` says it's running):
+     - it gets **bit 8, cancelled** (Wii `Interaction::SetCancelled`), with bit 10 set it stops there and runs on;
+     - otherwise person data 0xE goes to 0, and `ShouldInterrupt` is asked.
+   - **Not removed, no entry point 4.** The running action isn't removed, and entry point 4 doesn't run. Its tree is **interrupted**: `ShouldInterrupt` is yes for a running head with bit 8 and not bit 10, before its other tests. Every routing state then ends with **result 4 (interrupted)**, and `IdleForInput` takes its interrupt. The tree ends through its own interrupted paths, and the queue moves on.
+   - **Interrupts locked** (`+0x586` set, so `ShouldInterrupt` says no): it queues a new interaction on the Sim itself (`Interaction(me, me, 0x21, 0x32)` then `AddAction`). What that one is isn't read.
+4. **The action queue's cancel mode isn't reachable.** `ACTTarget` has a cursor (`+0x68C`; Wii `CancelCurrentObject`, `ExitCancelMode`). `H2D_SELECT` cancels the item under it (PS2 `0x296668`, through the same `RemoveAction`). But nothing ever sets the cursor to an item, on PS2 or Wii. The only stores advance an existing cursor or clear it. So the PS2 player can't pick a queued icon to cancel. Proven by the absence of any other store.
 
 **How a queued action starts. Read on PS2, likely.** The Sim's main tree idles in `Wait For Notify` (global `0x119`), on `IdleForInput`. Each tick that primitive first asks `cXPerson::ShouldInterrupt` (`0x1AEAD0`): yes when the next action waiting, after the running one if any, has a higher priority than the running priority or is a continuation; when any of the motives at Sim `+0x194`, `+0x19C` or `+0x1A4` is below -99; and otherwise only for a head that runs as a sub-action. Then `executeInterruptOnIdlePrimitve` (`0x1AEFD0`):
 

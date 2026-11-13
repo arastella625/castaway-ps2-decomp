@@ -572,7 +572,7 @@ long cXObject::InterpValue(s16 scope, s16 data, const s16 **ref, f32 **floatRef,
     case 0x2a: {
         // The ingredient whose ID is in temp 0.
         s16 id = mTemps[0];
-        const IngredientToken *token = GetIngredientManager()->FindIngredientToken(id);
+        const IngredientToken *token = GetIngredientManagerInline()->FindIngredientTokenInline(id);
         OBJECT_CHECK(token, 0x5d);
         switch (data) {
         case 0:
@@ -629,13 +629,13 @@ long cXObject::InterpValue(s16 scope, s16 data, const s16 **ref, f32 **floatRef,
             value = token->field_0xe;
             break;
         case 8:
-            value = token->field_0x4;
+            value = ((const s16 *)&token->mFlags)[0];
             break;
         case 9:
-            value = token->field_0x6;
+            value = ((const s16 *)&token->mFlags)[1];
             break;
         case 10:
-            value = token->field_0x0;
+            value = ((const s16 *)&token->mGuid)[0];
             break;
         case 11:
             value = token->field_0x2;

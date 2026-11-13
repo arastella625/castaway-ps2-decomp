@@ -10,6 +10,7 @@ class Family;
 class ReconBuffer;
 class cXObject;
 struct InventoryTokens;
+struct IngredientToken;
 
 // Wii: InventoryItem. Its vptr comes after the first word. The slots are named from the game's
 // ObjectItem, TokenItem and ClothingItem vtables (0x4BB460, 0x4BB570 and 0x4BB230), which
@@ -26,11 +27,11 @@ public:
     virtual s16 GetID() const;                        // 0: the token's or clothing's ID
     virtual s16 GetCount() const;                     // 1
     virtual u32 GetGuid() const;                      // 2
-    virtual int GetCategory() const;                  // 3: 0 object, 1 ownable, 2 token, 3 clothing
-    virtual int GetOwnerID() const;                   // 4
+    virtual s8 GetCategory() const;                   // 3: 0 object, 1 ownable, 2 token, 3 clothing
+    virtual s16 GetOwnerID() const;                   // 4
     virtual int GetOwnershipPoints(s16 a) const;      // 5
     virtual int GetNumAttributes() const;             // 6
-    virtual int GetAttribute(int index);              // 7
+    virtual s16 GetAttribute(int index);              // 7
     virtual void SetAttribute(int index, s16 value);  // 8
     virtual void AddAtribute(s16 value);              // 9 (the game's spelling)
     virtual s8 GetStatusText();                       // 10
@@ -38,7 +39,7 @@ public:
     virtual void IncrementCount(s16 count);           // 12
     virtual void DecrementCount(s16 count);           // 13
     virtual const InventoryTokens *GetToken();        // 14
-    virtual int GetIngredientToken();                 // 15
+    virtual const IngredientToken *GetIngredientToken(); // 15
     virtual void DoStream(ReconBuffer *buffer, int a); // 16
     virtual void LoadItemInfo(cXObject *object, Family *family, s16 a); // 17
     virtual int MakeObject(Family *family, s16 a);    // 18
@@ -96,6 +97,18 @@ public:
     void AddClothingItem(s16 id);
     void RemoveItem(int index, s16 count);
     void MergeInventories(InventoryItems *other); // 0x1FA4D0
+    // Wii keeps these as functions; TryFamilyInventory inlines every one. Inventory.h has them.
+    int CountItems();
+    u8 GetNonTokenCount() const;
+    InventoryItem *GetItem(int index);
+    int GetObjectItemIndex(int guid);
+    int GetOwnableItemIndex(s16 owner, int guid);
+    int GetClothingItemIndex(s16 id);
+    int RemoveObjectItem(int guid);
+    int RemoveOwnableItem(s16 owner, u32 guid);
+    int RemoveTokenItem(s16 id, s16 count);
+    int RemoveClothingItem(s16 id);
+    int AddOwnableItem(u32 guid);
     static const struct ClothingItemsRow *GetClothingItemsRow(s16 id);
     void GimmeAllFood(s16 count);
     void GimmeAllResources(s16 count);
