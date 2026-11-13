@@ -29,11 +29,11 @@ public:
     s16 GetID() const;
     s16 GetCount() const;
     u32 GetGuid() const;
-    int GetCategory() const;
-    int GetOwnerID() const;
+    s8 GetCategory() const;
+    s16 GetOwnerID() const;
     int GetOwnershipPoints(s16 a) const;
     int GetNumAttributes() const;
-    int GetAttribute(int a);
+    s16 GetAttribute(int a);
     void SetAttribute(int a, s16 b);
     void AddAtribute(s16 a);
     s8 GetStatusText();

@@ -19,9 +19,10 @@ public:
     u8 pad_0x24[0x10]; // 0x34 bytes in all: InventoryItems::AddOwnableItem allocates that
 
     OwnableItem(cXObject *object);
-    int GetCategory() const;
+    OwnableItem(u32 guid); // 0x24F428: ObjectItem(guid), then its own vtable and zeroed fields
+    s8 GetCategory() const;
     // Its own in slots 4, 5 and 31 of its vtable, so these are the names.
-    int GetOwnerID() const;
+    s16 GetOwnerID() const;
     int GetOwnershipPoints(s16 a) const;
     void SetupOwnershipInfo(cXObject *object);
 };

@@ -10,7 +10,7 @@ u32 ObjectItem::GetGuid() const
     return field_0x8;
 }
 
-int ObjectItem::GetCategory() const
+s8 ObjectItem::GetCategory() const
 {
     return 0;
 }
@@ -20,7 +20,7 @@ s16 ObjectItem::GetCount() const
     return 1;
 }
 
-int ObjectItem::GetOwnerID() const
+s16 ObjectItem::GetOwnerID() const
 {
     return -1;
 }

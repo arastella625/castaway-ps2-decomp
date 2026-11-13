@@ -1,4 +1,4 @@
-# UI: the interaction menu
+# UI: the interaction menu and the HUD
 
 How the game places, sizes and fills the interaction menu: the Flash (Apt) movie
 `tsc5_interaction_menu`, driven by `ActionMenu`. Read on PS2, with Wii for the names. Addresses
@@ -118,11 +118,33 @@ registers the sound callbacks `IMU_SndOpen` to `IMU_SndRefresh`.
 
 So the arrows are the left and right object-cycling arrows, and they only show in direct control.
 
+**What sets the arrow flags. Proven, PS2**, with Wii's names. Only three places write `+0x1B8` and `+0x1BC`:
+
+- **Cleared:** the constructor (`0x2C142C`) and `TerminateMenu` (`0x2C28A0`) set both to 0.
+- **`DirectInteractor::SetLeftArrow(b)`** (`0x176128`) and **`SetRightArrow(b)`** (`0x176150`) write `+0x1BC` and `+0x1B8` on the HUD's (`0x514C04`) action menu (`+0x90`), if there is one.
+- **When the menu opens in direct control** (Wii `DirectInteractor::Update`, PS2 `0x14B4B4`), the objects list is `GetInteractionMenuObjectList` (`0x14B7D0`): the cursor-highlighted objects near the Sim. If the list isn't empty and the menu isn't locked, it sets **left off** and **right on if the list has 2 or more objects**.
+- **When the player cycles** to another object, `ResetDisplayArrows` (`0x176178`) sets **left = the current object isn't the list's first**, and **right = it isn't the last**. There's no wrap-around: at either end, that side's arrow goes off. The flag rule is proven; that cycling stops at the ends rather than wrapping is likely, from Wii's `Update`, which falls back to the list's last or first object when it finds no next or previous one.
+
 **The visible window. Proven:** `UpdateGetLocalizationItems(sel)` (`0x2DFE40`) binds the movie's
 **12 text slots** to the names `IMU_` + `%0.2d` of **max(sel − 6, 0)** onward. So the movie always
 holds 12 consecutive item names around the highlighted item: up to 6 before it, and the rest
 after. It's called with the selection whenever that changes. Which of those 12 the movie draws,
 and where, is in the movie.
+
+**The numbers are absolute item numbers. Proven, PS2.**
+
+- **How a slot is bound.** Slot k (0 to 11) is a buffer at `+0x174 + 4k`. It's filled with `IMU_` and `%0.2d` of start + k, where start = max(sel − 6, 0).
+- **How a name is read.** When the movie asks for a name starting `IMU_`, `GetLocalizable` (`0x2C2D40`) reads the number after it with `atoi` (`0x3E0188`). That's an index into **the current menu level**, `+0xF0 + 4 × (+0x150)`, so a submenu's own items.
+- **What it returns.** Below that menu's count, it's that item's label (item `+0x44`). Past the end it's empty.
+
+| Selection | Slot 0 … slot 11 |
+|---|---|
+| 0 to 6 | `IMU_00` … `IMU_11` |
+| 7 | `IMU_01` … `IMU_12` |
+| 9 | `IMU_03` … `IMU_14` |
+| n ≥ 6 | `IMU_`(n − 6) … `IMU_`(n + 5) |
+
+So with 5 items and item 0 highlighted, slots 0 to 4 show the items and slots 5 to 11 are empty. Slot 6 holds the highlighted item once the selection is 6 or more. Before that, slot *sel* does.
 
 ### Variables the movie sets
 
@@ -212,11 +234,216 @@ so those objects show no icon. For example:
 They are the same pictures the action queue shows: `ActionQueue::SetIconObject` (`0x1A6238`) and
 `ActionQueue::Insert` call the same `GetShaderForObject`.
 
+## The HUD in live mode
+
+What's on screen while the game runs, and the values the game feeds it. **Proven** parts were read in PS2 code or found on the disc; the rest is labelled.
+
+### Where the layouts are
+
+**Proven.** Most HUD pieces are "screens" laid out by a table in the ELF, not by a movie.
+- **The table:** arrays of pointers to strings that spell out an XML-like layout, starting at `0x496A60`. For example: `<scr><scid>MOT</scid><x>60</x><y>23</y> … <sw><swid>MOT_bar0</swid><x>20</x><y>-15</y><sf>s2c_comp_motivebar.swf</sf></sw> …</scr>`.
+- **Tags:**
+  - `scr` / `scid`: a screen and its three-letter ID, which is also its target class (`MOTTarget` and so on).
+  - `c` / `cid`: a container.
+  - `sw` / `swid` / `sf`: a placed movie and its file.
+  - `s` / `sid`: a 2D or 3D picture slot.
+  - `t` / `tid`: text, `stv` its source (`getloc:` a localizable name, `qd:` a quickdata string).
+  - `gad`: a button.
+  - `b`: a controller binding.
+  - `x`, `y`, `w`, `h`: in the 640 × 448 stage, relative to the parent. `v` is visible at start.
+- **The 19 screens:** AQU, TUH, BBH, CRD, FCM, G2D, H2D, ITB, LSM, M2M, MDI, MOT, RMD, SSH, TRC, WAF, PPC and KNL, plus one with no ID.
+
+The HUD's own movie is **`tsc6_hud`**. It's the only movie on the disc that defines `hudMeter`, `hudTod` and `hudMoon`, the functions `MODTarget::UpdateMood` calls (below). Its other functions are `hudShow`, `hudHide`, `hudShowButtons`, `hudHideButtons`, `hudSetAlpha` and `hudResetWarning`; what calls them isn't read.
+
+| Piece | Screen or movie | Files (for `screens.py`) |
+|---|---|---|
+| Motives | `MOT` screen, at (60, 23), hidden at start | `tsc5_comp_sidepanel_bkg`, `s2c_comp_motivebar` ×8, one icon movie per motive (table below) |
+| Mood, time of day, moon, clouds, warning | `tsc6_hud` | `tsc6_hud` |
+| Game speed | `H2D` screen: three movies at (128, 344), all hidden at start | `s2c_comp_hud_pause`, `s2c_comp_hud_ff`, `s2c_comp_hud_sff` |
+| Wants and the aspiration meter | `WAF` screen, at (580, 23) | `tsc5_comp_sidepanel_bkg`, `tsc5_aspiration_meter`, `s2c_comp_wants_bkgd`, `s2c_comp_wantsfears_slotmachine`, `s2c_comp_wantsfears_bkgd_gold`. Not read further |
+| Relationships | `RSPTarget`, from `H2DTarget::Update` | `tsc5_rsp_relationships_sidebar`. Not read further |
+| Modal dialog | `G2D` screen | `tsc5_comp_dialogbox` |
+| Modeless message | `MDI` screen, likely | `tsc5_comp_dialogbox` |
+| Thought balloon (Dialog type 5) | `ITB` screen, likely | Picture slots only |
+
+### Motives (`MOTTarget`)
+
+**Proven on PS2** (`0x2AB808` to `0x2ABFD0`, helpers `0x2BE7A0` and `0x2BE978`), with Wii for the names.
+
+**Bars and motives.** `MapMotiveIDFromBar` (`0x2BE978`) gives each bar its motive:
+
+| Bar | Motive | Icon movie | Its unlock |
+|---|---|---|---|
+| 0 | 14 social | `s2c_comp_social` | 14 |
+| 1 | 9 bladder | `s2c_comp_bladder` | 11 |
+| 2 | 8 hygiene | `s2c_comp_hygene` | 12 |
+| 3 | 7 hunger | `s2c_comp_hunger` | 10 |
+| 4 | 15 fun | `s2c_comp_fun` | 13 |
+| 5 | 5 energy | `s2c_comp_energy` | 8 |
+| 6 | 6 comfort | `s2c_comp_comfort` | 9 |
+| 7 | 13 room | `s2c_comp_room` | 15 |
+
+In the layout, icon k is at (0, 38k) and bar k at (20, 38k − 15), inside a container at (−26, 5).
+
+**Value to bar** (`ReadMotiveBar`, `0x2BE7A0`). For the selected Sim:
+- The **level** is `round((motive + 100) × 0.05)`, rounding .5 down, clamped to 0 to 10. So −100 is 0, 0 is 5 and 100 is 10.
+- The **trend** is set only when the motive has moved 4 or more since the value last kept, which is then updated: 1 if it went up, 2 if down, otherwise 0.
+
+**What's drawn** (`MOTTarget::Update`):
+- **Pacing:** each bar is redrawn at most every fifth update, unless something forces a redraw.
+- **Catching up:** a bar shown at a different level moves one step towards the new level each time it's redrawn. When the gap is 4 or more, or the motives were just shown, it jumps straight there.
+- **Frame:** the bar movie goes to the frame label `a` + (group + shown level), with the group:
+  - **0** while the trend is up (`a0` to `a10`);
+  - **11** while it's down or the bar is catching up (`a11` to `a21`);
+  - **22** when steady (`a22` to `a32`).
+  - `s2c_comp_motivebar` has exactly these 33 labels. The groups' looks (arrows, colours) are the movie's, so which is which is likely.
+- **Icon:** the motive's icon movie goes to `a1` when the shown level is below 2 and `a0` otherwise. Each icon movie has just those two labels, so `a1` is likely the warning look.
+
+**Locked motives aren't drawn** (`ShowMotives`, `0x2AB9F0`):
+- **Hidden:** for each bar whose motive `UISimulatorSupport::IsMotiveUnlocked` (`0x2E9248`) says is locked, the icon and bar are made invisible.
+- **Packed:** the unlocked ones are packed at the bottom, 38 apart. With n unlocked, the first is at y = 304 − 38n and the last at 266, which is where bar 7's layout puts it.
+- **Background:** `MOT_bkg` is resized to fit, getting 114 + 38n and 279 − 38n, likely its height and y.
+- **In the opening:** the panel shows only what the tutorial has unlocked. Hunger appears at step 10 (see bhav.md, "The opening on the beach").
+
+A locked motive is held at 0 by `SimMotives`. If it were drawn, it would be a half bar, level 5.
+
+### Mood, time and moon (`MODTarget::UpdateMood`, `0x2F6068`)
+
+**Proven on PS2.** Each value is sent to `tsc6_hud` only when it changes, by calling a function in the movie with the number as a string (`AptViewer::NewCallFunction` on the viewer at `_globals +0x16C`).
+
+| Function | Value |
+|---|---|
+| `hudTod(n)` | **The time of day in 5-minute steps**, 0 to 287: (hour × 60 + minute) / 5, modulo 288 (`0x2F5CB0`). The hour and minute come from the clock object's `+0x38` and `+0x42`, or the lot's start time plus an offset table when that object is absent. The arithmetic is proven; the two fields are likely |
+| `hudMeter(n)` | `MODTarget +0xA8`, which `0x2FB390` sets from (the selected Sim's motive 3 + 100) × 0.5, so the mood as 0 to 100. Also stored as the UIDB int `MoodMeter`. What `0x2FB390` does on the way (rounding, smoothing) isn't read |
+| `hudMoon(n)` | The word at `+0x470` of the object at `0x50A6A4`. What it counts isn't read |
+
+The movie reads `HUD_meter`, `HUD_tod`, `HUD_moon`, `HUD_cloudy`, `HUD_warning_icon` and `HUD_warning_text` too. `MODTarget::SetWarning` is called from `MOTTarget::Update`, so the warning is likely a low motive.
+
+### Game speed (`H2DTarget::UpdateSpeedControls`, `0x2A0408`)
+
+**Proven on PS2.** It hides the previous state's movie and shows the new one:
+- 1 `H2D_fastforward_swf`;
+- 2 `H2D_veryfastforward_swf`;
+- 3 `H2D_pause_swf`;
+- 0 none.
+
+All three sit at (128, 344).
+
+**Who passes the state. Proven, PS2:** H2DTarget's speed input step (`0x2A0578`). It turns its speed request (HUD `+0x224`) into an icon, and when the request changes, writes it to the simulator's speed `+0x58` (bhav.md, "Game speed"):
+
+| Request | Game speed | Icon state |
+|---|---|---|
+| −4 (controller command 0x27) | Paused | 3, `H2D_pause_swf` |
+| −2 (command 0x28 held, fast-forward allowed) | 5× | 1, `H2D_fastforward_swf` |
+| −3 (no family member awake and visible) | 30× | 2, `H2D_veryfastforward_swf` |
+| 0 | 1× | None |
+
+- **0.5× (−1)** is never requested here, so it has no icon.
+- **Refreshing:** passing the state already shown just restarts a 6-update countdown (`+0x250`). When it runs out, `H2DTarget::Update` passes 0, so the icon goes when the request stops coming.
+
+### Text markup (`AptParagraph::Build`, `0x3045D8`)
+
+**Proven on PS2.** When text is laid out, it's split into word tokens at whitespace (space, 9 to 13), `|`, `<` and `>`. A token that starts with a tag name is a tag. The tags are `<COLOR_`, `<FONT_`, `<BUTTON_`, `<WT>`, `<PULSE_`, `<ROCK_`, `<ROTATE_`, `<BLINK_`, `<PARTICLE_`, `<RUMBLE_`, `<WAVE_`, `<OUTLINE_`, `<SEARCHLIGHT_`, `<BULGE_`, `<TIPSY>` and `<REVEAL_`.
+
+**`<BUTTON_xx>`** must be exactly 11 characters. `xx` is two hex digits, below 0x23. It becomes an inline picture, the shader from a 35-entry table at `+4 × xx` in the UI object at `0x492F38` (filled by `0x278530`), its width from a float table at `+0x118`.
+
+- **The table depends on a controller set** at `+0x1A8`: 3 is the GameCube buttons (`Button_NGC_*`) and 2 Xbox (`Button_XBX_*`).
+- **The PS2 uses set 0.** The constructor (`0x27FC58`) sets `+0x1A8` to 0, and nothing else writes it.
+- **The pictures:** each name is both a shader in `SHADERS.ARC` and a texture in `TEXTURES.ARC`. Matched by `name_hash`.
+- **Widths:** all 28 except 05, 08 and 0D, which are 48.
+
+| `xx` | PS2 picture (shader) | The button |
+|---|---|---|
+| 00 | `Xs` | Cross |
+| 01 | `triangles` | Triangle |
+| 02 | `cntr_PS2_Lanl` | Left stick |
+| 03 | `cntr_PS2_Dpad` | D-pad |
+| 04 | `cntr_PS2_Ranl` | Right stick |
+| 05 | `cntr_PS2_strt` | Start |
+| 06 | `squares` | Square |
+| 07 | `Os` | Circle |
+| 08 | `cntr_PS2_slct` | Select |
+| 09 | `L2` | L2 |
+| 0A | `R2` | R2 |
+| 0B | `L1` | L1 |
+| 0C | `R1` | R1 |
+| 0D | `cntr_PS2_slct` | Select again |
+| 0E | `L2` | L2 again |
+| 0F to 22 | `empty` | Nothing |
+
+Set 1 is the same with 00 Circle, 01 Cross, 06 Triangle and 07 Square, a swapped layout the PS2 doesn't use. The tutorial's wording fits set 0: "press `<BUTTON_00>`" to act, `<BUTTON_05>` for the menu, `<BUTTON_06>` for the motives, "hold `<BUTTON_0C>`" to fast-forward.
+
+**`<COLOR_AARRGGBB>`** must be exactly 16 characters, four pairs of hex digits each divided by 255.
+- **It colours one word:** the tag token is unlinked, and the colour goes to the next token only.
+- There's no closing form, and no line or span scope. Each coloured word needs its own tag, as in step 3's "`<COLOR_FF0B0077> Moneywell's\r\n<COLOR_FF0B0077> Big_Book_of_Survival!`".
+
+**Underscores.** Nothing in the game's code swaps `_` for a space.
+- **One word:** the splitter doesn't break at `_`, so "Big_Book_of_Survival!" is one token, and one `<COLOR_>` colours all of it.
+- **Drawn as a space:** the `frankfur` font has no glyph for `_` (`systemfont` does). A code with no glyph advances the pen by the font's `space` and draws nothing (media.md, Fonts). Likely, since which font a screen's text uses isn't read; `frankfur` is the one with the full character set.
+
+**Text size** (`0x440560`, `FlashBigFile` code; proven, PS2). Setting a text item's size S:
+- **The target size** is S × the global at `0x5A82F4`. The aspect is scaled by the ratio of `0x5A82F4` to `0x5A82F0`.
+- **Both globals are 1.0.** The engine's static initializer (`0x44F64C`) sets them and nothing else writes them. **So the target pixel size is just S.**
+- **The font size:** it then picks the font's nearest size, an exact match if there is one, else preferring a larger size up to twice the target. It records the target (`+0x4C`) and the chosen size (`+0x54`).
+- **For `frankfur`:** it has only size 24, so it's always the one chosen, and text at size 12, 13, 15 or 25 is frankfur's 24-pixel glyphs scaled by S / 24. That the draw scales by target over chosen is likely; the draw itself isn't read.
+
+### Dialogs
+
+- **Modal** (Dialog types 0, 3 and 4):
+  - `UIDialog::SpawnDialog` (`0x2BB5B8`) calls `G2DTarget::SpawnDialog`. Proven.
+  - The `G2D` layout: `tsc5_comp_dialogbox.swf` full screen.
+  - Title `G2D_title` at (240, 120), 310 wide, font 14, colour `0x45479E`.
+  - Message `G2D_body` at (170, 145), font 12, colour `0x424242`.
+  - Up to three buttons `G2D_button0` to `2`, 128 × 36, 36 apart, labelled `G2D_sel0` to `2`.
+  - An icon at (144, 160), 48 × 48.
+- **Modeless** (types 1 and 2): the **`MDI` screen**. Proven on PS2, with Wii for the names.
+  - **The path:** `H2DTarget::SpawnModelessDialog` (`0x2BBBC8`) passes the dialog to the target at HUD `+0xA8`. On Wii that's `MDITarget::SpawnModelessDialog`, and the PS2 function it calls (`0x2AA430`) sits in MDITarget's code.
+  - **The record:** it copies the dialog's **message** (`+0x2C`) and **title** (`+0x30`), the two icon shaders (`+0x40`, `+0x48`), and whether it has no timeout (dialog `+0x18` = −1, type 2). It doesn't add one whose title and message are both the same as a queued one's.
+  - **Not copied:** the line SetDialog builds from `+3` (`+0x34`) for types 1 and 2. **So `+3`'s line is never shown for a modeless message.**
+  - **Art:** `tsc5_comp_dialogbox.swf` (`MDI_swf` at (0, 0) in the screen), in its mode 1. `MDITarget::GetVariable` (`0x2AA078`) answers the movie: `MDI_swf_Type` "1", **`MDI_swf_boxWidth` 468**, `MDI_swf_boxHeight1` the field `+0x90`, `boxHeight2` and `boxHeight3` "0".
+  - **The movie** (`initBox` in its ActionScript): for type 1 it draws a `PANE_LARGE` gadget of boxWidth × boxHeight1 at its own origin, and a `PANE_MED_CONTRAST` one 16 smaller each way at (8, 8).
+  - **Where and how big** (the show step, `0x2AA5F8`; proven for the stores, the arithmetic partly likely):
+    - **Position:** the whole `MDI` screen is moved to **x = 97**. Its y stays the layout's 0, so the box's top-left is (97, 0) and it spans x 97 to 565.
+    - **Height:** `+0x90` is recomputed on every show. It's about max(message height + 22 if there's a title, 48) + 42, rounded to an even number. The message is laid out at size 12 in a 412-wide area. The 128 set when the screen loads is only a starting value.
+  - **Pieces**, as the show step places them (the layout's own values are overridden):
+    - the step starts from x 24 and width 428, then (`0x2AA910` to `0x2AA940`) adds 16 to both x values and takes 16 off both widths before anything is laid out or stored;
+    - `MDI_title` and `MDI_body` both get **font size 12**, **412 wide**;
+    - the title at **(40, 24)**; the body at **(40, 24)**, or **(40, 46)** under a title;
+    - the icon frame and icon (`MDI_icon_bg_shdr` 48 × 48, `MDI_icon_shdr` 32 × 32) are placed from the same numbers. Their exact x and y aren't pinned.
+  - **Show and hide:** tweens of 250 (`MDI_show_callback`, `MDI_hide_callback`).
+  - **Messages close themselves. Proven, PS2** (`MDITarget::Update`, `0x2AA1E0`):
+    - **The timer:** on show, the shown message gets a time in ms: max(a value from its laid-out paragraph × its height, **3,600**) × 0.9. It's × 0.2 instead when the dialog asked to go first (dialog `+0x28`; such messages are also queued at the front). Then × 1 for both modeless types, **capped at 14,400**, or a flat 500 while global `0x5150F0` is set.
+    - **Counting down:** each update takes the frame's real time × 1,000 off. The count stops while the UI object at `0x514F1C` has `+0x88` set (likely a full-screen menu up).
+    - **At zero:** the message is deleted and the next queued one is shown, or the screen hides.
+    - **So every modeless message is gone within 3.2 to 14.4 seconds of showing** unless something keeps adding it. GenericSimCall 0x2C only closes them sooner. Opening the inventory or another screen doesn't close them; it may pause the count.
+  - **Not used:** the `HUD_modeless_dialog_title`, `_text` and `_continue_text` names belong to `HUDTarget`. No movie on the disc reads them, so the port shouldn't rely on them.
+- **Thought balloon** (type 5): `SpawnIntroThoughtBalloon` (`0x2BBB68`), likely the `ITB` screen.
+
+### The action queue
+
+- **Source:** the Sim's `ActionQueue` sends each visible action to `H2DTarget::AddAction` (`ActionQueue::AddActionToHUD`, Wii names). Each action carries its text and an icon shader, the object's `*_action_queue` texture (see "The icon box" above). Likely.
+- **The target:** `H2DTarget::AddAction` (`0x2BBC60`) passes it to the `ACTTarget` at HUD **`+0xA0`** (Wii `+0xBC`). Its `AddAction` is `0x295E50`. Proven.
+- **The screen is `AQU`**, from the layout table. Proven:
+  - `AQU_queue_container` at **(146, 375)**, 350 × 40, hidden at start;
+  - 18 items `AQU_item0` to `17`, each a 38 × 38 frame (`AQU_frameN`) and a 32 × 32 icon (`AQU_shdrN`), **with no positions of their own**;
+  - `AQU_SelectorIcon`, the text `<BUTTON_00>`.
+- **Slot positions** (`ReOrderActionQueue`, PS2 `0x296530`; proven):
+  - each record in the list gets a slot, and the slot's x and y are the floats at **`ACTTarget +0x88 + 8 × slot`** and `+0x8C + 8 × slot`, truncated to whole numbers;
+  - slots run 0 to 8, and everything past the ninth shares slot 8;
+  - slot 0 gets the frame shader `0x3EF13377`, the others `0xDD35680E`.
+- **Cancelling isn't done here.** The player cancels with a button, not by picking an icon. ACTTarget's cancel cursor is never set, so its cancel mode never opens. See bhav.md, "How the player cancels an action".
+- **Who fills the table isn't found.** The base constructor (`0x296958`) zeroes `+0x88` to `+0x9C`, and nothing in ACTTarget's code (PS2 `0x294000` to `0x298800`, `0x2B8E38` on; Wii `ACTTarget` methods) stores into it.
+- **A RAM read settles it.** With a few actions queued, in live mode:
+  1. Read the word at **`0x00514C04`**: the HUD (`H2DTarget`).
+  2. Read the word at **HUD + `0xA0`**: the `ACTTarget`.
+  3. Read **18 floats from ACTTarget + `0x88`**: (x, y) for slots 0 to 8, in the 640 × 448 stage.
+  - Also note ACTTarget + `0xE0`, the list head. Each record's `+0x14` and `+0x18` are the placed x and y, and `+0x48` is the next record. Comparing them with the table checks the reading.
+
 ## Not read
 
 - **Inside the movie:** row height, which way the list grows, how many of the 12 names show, where
   the title, count and icon sit, and how the movie offsets the box from the point it's given and
   keeps it on screen. These are in `tsc5_interaction_menu`'s ActionScript and timeline. The
   game's code doesn't do any of them.
-- **What sets `+0x1B8`/`+0x1BC`, the arrow flags.** Likely, from Wii's `SetLeftArrowEnable` and
-  `SetRightArrowEnable`: the object-cycling in direct control.
+- **HUD:** the bar groups' looks; `hudMoon`'s value; the action queue's slot table (see its RAM
+  read); where `tsc5_comp_dialogbox` puts its box; the `WAF` and `RSP` panels.

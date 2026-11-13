@@ -22,9 +22,9 @@ public:
 
     s16 GetID() const;
     u32 GetGuid() const;
-    int GetCategory() const;
+    s8 GetCategory() const;
     s16 GetCount() const;
-    int GetOwnerID() const;
+    s16 GetOwnerID() const;
     int GetOwnershipPoints(s16 a) const;
     s8 GetStatusText();
     void SetStatusText(s8 value);
