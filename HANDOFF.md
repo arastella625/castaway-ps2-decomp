@@ -18,7 +18,7 @@ The owner chose PS2 over Wii on purpose. As far as we know nobody has decompiled
 
 ## Key facts established so far
 
-**Target binary:** `SLUS_216.64`, the US PS2 build. The owner has it locally at `D:\tools\castaway_work\game`, outside this kit; `pkg/target.sha1` holds its checksum.
+**Target binary:** `SLUS_216.64`, the US PS2 build. The owner keeps it in a work folder outside this kit; `pkg/target.sha1` holds its checksum.
 - ELF32 MIPS (Emotion Engine / R5900), entry point `0x100008`, **stripped**: no symbol table or debug sections.
 - `.text` runs from `0x00100000`, size `0x38C604` (about 930k instructions).
 - It also has `.vutext` (vector unit microcode) and many `.DVP.overlay.*` sections. That's VU1 rendering microcode, which doesn't port directly and will need a rewrite.
@@ -64,7 +64,7 @@ Checked here: that workaround works with our `Ps2EeAs`. With three `nop`s and a 
 
 **Matching workflow:** decompiled code is in `src/`, addresses in `config/symbols.txt`, and `tools/verify.py` builds and byte-compares every function. `docs/STANDARDS.md` has the rules and the command. `pkg/tools/matching` is the older harness that compared four compilers and twelve flag sets; keep it for testing other modules.
 
-To run the older harness: it is in `pkg/tools/matching`. Set `COMPILERS` to the folder holding the compilers (here `/mnt/d/tools/castaway_work/compilers`). Run the SN `.exe` files under Wine in WSL with `unshare -rn` so they have no network. `cc1plus` has no preprocessor, so feed it preprocessed `.ii` input. `Ps2EeAs.exe` works when given only `-G0` (see "Assembler" above). Never commit the compilers.
+To run the older harness: it is in `pkg/tools/matching`. Set `COMPILERS` to the folder holding the compilers (outside the repo, next to the game files). Run the SN `.exe` files under Wine in WSL with `unshare -rn` so they have no network. `cc1plus` has no preprocessor, so feed it preprocessed `.ii` input. `Ps2EeAs.exe` works when given only `-G0` (see "Assembler" above). Never commit the compilers.
 
 Rebuild from scratch (export `ghidra_functions.csv` first with `tools/ExportGhidraFunctions.java`):
 ```
@@ -77,11 +77,11 @@ python3 tools/order_fill.py wii_funcs.json ghidra_functions.csv seeded.csv order
 ```
 Then merge `vtable_names.csv` and `order_names.csv` into one CSV (columns `ps2_addr,wii_symbol,evidence,tier`) and run `match.py` once more with it as the extra file, using `castaway_ps2_names` as the prefix.
 
-`match.py` output keeps an `example_strings` column of game text for local review. Run `tools/publish_names.py` before copying a names CSV into the kit, because that column shouldn't be published. The full copy is in `D:\tools\castaway_work\v4`.
+`match.py` output keeps an `example_strings` column of game text for local review. Run `tools/publish_names.py` before copying a names CSV into the kit, because that column shouldn't be published. The full copy stays in the work folder outside the repo.
 
 Dependencies: `pip install capstone pyelftools`. Wii and PS2 strings are normalized by swapping `Wii`/`PS2` for `@PLAT@`.
 
-**Status, 2026-11-05:** steps 1–3 are done, with names applied in Ghidra (`D:\tools\ghidra\projects`). PS2 vtable slots are 8 bytes (`{delta, index}`, pointer), which points to an older GCC ABI and is a lead for step 5. Ghidra's boundaries did not clear the `review` tier as predicted. Constants, switch-table sizes and call counts were not tried.
+**Status, 2026-11-05:** steps 1–3 are done, with names applied in the local Ghidra project. PS2 vtable slots are 8 bytes (`{delta, index}`, pointer), which points to an older GCC ABI and is a lead for step 5. Ghidra's boundaries did not clear the `review` tier as predicted. Constants, switch-table sizes and call counts were not tried.
 
 Step 4 is partly done. `CasSimDescription` (0x334 bytes), `SimBodyPart` (0x24) and its 15 subclasses have structs, defined in `cas_layouts.csv` and applied with `tools/ApplyClassLayouts.java`; 96 methods have `this` typed. `CasUtils` and `CharacterImageMaker` have no structs yet. Field rule for these classes: PS2 offset = Wii offset − 4, because the vptr is the last member on PS2 and the first on Wii. Subclass extra fields and the `field_0x*` entries are still unknown.
 
@@ -145,7 +145,7 @@ More of what the compiler does with source shape, from this round:
 - When a stream decodes "well enough", make it end exactly on its marks before trusting any field. A reader that stops early can be wrong from an early field on and still look right.
 - Disassembly `nop`s before a label are alignment. They follow from sizes earlier in the function, so leave them until everything before is right.
 
-New scratch tools in `D:\tools\castaway_work\bhav`: `dd.py` aligns our object against the game by sequence and prints only real differences, with `REMAP=s2=s3,...` to look past a register rename; `dr.ps1 "" <limit> <lines> <mangled> <source stem>` builds and runs it; `cases.py` and `te.py` mark jump-table cases in Wii and PS2 listings; `squeeze.py` and `squeeze2.py` fold error and virtual call sequences; `opsym.py` rewrites the operands block of `config/symbols.txt` from `opsyms.txt`, so edit that list, not the file.
+New scratch tools in the work folder outside the repo: `dd.py` aligns our object against the game by sequence and prints only real differences, with `REMAP=s2=s3,...` to look past a register rename; `dr.ps1 "" <limit> <lines> <mangled> <source stem>` builds and runs it; `cases.py` and `te.py` mark jump-table cases in Wii and PS2 listings; `squeeze.py` and `squeeze2.py` fold error and virtual call sequences; `opsym.py` rewrites the operands block of `config/symbols.txt` from `opsyms.txt`, so edit that list, not the file.
 
 **Status, 2026-11-06, the behaviour interpreter:** 873 functions match. The 46 new ones are the code that runs BHAV trees: all of `TreeSim` that isn't in a subclass, `TreeStack`, `StackElem`, and `Behavior`'s lookup of trees and nodes. One function is parked: `TreeSim::DoNodeActionNormal` is one word off (`beql` for `beq`, same delay slot, so behaviour is the same) and sits under `NON_MATCHING` with a note. `docs/formats/bhav.md` holds what this taught about the instruction set, and says what's proven, likely and open.
 
@@ -237,9 +237,9 @@ Best next seam for count alone: names. 2,955 of 4,538 vtable slot targets are st
 
 ## Before making the repo public
 
-- Decide whether to contact the ts2c maintainers; ts2c has no license, and the function names come from it. It's credited in `README.md`.
+- The ts2c licensing question is settled (2026-11-12): ts2c's `symbols.txt` is a `readelf` dump of `files/tsc_wii_release_dvd.elf`, EA's own linker output that ships on the retail Wii disc, so the names are game data rather than ts2c's work. ts2c is credited in `README.md`.
 - Check the history for anything that shouldn't be published.
-- The Ghidra project is not in git. A copy is in `G:\My Drive\castaway_ghidra_backup`; refresh it after big changes, and don't share that folder, because it contains the game executable.
+- The Ghidra project is not in git. A copy is in a cloud-drive backup folder; refresh it after big changes, and don't share that folder, because it contains the game executable.
 
 ## Owner context
 

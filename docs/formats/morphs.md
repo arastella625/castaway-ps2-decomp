@@ -10,7 +10,7 @@ How far each claim was checked:
 |---|---|
 | Lattice file format | All 2,404 models: 1,195 lattices in 769 models parse, and in all 769 the three following counts are 0 and the first mesh record sits exactly 33 bytes on, as in models with no lattices |
 | Grid and box maths | 67,308 vertices inside their box come back within 1.5/4096 m with nothing morphed (median about 0.1) |
-| Whole body morph | Bit-exact against RAM: torso 468 of 468 vertices, lower body 432 of 432, sleeves 603 of 603, for Amber Rastella at [3, 0.5, 0.5, 0.5] |
+| Whole body morph | Bit-exact against RAM: torso 468 of 468 vertices, lower body 432 of 432, sleeves 603 of 603, for the test save's player Sim at [3, 0.5, 0.5, 0.5] |
 | Unmoved parts | Bit-exact against RAM: face 803 of 803, `af_ha2_wavylong_ln` 409 of 409, shoes 274 of 274 |
 | Keyframe weights | PS2 disassembly matches Wii. RAM proves values 0.5 (keyframe 1) and head 3 (none). Above 1.0 and other head values are code and renders only |
 | Face targets | PS2 disassembly matches Wii; the 13-model list read from RAM; all 24 targets fit the face. **No face with a non-default value has been compared with the game** |
