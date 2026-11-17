@@ -28,6 +28,11 @@ inline int cXObject::GetTreeID(ObjEntryPoint entry)
     return mSelector->GetFnTable()->HasFunction(entry);
 }
 
+inline bool cXObject::RequiresWallAdjacency() const
+{
+    return GetFnTableOutOfLine()->HasFunction(kObjEntryWallAdjacency) != 0;
+}
+
 inline bool cXObject::IsChair()
 {
     return GetTreeID(kObjEntryChair) != 0;
@@ -526,6 +531,37 @@ void cXObject::UpdateChairFacing()
     }
 }
 
+// 0x214098. Wii: UpdateWallAdjacency. For an object with tree 6: the low six bits of
+// variable 5 become which sides of its tile have a wall, turned to the object's facing (bit 0
+// segment 1, bit 2 segment 2, bit 1 segment 4, bit 3 segment 8), and tree 6 runs when that
+// changes. Above GetCTilePt's second body, so that it calls 0x253ED0 as the game does.
+void cXObject::UpdateWallAdjacency()
+{
+    if (!RequiresWallAdjacency())
+        return;
+    cFixedWorld *world = GetFixedWorld();
+    s16 adjacency = GetData(5);
+    adjacency &= ~0x3f;
+    CTilePt tile = GetCTilePt();
+    if (!world->OutOfBounds(tile)) {
+        int rotation = (-GetData(1) / 2) & 3;
+        TileWalls walls = world->GetWall(tile);
+        walls.Rotate(rotation);
+        if (walls.HasWall(1))
+            adjacency |= 1;
+        if (walls.HasWall(2))
+            adjacency |= 4;
+        if (walls.HasWall(4))
+            adjacency |= 2;
+        if (walls.HasWall(8))
+            adjacency |= 8;
+    }
+    if (adjacency != GetData(5)) {
+        SetData(5, adjacency);
+        RunTree(kObjEntryWallAdjacency, 0, 0);
+    }
+}
+
 // GetCTilePt's body again (cXObjectPrims.cpp has the first), here so that
 // CalcArmorAgainstDamage inlines it, as the game does. It must come after UserCanPickup,
 // which calls the game's copy at 0x253ED0: a function compiled before an inline's body has
@@ -736,4 +772,10 @@ int cXObject::GetTileWidth()
     if (mDef[0x43] != 0)
         width = mDef[0x43];
     return width;
+}
+
+// 0x2455F8. Wii: GetFnTable.
+ObjectFunctionTable *cXObject::GetFnTableOutOfLine() const
+{
+    return mSelector->GetFnTable();
 }

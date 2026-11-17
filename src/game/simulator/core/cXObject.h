@@ -18,6 +18,7 @@ class CompleteGoalParam;
 class KillSoundsParam;
 class PlaySoundParam;
 class ObjSelector;
+class ObjectFunctionTable;
 class ReconBuffer;
 class RelMatrix;
 
@@ -34,6 +35,8 @@ enum ObjEntryPoint {
     kObjEntryLoad = 2,           // PostLoad, with the transition type as the parameter
     kObjEntryUserPlacement = 0xb, // UserPlace
     kObjEntryUserPickup = 0xc,   // UserPickup
+    kObjEntryWallAdjacency = 6,  // UpdateWallAdjacency: having it opts in, and it runs when
+                                 // the walls around the object change
     kObjEntryPlacement = 9,      // TS2's placement entry; UpdateChairFacing runs it on a part
                                  // whose chair bit changed, if the part has tree 0x19
     kObjEntryChairFacing = 0x19, // UpdateChairFacing: only a part with this tree reruns 9
@@ -444,6 +447,10 @@ public:
     // Wii: GetDef as a function (0x245700 here too, called by GetStyle in
     // CalcRoomScoreImpact), GetStyle and SetData.
     s16 *GetDefOutOfLine(); // 0x245700
+    // Wii: GetFnTable, out of line on PS2 as well: UpdateWallAdjacency calls it.
+    ObjectFunctionTable *GetFnTableOutOfLine() const; // 0x2455F8
+    // Wii: RequiresWallAdjacency, inlined on PS2.
+    inline bool RequiresWallAdjacency() const; // defined in cXObject.cpp
     s16 GetStyle() { return GetDefOutOfLine()[0x15]; }
     void SetData(int index, s16 value) { mVars.WriteVar(index, value); }
     // Wii: GetData, a variable by index through the out-of-line operator[].
