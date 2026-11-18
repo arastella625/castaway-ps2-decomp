@@ -2,6 +2,7 @@
 
 #include "game/GameData.h"
 #include "game/UIDB.h"
+#include "game/simulator/core/PassiveInfluenceSystem.h"
 
 #include "common/EGlobal.h"
 #include "common/EVec3.h"
@@ -63,13 +64,6 @@ public:
 };
 }
 
-class AnimRef;
-class PassiveInfluenceSystem {
-public:
-    void SetSkillNameID(cXObject *object, const AnimRef *anim);
-    void ClearInfluenceMotiveDeltas(cXObject *object);
-    void SetInfluenceMotiveDelta(cXObject *object, u8 motive, f32 delta, s16 limit, s8 type);
-};
 
 inline u32 Behavior::GetNamespaceIDInline()
 {

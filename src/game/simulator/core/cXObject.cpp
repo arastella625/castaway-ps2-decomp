@@ -11,6 +11,8 @@
 #include "game/simulator/core2/SlotLoader.h"
 #include "game/simulator/core/ObjectIterator.h"
 #include "game/simulator/core/ObjSelector.h"
+#include "game/simulator/core/SoundPlayer.h"
+#include "game/simulator/core/PassiveInfluenceSystem.h"
 #include "game/simulator/objectdata/XObjLang.h"
 
 // UserCanPlace's placement check is inside a do { } while (0), so the original had a macro
@@ -26,6 +28,16 @@
 inline int cXObject::GetTreeID(ObjEntryPoint entry)
 {
     return mSelector->GetFnTable()->HasFunction(entry);
+}
+
+inline Behavior *cXObject::GetBehavior()
+{
+    return mSelector->mBehavior;
+}
+
+inline bool cXObject::RequiresWallAdjacency() const
+{
+    return GetFnTableOutOfLine()->HasFunction(kObjEntryWallAdjacency) != 0;
 }
 
 inline bool cXObject::IsChair()
@@ -397,6 +409,12 @@ int cXObject::UserCanPickup()
     return 1;
 }
 
+// 0x255968. Nothing but an invalid spec; Pickup tests it anyway.
+PlacementSpec::PlacementSpec(bool)
+{
+    mValid = 0;
+}
+
 // The tile is the one given unless the object goes into a slot of another object that is not
 // a TS2 slot, when it is that object's own location.
 PlacementSpec::PlacementSpec(const FTilePt &tile, int level, cXObject *object, int slot)
@@ -524,6 +542,203 @@ void cXObject::UpdateChairFacing()
                 part->RunTree(kObjEntryPlacement, 0, 0);
         }
     }
+}
+
+// 0x214098. Wii: UpdateWallAdjacency. For an object with tree 6: the low six bits of
+// variable 5 become which sides of its tile have a wall, turned to the object's facing (bit 0
+// segment 1, bit 2 segment 2, bit 1 segment 4, bit 3 segment 8), and tree 6 runs when that
+// changes. Above GetCTilePt's second body, so that it calls 0x253ED0 as the game does.
+void cXObject::UpdateWallAdjacency()
+{
+    if (!RequiresWallAdjacency())
+        return;
+    cFixedWorld *world = GetFixedWorld();
+    s16 adjacency = GetData(5);
+    adjacency &= ~0x3f;
+    CTilePt tile = GetCTilePt();
+    if (!world->OutOfBounds(tile)) {
+        int rotation = (-GetData(1) / 2) & 3;
+        TileWalls walls = world->GetWall(tile);
+        walls.Rotate(rotation);
+        if (walls.HasWall(1))
+            adjacency |= 1;
+        if (walls.HasWall(2))
+            adjacency |= 4;
+        if (walls.HasWall(4))
+            adjacency |= 2;
+        if (walls.HasWall(8))
+            adjacency |= 8;
+    }
+    if (adjacency != GetData(5)) {
+        SetData(5, adjacency);
+        RunTree(kObjEntryWallAdjacency, 0, 0);
+    }
+}
+
+// Not matched: 26 of 180 words differ (aligned), every one from a single register choice.
+// The game keeps &mVars in s3 and the address sp+0x20 in s4, and uses that register only for
+// the off-grid tile; each HierarchySite at the same slot is passed as a fresh addiu. Ours
+// shares one register for the tile and both sites, so it has more uses, ranks first and takes
+// s3. Tried: the tile at function scope (its own slot, frame 0x120), and the tile inside an
+// inline helper (no change). The logic is complete; bhav.md describes it.
+#ifdef NON_MATCHING
+// 0x2112B8. Wii: Pickup, a different body from PS2's. A single-tile object runs tree 10.
+// Then it leaves the hierarchy: with no spec (always, since PlacementSpec(true) is invalid on
+// PS2) the object in its slot 0 takes its site; otherwise whatever is at the spec's site
+// swaps places with it. Variables 2 and 3 are cleared to no holder and slot -1, it moves off
+// the grid on level 1, bit 8 of variable 8 is cleared, a chair updates the facing of whatever
+// is in front of where it stood, and the container it was in runs tree 9.
+void cXObject::Pickup()
+{
+    if (!IsMultiTile())
+        RunTree(kObjEntryPickup, 0, 0);
+    int x = mTileX >> 4;
+    int y = mTileY >> 4;
+    s16 direction = GetData(1);
+    PlacementSpec spec(true);
+    cXObject *container = GetContainerInline();
+    if (!spec.mValid) {
+        HierarchySite site(this);
+        HierSever();
+        cXObject *child = mModule->GetObjectFromID(mObjectSlots[0].mObjectID);
+        if (child != 0) {
+            child->HierSever();
+            child->HierSetSite(&site);
+        }
+    } else {
+        HierarchySite site(&spec);
+        cXObject *occupant = HierGetObject(&site);
+        if (occupant != this) {
+            if (occupant != 0)
+                occupant->HierSever();
+            HierSetSite(&site);
+            if (occupant != 0) {
+                HierarchySite mine(this, site.mTile, 0);
+                occupant->HierSetSite(&mine);
+            }
+        }
+    }
+    SetData(2, 0);
+    SetData(3, -1);
+    FTilePt tile;
+    tile.Set(-1, -1);
+    SetLocation(tile, 1);
+    SetData(8, GetData(8) & ~0x100);
+    if (IsChair())
+        UpdateChairFacingOutOfLine(mModule, x + sXDirTable[direction], y + sYDirTable[direction], mLevel);
+    if (container != 0)
+        container->RunTree(kObjEntryPlacement, 0, 0);
+}
+#endif
+
+// 0x20F478. Wii: Reset. Back to how it was created, where it is: it leaves the hierarchy,
+// the variables are reset but nine are kept (bhav.md lists them), variable 0xb is the ID
+// again and 0x3a the definition's, the attribute arrays and temps are cleared, the stack
+// restarts on the main tree, and it goes back to its site with variables 2 and 3 naming the
+// holder and slot. Then it ages, goes idle and leaves the influence map and the listeners;
+// a single-tile object runs tree 0, and when asked outside author mode it simulates once.
+void cXObject::Reset(bool simulate)
+{
+    field_0x124 = 0;
+    field_0x128 = 0;
+    field_0x12c = 0;
+    mCreationFrame = _framecount;
+    HierarchySite site(this);
+    HierSever();
+    bool placed = GetWasPlacedByPlayer();
+    EdithVariableSet saved(mVars);
+    mVars.Reset();
+    SetData(0x1d, saved[0x1d]);
+    SetData(1, saved[1]);
+    SetData(0x29, saved[0x29]);
+    SetData(0x2d, saved[0x2d]);
+    SetData(0x2e, saved[0x2e]);
+    SetData(0x2f, saved[0x2f]);
+    SetData(0x18, saved[0x18]);
+    SetData(0x15, saved[0x15]);
+    SetData(0x43, saved[0x43]);
+    SetData(0xb, GetID());
+    SetData(0x3a, GetDef()[0x31]);
+    CalcRoomScoreImpact();
+    SetWasPlacedByPlayer(placed);
+    int i;
+    for (i = 0; i < mNumAttrs; i++)
+        mAttrs[i] = 0;
+    for (i = 0; i < mNumSemiAttrs; i++)
+        mSemiAttrs[i] = 0;
+    for (i = 7; i >= 0; i--)
+        mTemps[i] = 0;
+    s16 tree = GetTreeID(kObjEntryMain);
+    SetNoMainTreeSim(tree == 0);
+    TreeSim::Reset(GetBehavior(), tree);
+    HierSetSite(&site);
+    PlacementSpec spec(this);
+    if (spec.mObject != 0)
+        SetData(2, spec.mObject->GetID());
+    else
+        SetData(2, 0);
+    SetData(3, spec.mSlot);
+    UpdateAge();
+    SetIdleStatus(-1);
+    GetSimulator()->GetPassiveInfluenceSystem()->RemoveObjectFromMap(this);
+    GetSimulator()->RemoveAllForListener(GetID());
+    if (!IsMultiTile()) {
+        RunTree(kObjEntryInit, 0, 0);
+        if (simulate && !_gd.IsAuthorMode() && HasMainTreeSim())
+            Simulate(0);
+        UpdateSimFlags();
+    }
+}
+
+// 0x20F8C0. Wii: Cleanup. Only with no object given. An object with tree 3 runs it, clears
+// variable 0x3e and bit 5 of variable 8 (occupied) and restarts on its main tree; a multi-tile
+// object does that for each part that has the tree, with the lead's tree set. Without tree 3
+// it is picked up, reset, and put back where it was unless misc flag 0x40 is set. Then the
+// object goes idle, its sounds stop and it lets go of the tutorial.
+void cXObject::Cleanup(cXObject *object)
+{
+    if (object != 0)
+        return;
+    if ((s16)GetTreeID(kObjEntryCleanup) != 0) {
+        if (IsMultiTile()) {
+            cXMTObject *lead = GetMTObject();
+            if (lead == 0)
+                return;
+            for (cXMTObject *part = lead->GetFirstMultiTileObject(); part != 0;
+                 part = part->GetNextMultiTileObject()) {
+                if ((s16)part->GetTreeID(kObjEntryCleanup) != 0) {
+                    part->RunTree(kObjEntryCleanup, 0, 0);
+                    part->SetData(0x3e, 0);
+                    part->SetData(8, part->GetData(8) & ~0x20);
+                    part->TreeSim::Reset(GetBehavior(), GetTreeID(kObjEntryMain));
+                }
+            }
+        } else {
+            RunTree(kObjEntryCleanup, 0, 0);
+            SetData(0x3e, 0);
+            SetData(8, GetData(8) & ~0x20);
+            TreeSim::Reset(GetBehavior(), GetTreeID(kObjEntryMain));
+        }
+    } else {
+        FTilePt tile;
+        int level;
+        cXObject *container;
+        s16 slot;
+        int placed;
+        GetPlacementInfo(&tile, &level, &container, &slot, &placed);
+        Pickup();
+        if (!(mMiscFlags & 0x40)) {
+            Reset(true);
+            if (placed)
+                Place(tile, level, container, slot);
+        }
+    }
+    SetIdleStatus(-1);
+    cSoundPlayer *player = GetSoundPlayer();
+    if (player != 0)
+        player->QuietBySourceID(GetID());
+    if (mModule->GetTutorialObject() == this)
+        mModule->SetTutorialObjectOutOfLine(0);
 }
 
 // GetCTilePt's body again (cXObjectPrims.cpp has the first), here so that
@@ -736,4 +951,38 @@ int cXObject::GetTileWidth()
     if (mDef[0x43] != 0)
         width = mDef[0x43];
     return width;
+}
+
+// 0x2455F8. Wii: GetFnTable.
+ObjectFunctionTable *cXObject::GetFnTableOutOfLine() const
+{
+    return mSelector->GetFnTable();
+}
+
+// 0x253520. Wii: GetPlacementInfo.
+void cXObject::GetPlacementInfo(FTilePt *tile, int *level, cXObject **object, s16 *slot, int *valid)
+{
+    PlacementSpec spec(this);
+    *tile = spec.mTile;
+    *level = spec.mLevel;
+    *slot = spec.mSlot;
+    *object = spec.mObject;
+    *valid = spec.mValid;
+}
+
+// 0x255478. Wii: SetTutorialObject, out of line.
+bool ObjectModule::SetTutorialObjectOutOfLine(cXObject *object)
+{
+    if (mTutorialObject && object)
+        return false;
+    if (mTutorialObject == object)
+        return true;
+    mTutorialObject = object;
+    return true;
+}
+
+// 0x2539B0. UpdateChairFacing(module, x, y, level) as a function.
+void cXObject::UpdateChairFacingOutOfLine(ObjectModule *module, int x, int y, int level)
+{
+    UpdateChairFacing(module, x, y, level);
 }

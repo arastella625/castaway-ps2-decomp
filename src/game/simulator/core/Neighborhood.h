@@ -141,6 +141,7 @@ public:
     static Neighborhood *pNeighborhood;
     static class House *pHouse;
     static class EGlobal *pEORGlobals; // 0x50A6A8  Wii: GetEORGlobals
+    static class cSoundPlayer *pSound; // 0x50A694  Wii: GetSoundPlayer
 };
 
 class House {

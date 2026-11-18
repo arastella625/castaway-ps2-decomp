@@ -17,6 +17,12 @@ public:
     int Contains(int index);
     const s16 *WriteVar(int index, s16 value);
     void Initialize(cXObject *object); // 0x214FB8
+    // Reset keeps a copy across Reset() to restore nine variables from it. The default
+    // constructor is only declared so that the object classes stay constructible.
+    EdithVariableSet();
+    EdithVariableSet(const EdithVariableSet &other); // 0x214EB0
+    ~EdithVariableSet();                             // 0x254228
+    void Reset();                                    // 0x2190E0
 };
 
 #endif

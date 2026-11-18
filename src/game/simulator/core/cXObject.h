@@ -18,6 +18,7 @@ class CompleteGoalParam;
 class KillSoundsParam;
 class PlaySoundParam;
 class ObjSelector;
+class ObjectFunctionTable;
 class ReconBuffer;
 class RelMatrix;
 
@@ -31,9 +32,14 @@ extern u32 _framecount; // 0x49FDB8
 // are The Sims 2's function-table order; the names are ours, from the callers.
 enum ObjEntryPoint {
     kObjEntryInit = 0,           // PostLoad, when the selector needs a reset
+    kObjEntryMain = 1,           // the tree Cleanup and Reset restart the object's stack on
+    kObjEntryCleanup = 3,        // Cleanup: having it replaces the pickup-and-reset
+    kObjEntryPickup = 0xa,       // Pickup
     kObjEntryLoad = 2,           // PostLoad, with the transition type as the parameter
     kObjEntryUserPlacement = 0xb, // UserPlace
     kObjEntryUserPickup = 0xc,   // UserPickup
+    kObjEntryWallAdjacency = 6,  // UpdateWallAdjacency: having it opts in, and it runs when
+                                 // the walls around the object change
     kObjEntryPlacement = 9,      // TS2's placement entry; UpdateChairFacing runs it on a part
                                  // whose chair bit changed, if the part has tree 0x19
     kObjEntryChairFacing = 0x19, // UpdateChairFacing: only a part with this tree reruns 9
@@ -230,6 +236,9 @@ public:
     int mLevel;        // 0x14
 
     PlacementSpec(const FTilePt &tile, int level, cXObject *object, int slot); // 0x255978
+    PlacementSpec(cXObject *object);                                           // 0x255938  where it is now
+    // Wii: PlacementSpec(bool). PS2 ignores the argument and only clears mValid.
+    PlacementSpec(bool a);                                                     // 0x255968
 };
 STATIC_ASSERT(PlacementSpec_size, sizeof(PlacementSpec) == 0x18);
 
@@ -244,6 +253,7 @@ public:
     int mSlot;         // 0x10
     int mLevel;        // 0x14  the holder's, from the three-argument constructor
 
+    HierarchySite(cXObject *object);                                // 0x223D10  where it is now
     HierarchySite(const PlacementSpec *spec);                       // 0x255A28
     HierarchySite(cXObject *object, const FTilePt &tile, int slot); // 0x255A78
 };
@@ -444,6 +454,10 @@ public:
     // Wii: GetDef as a function (0x245700 here too, called by GetStyle in
     // CalcRoomScoreImpact), GetStyle and SetData.
     s16 *GetDefOutOfLine(); // 0x245700
+    // Wii: GetFnTable, out of line on PS2 as well: UpdateWallAdjacency calls it.
+    ObjectFunctionTable *GetFnTableOutOfLine() const; // 0x2455F8
+    // Wii: RequiresWallAdjacency, inlined on PS2.
+    inline bool RequiresWallAdjacency() const; // defined in cXObject.cpp
     s16 GetStyle() { return GetDefOutOfLine()[0x15]; }
     void SetData(int index, s16 value) { mVars.WriteVar(index, value); }
     // Wii: GetData, a variable by index through the out-of-line operator[].
@@ -493,6 +507,10 @@ public:
     inline cXObject *GetObjectFromID(s16 id);
     s16 *GetDef() { return mDef; }
     ObjSelector *GetSelector() { return mSelector; }
+    // Wii: GetBehavior, the selector's tree set.
+    inline Behavior *GetBehavior(); // defined in cXObject.cpp
+    // Wii: GetPlacementInfo, PlacementSpec(this)'s fields one by one; the last is a bool on Wii.
+    void GetPlacementInfo(FTilePt *tile, int *level, cXObject **object, s16 *slot, int *valid); // 0x253520
     int RunTree(ObjEntryPoint entry, s16 a, s16 *param); // 0x253FD8
     // Wii: GetTreeID. The tree at an entry point, or 0. Defined in cXObject.cpp.
     inline int GetTreeID(ObjEntryPoint entry);
@@ -503,6 +521,13 @@ public:
     void SetLocation(const FTilePt &tile, int level);    // 0x212400
     void UpdateSimFlags();                               // 0x253DC0
     void SetWasPlacedByPlayer(bool placed);               // 0x253C98
+    bool GetWasPlacedByPlayer() const;                    // 0x253C68
+    // Wii: HierSever, out of whatever holds it; HierSetSite puts it at a site.
+    void HierSever();                                     // 0x210368
+    void HierSetSite(const HierarchySite *site);          // 0x210240
+    // Wii: HierGetObject, whatever is at a site already.
+    cXObject *HierGetObject(const HierarchySite *site);  // 0x210418
+    void UpdateAge();                                     // 0x20FEB0
     int CanPlaceSingleTile(const FTilePt &tile, int level, cXObject *object, int slot); // 0x253958
     // CanPlaceSingleTile's body: UserCanPlace has it inlined while CanPlace calls the
     // function. Defined in cXObject.cpp.
@@ -522,6 +547,8 @@ public:
     void UpdateChairFacing();           // 0x211978
     // Wii keeps this as a function; Turn inlines both calls. Defined in cXObject.cpp.
     static inline void UpdateChairFacing(ObjectModule *module, int x, int y, int level);
+    // The same as a function, which Pickup calls.
+    static void UpdateChairFacingOutOfLine(ObjectModule *module, int x, int y, int level); // 0x2539B0
     void CalcRoomScoreImpact();         // 0x21ADA0
     // Wii: sXDirTable and sYDirTable, a step in each of the eight directions, north first.
     static int sXDirTable[8]; // 0x4927C8  0, 1, 1, 1, 0, -1, -1, -1

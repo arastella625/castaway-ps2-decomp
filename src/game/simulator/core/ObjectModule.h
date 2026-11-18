@@ -102,6 +102,8 @@ public:
         mTutorialObject = object;
         return true;
     }
+    // The same as a function, which Cleanup calls. Defined in cXObject.cpp.
+    bool SetTutorialObjectOutOfLine(cXObject *object); // 0x255478
 };
 
 extern ObjectModule *gObjectModule;
