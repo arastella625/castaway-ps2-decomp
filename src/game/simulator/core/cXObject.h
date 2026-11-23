@@ -431,6 +431,10 @@ public:
     virtual void TagGraphicsField();
     virtual void ReconStream(ReconBuffer *buffer, int a, bool b);
     virtual u32 ReconType();
+    // Wii: ReconSlots, the object IDs in the slots, from save version 5.
+    void ReconSlots(ReconBuffer *buffer, int version); // 0x2137D8
+    // Wii: ReconHeader, inlined on PS2: the rectangle, tile, level, ID and flags.
+    inline void ReconHeader(ReconBuffer *buffer, int version); // defined in cXObject.cpp
 
     void HandleError();
     int GetIdleStatus() { return mModule->GetIdleStatus(mID); }
@@ -605,6 +609,8 @@ public:
     long TryMakeActionString(StackElem *, XPrimParam *);
     long TryGenericSimCall(StackElem *, XPrimParam *);
     f32 CalcShortDistance(cXObject *object) const;
+    // Wii: CalcShortDistanceIn16thsOfTiles, from tile centres for anything but a Sim.
+    f32 CalcShortDistanceIn16thsOfTiles(cXObject *object); // 0x212C08
     // The object in variable 0x1a, the one this is in. Wii: HierGetParent.
     cXObject *HierGetParent(); // 0x253640
     // Wii keeps this as a function; PS2 inlines it: none when variable 0xe is set.

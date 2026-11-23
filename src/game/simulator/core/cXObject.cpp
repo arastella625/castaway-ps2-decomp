@@ -1,6 +1,8 @@
 #include "game/simulator/core/cXObject.h"
 
 #include "common/EGlobal.h"
+#include "common/ReconBuffer.h"
+#include "game/simulator/core/RelMatrix.h"
 #include "game/GameData.h"
 #include "game/simulator/core/Neighborhood.h"
 #include "game/simulator/core/ObjectModule.h"
@@ -549,6 +551,197 @@ void cXObject::UpdateChairFacing()
             if (tree != 0)
                 part->RunTree(kObjEntryPlacement, 0, 0);
         }
+    }
+}
+
+// Not matched: 9 of 133 words differ (aligned), all in ApproxSqrt's float block. Four are the
+// two nops the game has before each div.s (HANDOFF: "float division"; this is the first
+// function with one), the rest that the game keeps the root in f0 throughout where ours uses
+// f1 and f2. Tried: the root assigned to the end and returned, and returned as an expression.
+// The logic is complete, and bhav.md describes it.
+#ifdef NON_MATCHING
+// Wii: ApproxSqrt, inlined on PS2: two Newton steps from x / 20 + 1, and 0 for x <= 0.
+static inline f32 ApproxSqrt(f32 x)
+{
+    if (x <= 0.0f)
+        return 0.0f;
+    f32 root = x * 0.05f + 1.0f;
+    root = (root + x / root) * 0.5f;
+    root = (root + x / root) * 0.5f;
+    return root;
+}
+
+// 0x212C08. Wii: CalcShortDistanceIn16thsOfTiles. Each end is the object's position, moved to
+// the centre of its tile unless the object, or the container it is in, is a Sim.
+f32 cXObject::CalcShortDistanceIn16thsOfTiles(cXObject *object)
+{
+    FTilePt from = GetLocationRef();
+    cXObject *container = GetContainerInline();
+    if (container != 0) {
+        if (container->GetType() != 2) {
+            from.mX += 8;
+            from.mY += 8;
+        }
+    } else if (GetType() != 2) {
+        from.mX += 8;
+        from.mY += 8;
+    }
+    FTilePt to = object->GetLocationRef();
+    container = object->GetContainerInline();
+    if (container != 0) {
+        if (container->GetType() != 2) {
+            to.mX += 8;
+            to.mY += 8;
+        }
+    } else if (object->GetType() != 2) {
+        to.mX += 8;
+        to.mY += 8;
+    }
+    return ApproxSqrt(to.SquareDist(from));
+}
+#endif
+
+inline void cXObject::ReconHeader(ReconBuffer *buffer, int version)
+{
+    buffer->Recon32(&((FTileRect *)mRect)->mMinY, 1);
+    buffer->Recon32(&((FTileRect *)mRect)->mMinX, 1);
+    buffer->Recon32(&((FTileRect *)mRect)->mMaxY, 1);
+    buffer->Recon32(&((FTileRect *)mRect)->mMaxX, 1);
+    buffer->Recon32(&mTileX, 1);
+    buffer->Recon32(&mTileY, 1);
+    if (version >= 0x19)
+        buffer->ReconInt(&mLevel, 1);
+    if (version < 0x2f)
+        buffer->Recon16(&mID, 1);
+    s16 one = 1;
+    buffer->Recon16(&one, 1);
+    if (version == 0x37)
+        buffer->ReconInt((int *)&mMiscFlags, 1);
+}
+
+// 0x213158. Wii: ReconStream. Saves or loads an object. A rebuild (loading a new object)
+// reallocates any array the stream has more entries for; otherwise the extra entries are read
+// and dropped. The semi-global attributes are in from version 0x63, the static ones from 0x76.
+void cXObject::ReconStream(ReconBuffer *buffer, int version, bool rebuild)
+{
+    ReconHeader(buffer, version);
+    if (version <= 0) {
+        buffer->Recon16(mAttrs, 8);
+        buffer->Recon16(mTemps, 0x20);
+    }
+    s16 count = mNumAttrs;
+    buffer->Recon16(&count, 1);
+    if (mNumAttrs < count) {
+        if (rebuild) {
+            delete[] mAttrs;
+            mNumAttrs = count;
+            mAttrs = new s16[count];
+            buffer->Recon16(mAttrs, count);
+        } else {
+            s16 *saved = new s16[count];
+            buffer->Recon16(saved, count);
+            for (int i = 0; i < mNumAttrs; i++)
+                mAttrs[i] = saved[i];
+            delete[] saved;
+        }
+    } else {
+        buffer->Recon16(mAttrs, count);
+    }
+    if (version > 0x62) {
+        s16 semiCount = mNumSemiAttrs;
+        buffer->Recon16(&semiCount, 1);
+        if (mNumSemiAttrs < semiCount) {
+            if (rebuild) {
+                delete[] mSemiAttrs;
+                mSemiAttrs = 0;
+                mNumSemiAttrs = semiCount;
+                if (semiCount > 0) {
+                    mSemiAttrs = new s16[semiCount];
+                    buffer->Recon16(mSemiAttrs, semiCount);
+                }
+            } else if (semiCount > 0) {
+                s16 *saved = new s16[semiCount];
+                buffer->Recon16(saved, semiCount);
+                for (int i = 0; i < mNumSemiAttrs; i++)
+                    mSemiAttrs[i] = saved[i];
+                delete[] saved;
+            } else {
+                delete[] mSemiAttrs;
+                mSemiAttrs = 0;
+            }
+        } else if (semiCount > 0) {
+            buffer->Recon16(mSemiAttrs, semiCount);
+        }
+    }
+    if (version > 0x75) {
+        s16 staticCount = mNumStaticAttrs;
+        buffer->Recon16(&staticCount, 1);
+        if (mNumStaticAttrs < staticCount) {
+            if (rebuild) {
+                delete[] mStaticAttrs;
+                mStaticAttrs = 0;
+                mNumStaticAttrs = staticCount;
+                if (staticCount > 0) {
+                    mStaticAttrs = new s16[staticCount];
+                    buffer->Recon16(mStaticAttrs, staticCount);
+                }
+            } else if (staticCount > 0) {
+                s16 *saved = new s16[staticCount];
+                buffer->Recon16(saved, staticCount);
+                for (int i = 0; i < mNumStaticAttrs; i++)
+                    mStaticAttrs[i] = saved[i];
+                delete[] saved;
+            } else {
+                delete[] mStaticAttrs;
+                mStaticAttrs = 0;
+            }
+        } else if (staticCount > 0) {
+            buffer->Recon16(mStaticAttrs, staticCount);
+        }
+    }
+    buffer->Recon16(mTemps, 8);
+    mVars.ReconStream(buffer, version);
+    if (version < 0x6a) {
+        s16 unused = 0;
+        buffer->Recon16(&unused, 1);
+    }
+    mStack.ReconStream(buffer, version, mSelector->mFolder);
+    mRelMatrix->ReconStream(buffer, version);
+    ReconSlots(buffer, version);
+    s16 indexedCount = mNumIndexedData;
+    buffer->Recon16(&indexedCount, 1);
+    if (indexedCount > mNumIndexedData && rebuild) {
+        delete[] mIndexedData;
+        mNumIndexedData = indexedCount;
+        mIndexedData = new s16[indexedCount];
+    }
+    buffer->Recon16(mIndexedData, indexedCount);
+    if (rebuild)
+        SetData(1, 0);
+    if (GetISimInstance() != 0 && GetColorIndex() != 0)
+        GetISimInstance()->SetColorIndex(GetColorIndex());
+}
+
+// 0x2137D8. Wii: ReconSlots. The slot count, then for each slot a short that is always 0
+// and the ID of the object in it. The slot list grows to the count, reading or writing.
+void cXObject::ReconSlots(ReconBuffer *buffer, int version)
+{
+    if (version < 5)
+        return;
+    s16 count = mObjectSlots.size();
+    buffer->Recon16(&count, 1);
+    for (int i = 0; i < count; i++) {
+        s16 unused = 0;
+        s16 id = 0;
+        while (i >= (int)mObjectSlots.size()) {
+            ObjectSlot slot;
+            mObjectSlots.push_back(slot);
+        }
+        unused = 0;
+        id = mObjectSlots[i].mObjectID;
+        buffer->Recon16(&unused, 1);
+        buffer->Recon16(&id, 1);
+        mObjectSlots[i].SetObjectID(id);
     }
 }
 

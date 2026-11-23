@@ -12,6 +12,7 @@ public:
 
     void Recon16(s16 *values, int count);
     void Recon32(int *values, int count);
+    void ReconInt(int *values, int count); // 0x1DF0D0
     void ReconFloat(f32 *values, int count);
     void Recon8(s8 *values, int count);
     void ReconBool(bool *value);

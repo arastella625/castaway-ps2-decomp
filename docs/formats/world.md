@@ -350,7 +350,7 @@ from offset 12. The reader can skip what it doesn't understand.
 | mark | |
 | per object, then a mark | See below. The last mark is 0 |
 
-An object is `cXObject::ReconStream`, read from the PS2 code, then one word from `DoStream`:
+An object is `cXObject::ReconStream` (`0x213158`, **matched**, with `ReconHeader` and `ReconSlots` (`0x2137D8`) inlined or called as the game does), then one word from `DoStream`. The table is the stream at version 0x78 and later; the version tests are listed after it.
 
 | Field | Meaning |
 |---|---|
@@ -372,6 +372,8 @@ An object is `cXObject::ReconStream`, read from the PS2 code, then one word from
 | i16 count, i16 each | Scope 0x1B's array. Empty on every object |
 | 6 x i32, i16 | Multi-tile objects only: tile offsets, then the lead tile's ID |
 | i32 | `ObjectModule`'s word for this ID: low 16 bits idle status, high 16 Sim flags |
+
+Version tests in `ReconStream`, all **proven** by the match: the level is in from version 0x19; an i16 object ID comes after the level before version 0x2F; the misc flags follow the constant 1 at version 0x37 only; version 0 and below first stream 8 attributes and 0x20 temps. The semi-global attributes are in from 0x63 and the static ones from 0x76. An i16 that is always 0 follows the variables before 0x6A, and the object slots from version 5 (`ReconSlots`). Loading a new object reallocates an array the stream has more entries for; loading into an existing one reads the extra entries into a scratch buffer and keeps only as many as the object has. Loading a new object also clears variable 1 (facing) after the stream. At the end, an object with a sim instance and a non-zero colour index passes the index to the instance.
 
 A stack frame (`StackElem::ReconStream`):
 
