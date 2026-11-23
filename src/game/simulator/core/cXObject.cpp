@@ -40,6 +40,14 @@ inline bool cXObject::RequiresWallAdjacency() const
     return GetFnTableOutOfLine()->HasFunction(kObjEntryWallAdjacency) != 0;
 }
 
+inline bool cXObject::IsDoor()
+{
+    bool door = false;
+    if (GetTypeOutOfLine() == 8 && GetHeightOutOfLine() == 2)
+        door = (s16)GetTreeID(kObjEntryPortal) != 0;
+    return door;
+}
+
 inline bool cXObject::IsChair()
 {
     return GetTreeID(kObjEntryChair) != 0;
@@ -575,12 +583,13 @@ void cXObject::UpdateWallAdjacency()
     }
 }
 
-// Not matched: 26 of 180 words differ (aligned), every one from a single register choice.
+// Not matched: 23 of 180 words differ (aligned), every one from a single register choice.
 // The game keeps &mVars in s3 and the address sp+0x20 in s4, and uses that register only for
 // the off-grid tile; each HierarchySite at the same slot is passed as a fresh addiu. Ours
 // shares one register for the tile and both sites, so it has more uses, ranks first and takes
-// s3. Tried: the tile at function scope (its own slot, frame 0x120), and the tile inside an
-// inline helper (no change). The logic is complete; bhav.md describes it.
+// s3. Tried: the tile at function scope (its own slot, frame 0x120), the tile inside an
+// inline helper, and GetPrevObjectSibling as a conditional expression (no change); FTilePt::Set
+// through SetInteger and SetFrac took it from 26 to 23. The logic is complete; bhav.md has it.
 #ifdef NON_MATCHING
 // 0x2112B8. Wii: Pickup, a different body from PS2's. A single-tile object runs tree 10.
 // Then it leaves the hierarchy: with no spec (always, since PlacementSpec(true) is invalid on
@@ -690,6 +699,18 @@ void cXObject::Reset(bool simulate)
     }
 }
 
+// 0x20F840. Wii: JustBorn. The simulator's date becomes the object's birth date: year,
+// month and day in variables 0x2D, 0x2E and 0x2F, and globals 0 and 5 in 0x18 and 0x15.
+void cXObject::JustBorn()
+{
+    cSimulator *sim = GetSimulator();
+    SetData(0x2d, sim->GetGlobal(8));
+    SetData(0x2e, sim->GetGlobal(7));
+    SetData(0x2f, sim->GetGlobal(1));
+    SetData(0x18, sim->GetGlobal(0));
+    SetData(0x15, sim->GetGlobal(5));
+}
+
 // 0x20F8C0. Wii: Cleanup. Only with no object given. An object with tree 3 runs it, clears
 // variable 0x3e and bit 5 of variable 8 (occupied) and restarts on its main tree; a multi-tile
 // object does that for each part that has the tree, with the lead's tree set. Without tree 3
@@ -739,6 +760,126 @@ void cXObject::Cleanup(cXObject *object)
         player->QuietBySourceID(GetID());
     if (mModule->GetTutorialObject() == this)
         mModule->SetTutorialObjectOutOfLine(0);
+}
+
+// 0x20FEB0. Wii: UpdateAge. Whole years since the birth date go in variable 0x12 and whole
+// months in 0x30: a month not yet complete by the day counts one fewer, and a negative
+// month count borrows a year.
+void cXObject::UpdateAge()
+{
+    cSimulator *sim = GetSimulator();
+    s16 years = sim->GetGlobal(8) - (u16)mVars[0x2d];
+    s16 months = sim->GetGlobal(7) - (u16)mVars[0x2e];
+    s16 days = sim->GetGlobal(1) - (u16)mVars[0x2f];
+    if (days < 0)
+        months--;
+    if (months < 0) {
+        months += 12;
+        years--;
+    }
+    SetData(0x12, years);
+    SetData(0x30, years * 12 + months);
+}
+
+// 0x20FFB8. Wii: GetObstacleAtLocation. Climbs the stack on a tile from its root object
+// past everything a Sim can walk through.
+cXObject *cXObject::GetObstacleAtLocation(FTilePt &tile, int level, bool doors)
+{
+    cXObject *object = GetRootObject(tile, level);
+    cXObject *door = 0;
+    if (object != 0) {
+        do {
+            if (!object->CanIntersectPeople())
+                break;
+            if (doors && object->IsDoor())
+                door = object;
+            object = object->GetNextObjectSiblingOutOfLine();
+        } while (object != 0);
+    }
+    if (object == 0 && door != 0)
+        return door;
+    return object;
+}
+
+// 0x2100E0. Wii: GetPlacementSpec. A slot of 0 in variable 0xE means none, so the first
+// object's variable 0xE is set back to -1 when it is found there.
+void cXObject::GetPlacementSpec(PlacementSpec *spec)
+{
+    CTilePt tile(GetLocationRef(), 0);
+    if (GetFixedWorld()->OutOfBounds(tile)) {
+        spec->mValid = 0;
+        spec->mTile.Set(-1, -1);
+    } else {
+        spec->mValid = 1;
+        spec->mTile = GetLocationRef();
+    }
+    spec->mLevel = mLevel;
+    cXObject *first = this;
+    while (first->GetPrevObjectSiblingOutOfLine() != 0)
+        first = first->GetPrevObjectSiblingOutOfLine();
+    spec->mObject = GetObjectFromID(first->mVars[0x1a]);
+    spec->mSlot = first->GetData(0xe);
+    if (spec->mSlot != -1) {
+        spec->mSlot--;
+        if (spec->mSlot == -1)
+            first->SetData(0xe, -1);
+    }
+}
+
+// 0x210240. Wii: HierSetSite. Into a holder's slot: the slot records this object, variable
+// 0xE is the slot and 0x1A the holder. On a tile: the tile records it, 0xE is -1 and 0x1A 0.
+// Either way the level is the site's. An invalid site only severs it.
+void cXObject::HierSetSite(const HierarchySite *site)
+{
+    if (!site->mValid)
+        HierSever();
+    CTilePt tile(site->mTile, site->mLevel);
+    if (site->mObject == 0) {
+        if (site->mValid) {
+            GetObjectModule()->GetTileObjectID(tile);
+            GetObjectModule()->SetTileObjectID(tile, mID);
+            SetData(0xe, -1);
+            SetData(0x1a, 0);
+            SetLevel(site->mLevel);
+        }
+    } else {
+        int slot = site->mSlot;
+        site->mObject->mObjectSlots[slot].SetObjectID(GetID());
+        SetData(0xe, slot);
+        SetData(0x1a, site->mObject->GetID());
+        SetLevel(site->mLevel);
+    }
+}
+
+// 0x210368. Wii: HierSever. Clears whatever records this object, its holder's slot or its
+// tile, and sets variable 0x1A to no holder and 0xE to no slot.
+void cXObject::HierSever()
+{
+    HierarchySite site(this);
+    if (site.mObject != 0) {
+        site.mObject->mObjectSlots[site.mSlot].mObjectID = 0;
+    } else if (site.mValid) {
+        CTilePt tile(site.mTile, site.mLevel);
+        GetObjectModule()->SetTileObjectID(tile, 0);
+    }
+    SetData(0x1a, 0);
+    SetData(0xe, -1);
+}
+
+// 0x210418. Wii: HierGetObject. What a site holds: the object in the holder's slot, or the
+// object on the tile for levels 1 to 3; 0 for an invalid site.
+cXObject *cXObject::HierGetObject(const HierarchySite *site)
+{
+    if (site->mValid) {
+        cXObject *holder = site->mObject;
+        if (holder != 0)
+            return holder->GetObjectFromID(holder->mObjectSlots[site->mSlot].mObjectID);
+        if ((unsigned int)(site->mLevel - 1) < 3) {
+            CTilePt tile(site->mTile, site->mLevel);
+            return GetObjectFromID(GetObjectModule()->GetTileObjectID(tile));
+        }
+    }
+    return 0;
 }
 
 // GetCTilePt's body again (cXObjectPrims.cpp has the first), here so that
@@ -985,4 +1126,32 @@ bool ObjectModule::SetTutorialObjectOutOfLine(cXObject *object)
 void cXObject::UpdateChairFacingOutOfLine(ObjectModule *module, int x, int y, int level)
 {
     UpdateChairFacing(module, x, y, level);
+}
+
+// 0x2534B8. Wii: GetRootObject.
+cXObject *cXObject::GetRootObject(FTilePt &tile, int level)
+{
+    CTilePt where(tile, level);
+    s16 id = GetObjectModule()->GetTileObjectID(where);
+    if (id == 0)
+        return 0;
+    return GetObjectFromID(id);
+}
+
+// 0x253600. GetPrevObjectSibling as a function.
+cXObject *cXObject::GetPrevObjectSiblingOutOfLine()
+{
+    return mVars[0xe] == 0 ? HierGetParent() : 0;
+}
+
+// 0x2456C8. Wii: GetHeight.
+s16 cXObject::GetHeightOutOfLine()
+{
+    return GetDefOutOfLine()[0x1c];
+}
+
+// 0x2535E0. GetNextObjectSibling as a function.
+cXObject *cXObject::GetNextObjectSiblingOutOfLine()
+{
+    return HierGetChild(0);
 }

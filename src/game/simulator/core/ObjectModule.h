@@ -37,6 +37,7 @@ public:
     // The object ID on a tile, 0 off the 64 by 64 grid. The game also inlines it (the copy in
     // cXObjectPrims.cpp); Turn calls this one.
     s16 GetTileObjectID(const CTilePt &tile); // 0x255790
+    void SetTileObjectID(const CTilePt &tile, s16 id); // 0x2557D8
     // Wii: SimFlag. Only the value cXObject::Error passes is known; the name is ours.
     enum SimFlag { kSimFlagError = 4 };
     void SetSimFlag(int id, SimFlag flag, bool set); // 0x255688

@@ -44,6 +44,7 @@ enum ObjEntryPoint {
                                  // whose chair bit changed, if the part has tree 0x19
     kObjEntryChairFacing = 0x19, // UpdateChairFacing: only a part with this tree reruns 9
     kObjEntryChair = 0x1a,       // IsChair: an object with this tree counts as a chair
+    kObjEntryPortal = 0xf,       // TS2's portal entry; IsDoor needs it
     kObjEntryOnAdd = 0x1e,       // the inventory
     kObjEntryOnRemove = 0x1f,
     kObjEntryApplyDamage = 0x20  // ApplyDamage, with the damage as the parameter
@@ -63,12 +64,15 @@ public:
 
     // Wii: Set. Each coordinate is a Wii FInt, the integer above 4 bits of fraction:
     // SetInteger keeps the fraction, then SetFrac clears it.
+    // Wii: FInt::SetInteger and FInt::SetFrac, one coordinate at a time.
+    static void SetInteger(int *value, int integer) { *value = (*value & 0xf) | (integer << 4); }
+    static void SetFrac(int *value, int frac) { *value = (*value & ~0xf) | (frac & 0xf); }
     void Set(int x, int y)
     {
-        mX = (mX & 0xf) | (x << 4);
-        mX = (mX & ~0xf) | (0 & 0xf);
-        mY = (mY & 0xf) | (y << 4);
-        mY = (mY & ~0xf) | (0 & 0xf);
+        SetInteger(&mX, x);
+        SetFrac(&mX, 0);
+        SetInteger(&mY, y);
+        SetFrac(&mY, 0);
     }
 
     int SquareDist(const FTilePt &other) const
@@ -212,6 +216,9 @@ public:
     f32 mXOffset;        // 0x18
     f32 mYOffset;        // 0x1c
     f32 field_0x20;      // 0x20
+
+    // Wii: SetObjectID. Through an s16 parameter the ID is loaded with lh (HierSetSite).
+    void SetObjectID(s16 id) { mObjectID = id; }
 
     ObjectSlot(); // 0x1E1888
     virtual ~ObjectSlot() {} // 0x1D8C88 is the vtable's copy; Initialize inlines this one
@@ -448,6 +455,13 @@ public:
     bool IsStructure() { return GetTypeOutOfLine() == 5; }
     // Wii: IsVehicle, type 12. A function on both; the body is the evidence for the name.
     bool IsVehicle(); // 0x254078
+    // Wii: GetHeight, definition word 0x1C, as a function on PS2 too.
+    s16 GetHeightOutOfLine(); // 0x2456C8
+    // Wii: IsDoor, inlined on PS2: a portal of height 2 with the portal tree.
+    inline bool IsDoor(); // defined in cXObject.cpp
+    // Wii: GetObstacleAtLocation, the first object on a tile that a Sim cannot pass, or a
+    // door it passed on the way when asked for one.
+    cXObject *GetObstacleAtLocation(FTilePt &tile, int level, bool doors); // 0x20FFB8
     // Wii: IsChair, whether the object has the tree at entry point 0x1a. Defined in
     // cXObject.cpp after GetTreeID, which it calls.
     inline bool IsChair();
@@ -528,6 +542,8 @@ public:
     // Wii: HierGetObject, whatever is at a site already.
     cXObject *HierGetObject(const HierarchySite *site);  // 0x210418
     void UpdateAge();                                     // 0x20FEB0
+    // Wii: JustBorn, the creation date in variables 0x2D, 0x2E, 0x2F, 0x18 and 0x15.
+    void JustBorn();                                      // 0x20F840
     int CanPlaceSingleTile(const FTilePt &tile, int level, cXObject *object, int slot); // 0x253958
     // CanPlaceSingleTile's body: UserCanPlace has it inlined while CanPlace calls the
     // function. Defined in cXObject.cpp.
@@ -540,9 +556,17 @@ public:
     int GetPersonWidth() const { return gPersonWidth; }
     // Wii: HasZeroExtent, bit 2 of the flags variable; UpdateChairFacing skips such objects.
     int HasZeroExtent() const { return ((u16)mVars[8] >> 2) & 1; }
+    // Wii: CanIntersectPeople, inlined on PS2. Below HasZeroExtent, so that
+    // it inlines that too. A zero-extent object unless bit 1 of variable 8
+    // is set; anything else when bit 4 is.
+    int CanIntersectPeople() const
+    {
+        return (HasZeroExtent() ? ((u16)mVars[8] >> 1) ^ 1 : (u16)mVars[8] >> 4) & 1;
+    }
     // Wii: HierGetChild, the object in slot `slot`. GetNextObjectSibling is slot 0.
     cXObject *HierGetChild(int slot); // 0x253678
     cXObject *GetNextObjectSibling() { return HierGetChild(0); }
+    cXObject *GetNextObjectSiblingOutOfLine(); // 0x2535E0
     void UpdateWallAdjacency();         // 0x214098
     void UpdateChairFacing();           // 0x211978
     // Wii keeps this as a function; Turn inlines both calls. Defined in cXObject.cpp.
@@ -589,6 +613,13 @@ public:
     // so that its GetObjectFromID is the inlined one.
     inline cXObject *GetContainerInline();
     cXObject *GetContainer();
+    // The same as a function, which GetPlacementSpec calls.
+    cXObject *GetPrevObjectSiblingOutOfLine();           // 0x253600
+    // Wii: GetPlacementSpec, where the object is now: its tile when on the grid, its level,
+    // and the holder and slot of the first object in its chain of previous siblings.
+    void GetPlacementSpec(PlacementSpec *spec);          // 0x2100E0
+    // Wii: GetRootObject, the object that has a tile, or 0.
+    cXObject *GetRootObject(FTilePt &tile, int level);   // 0x2534B8
     long ShowAllObjectDialogs(StackElem *elem, XPrimParam *param);
     static void ChangeSelectedSimL();
     long TryDialog(StackElem *, XPrimParam *, bool);
