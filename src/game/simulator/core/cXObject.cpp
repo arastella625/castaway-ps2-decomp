@@ -583,30 +583,12 @@ void cXObject::UpdateWallAdjacency()
     }
 }
 
-// Not matched: 23 of 180 words differ (aligned), every one from a single register choice.
-// The game keeps &mVars in s3 and the address sp+0x20 in s4, and uses that register only for
-// the off-grid tile; each HierarchySite at the same slot is passed as a fresh addiu. Ours
-// shares one register for the tile and both sites, so it has more uses, ranks first and takes
-// s3. Tried: the tile at function scope (its own slot, frame 0x120), the tile inside an
-// inline helper, and GetPrevObjectSibling as a conditional expression (no change); FTilePt::Set
-// through SetInteger and SetFrac took it from 26 to 23. The logic is complete; bhav.md has it.
-#ifdef NON_MATCHING
-// 0x2112B8. Wii: Pickup, a different body from PS2's. A single-tile object runs tree 10.
-// Then it leaves the hierarchy: with no spec (always, since PlacementSpec(true) is invalid on
-// PS2) the object in its slot 0 takes its site; otherwise whatever is at the spec's site
-// swaps places with it. Variables 2 and 3 are cleared to no holder and slot -1, it moves off
-// the grid on level 1, bit 8 of variable 8 is cleared, a chair updates the facing of whatever
-// is in front of where it stood, and the container it was in runs tree 9.
-void cXObject::Pickup()
+// With no spec (always, from Pickup and the first call in Place, since PlacementSpec(true) is
+// invalid on PS2) the object leaves the hierarchy and the object in its slot 0 takes its site;
+// otherwise whatever is at the spec's site swaps places with it.
+inline void cXObject::Place(PlacementSpec *spec)
 {
-    if (!IsMultiTile())
-        RunTree(kObjEntryPickup, 0, 0);
-    int x = mTileX >> 4;
-    int y = mTileY >> 4;
-    s16 direction = GetData(1);
-    PlacementSpec spec(true);
-    cXObject *container = GetContainerInline();
-    if (!spec.mValid) {
+    if (!spec->mValid) {
         HierarchySite site(this);
         HierSever();
         cXObject *child = mModule->GetObjectFromID(mObjectSlots[0].mObjectID);
@@ -615,7 +597,7 @@ void cXObject::Pickup()
             child->HierSetSite(&site);
         }
     } else {
-        HierarchySite site(&spec);
+        HierarchySite site(spec);
         cXObject *occupant = HierGetObject(&site);
         if (occupant != this) {
             if (occupant != 0)
@@ -627,6 +609,61 @@ void cXObject::Pickup()
             }
         }
     }
+}
+
+// 0x211580. Wii: Place. Into an object's slot the level is that object's. The object first
+// leaves where it was (and a chair updates whatever it faced there), then goes to the site:
+// variables 2 and 3 name the holder and slot, it moves to the tile, the chairs around and in
+// front of it update, its wall adjacency is recomputed, and tree 9 runs on a single-tile object
+// and on the holder.
+void cXObject::Place(const FTilePt &tile, int level, cXObject *object, int slot)
+{
+    int placeLevel = level;
+    if (object != 0)
+        placeLevel = object->GetLevelOutOfLine();
+    int x = mTileX >> 4;
+    int y = mTileY >> 4;
+    s16 direction = GetData(1);
+    PlacementSpec none(true);
+    Place(&none);
+    if (IsChair())
+        UpdateChairFacingOutOfLine(mModule, x + sXDirTable[direction], y + sYDirTable[direction], mLevel);
+    PlacementSpec spec(tile, placeLevel, object, slot);
+    Place(&spec);
+    if (spec.mObject != 0)
+        SetData(2, spec.mObject->GetID());
+    else
+        SetData(2, 0);
+    SetData(3, spec.mSlot);
+    SetLocation(spec.mTile, spec.mLevel);
+    x = mTileX >> 4;
+    y = mTileY >> 4;
+    UpdateChairFacingOutOfLine(mModule, x, y, mLevel);
+    if (IsChair())
+        UpdateChairFacingOutOfLine(mModule, x + sXDirTable[GetData(1)], y + sYDirTable[GetData(1)], mLevel);
+    UpdateWallAdjacency();
+    if (!IsMultiTile())
+        RunTree(kObjEntryPlacement, 0, 0);
+    if (object != 0)
+        object->RunTree(kObjEntryPlacement, 0, 0);
+    if (!IsMultiTile())
+        SimObjectPlaced(GetISimInstance());
+}
+
+// 0x2112B8. Wii: Pickup. A single-tile object runs tree 10, then it leaves the hierarchy
+// through Place with an invalid spec. Variables 2 and 3 are cleared to no holder and slot -1,
+// it moves off the grid on level 1, bit 8 of variable 8 is cleared, a chair updates the facing
+// of whatever is in front of where it stood, and the container it was in runs tree 9.
+void cXObject::Pickup()
+{
+    if (!IsMultiTile())
+        RunTree(kObjEntryPickup, 0, 0);
+    int x = mTileX >> 4;
+    int y = mTileY >> 4;
+    s16 direction = GetData(1);
+    PlacementSpec spec(true);
+    cXObject *container = GetContainerInline();
+    Place(&spec);
     SetData(2, 0);
     SetData(3, -1);
     FTilePt tile;
@@ -638,7 +675,6 @@ void cXObject::Pickup()
     if (container != 0)
         container->RunTree(kObjEntryPlacement, 0, 0);
 }
-#endif
 
 // 0x20F478. Wii: Reset. Back to how it was created, where it is: it leaves the hierarchy,
 // the variables are reset but nine are kept (bhav.md lists them), variable 0xb is the ID
@@ -1154,4 +1190,48 @@ s16 cXObject::GetHeightOutOfLine()
 cXObject *cXObject::GetNextObjectSiblingOutOfLine()
 {
     return HierGetChild(0);
+}
+
+// 0x2536B0. Wii: IsContained.
+bool cXObject::IsContained()
+{
+    PlacementSpec spec(this);
+    return spec.mObject != 0;
+}
+
+// 0x2536D8. Wii: GetContainerID, 0 when not in anything.
+s16 cXObject::GetContainerID()
+{
+    PlacementSpec spec(this);
+    if (spec.mObject == 0)
+        return 0;
+    return spec.mObject->GetID();
+}
+
+// 0x253708. Wii: GetContainedSlotNum.
+s16 cXObject::GetContainedSlotNum()
+{
+    PlacementSpec spec(this);
+    return spec.mSlot;
+}
+
+// 0x253818. Wii: ExtractContainedSims. A Sim in a slot is cleaned up, which takes it out;
+// anything else is searched in turn.
+void cXObject::ExtractContainedSims()
+{
+    for (int i = 0; i < CountObjectSlots(); i++) {
+        cXObject *object = GetContainedObject(i);
+        if (object != 0) {
+            if (object->IsPerson())
+                object->GetPerson()->Cleanup(0);
+            else
+                object->ExtractContainedSims();
+        }
+    }
+}
+
+// 0x253EC0. Wii: GetLevel.
+int cXObject::GetLevelOutOfLine() const
+{
+    return mLevel;
 }

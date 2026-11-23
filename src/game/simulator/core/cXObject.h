@@ -533,6 +533,12 @@ public:
     inline int RunTreeInline(ObjEntryPoint entry, s16 a, s16 *param);
     void SetLevel(int level);                            // 0x253EC8
     void SetLocation(const FTilePt &tile, int level);    // 0x212400
+    int GetLevelOutOfLine() const;                       // 0x253EC0  Wii: GetLevel
+    // Wii: Place(PlacementSpec *), a function on Wii that PS2 inlines into Pickup and Place:
+    // into the hierarchy at the spec's site, or out of it for an invalid spec.
+    inline void Place(PlacementSpec *spec); // defined in cXObject.cpp
+    // Wii: SimObjectPlaced, for a single-tile object once Place is done.
+    static void SimObjectPlaced(IBaseSimInstance *instance); // 0x21A750
     void UpdateSimFlags();                               // 0x253DC0
     void SetWasPlacedByPlayer(bool placed);               // 0x253C98
     bool GetWasPlacedByPlayer() const;                    // 0x253C68
@@ -613,6 +619,12 @@ public:
     // so that its GetObjectFromID is the inlined one.
     inline cXObject *GetContainerInline();
     cXObject *GetContainer();
+    // Wii: IsContained, GetContainerID and GetContainedSlotNum, each from PlacementSpec(this).
+    bool IsContained();                                  // 0x2536B0
+    s16 GetContainerID();                                // 0x2536D8
+    s16 GetContainedSlotNum();                           // 0x253708
+    // Wii: ExtractContainedSims. Every Sim held anywhere inside this object is cleaned up.
+    void ExtractContainedSims();                         // 0x253818
     // The same as a function, which GetPlacementSpec calls.
     cXObject *GetPrevObjectSiblingOutOfLine();           // 0x253600
     // Wii: GetPlacementSpec, where the object is now: its tile when on the grid, its level,
