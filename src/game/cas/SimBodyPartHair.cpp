@@ -2,6 +2,8 @@
 
 #include "common/ReconBuffer.h"
 #include "game/cas/CasSimDescription.h"
+#include "game/cas/CasUtils.h"
+#include "game/simulator/core/Neighborhood.h"
 
 void SimBodyPartHair::DoStream(ReconBuffer *buffer, int version)
 {
@@ -176,6 +178,79 @@ s32 SimBodyPartHair::GetCurrentHitPoints()
 void SimBodyPartHair::SetCurrentHitPoints(int hitPoints)
 {
     currentHitPoints = hitPoints;
+}
+
+int SimBodyPartHair::GetValidClothingSetIndexes(
+    eastl::vector<Sim::ClothingSetIndexInfo, eastl::allocator> &indexes)
+{
+    int count = 0;
+    bool flag = GetCharacterFlag(0);
+    bool useArchetype = CasUtils::UseArchetype();
+    s16 personData = 0;
+    SimBodyPart *temp = CreateInstance((Character::eBodyPart)GetType(), flag);
+    u8 total = GetNumPossibleClothingSets();
+    if (!useArchetype) {
+        int neighborID = UIDB::UIDBGetInt("CAS_neighborID");
+        Neighbor *neighbor = GetNeighborhood()->FindNeighborByID(neighborID);
+        if (neighbor != 0)
+            personData = neighbor->GetNeighborPersonData(0xe);
+    }
+    for (u8 i = 0; i < total; i++) {
+        Sim::BodyPartGeometryTSC6 *set = &(*geometryVector)[i];
+        if (strncmp("generic", set->name, 10) != 0
+            && (useArchetype || (int)((set->flags & 0xf00) >> 8) * 100 <= personData)) {
+            temp->SetClothingSetIndex(i);
+            temp->SwitchToFirstAvailableDegradationStage();
+            if (useArchetype || temp->StyleIndex() <= styleIndex) {
+                // Redundant second setup, kept to match the original code.
+                temp->SetClothingSetIndex(i);
+                temp->SwitchToFirstAvailableDegradationStage();
+                Sim::ClothingSetIndexInfo info;
+                info.clothingSetIndex = i;
+                info.itemID = 0;
+                info.flags = 1;
+                info.iconTextureID = temp->GetIconTextureID();
+                indexes.push_back(info);
+                count++;
+            }
+        }
+    }
+    if (temp != 0)
+        delete temp;
+    return count;
+}
+
+u8 SimBodyPartHair::GetClothingSetUIIndex() const
+{
+    bool flag = GetCharacterFlag(0);
+    bool useArchetype = CasUtils::UseArchetype();
+    s16 personData = 0;
+    SimBodyPart *temp = CreateInstance((Character::eBodyPart)GetType(), flag);
+    u8 total = GetNumPossibleClothingSets();
+    if (!useArchetype) {
+        int neighborID = UIDB::UIDBGetInt("CAS_neighborID");
+        Neighbor *neighbor = GetNeighborhood()->FindNeighborByID(neighborID);
+        if (neighbor != 0)
+            personData = neighbor->GetNeighborPersonData(0xe);
+    }
+    int uiIndex = 0;
+    for (u8 i = 0; i < total; i++) {
+        Sim::BodyPartGeometryTSC6 *set = &(*geometryVector)[i];
+        if (strncmp("generic", set->name, 10) != 0
+            && (useArchetype || (int)((set->flags & 0xf00) >> 8) * 100 <= personData)) {
+            temp->SetClothingSetIndex(i);
+            temp->SwitchToFirstAvailableDegradationStage();
+            if (useArchetype || temp->StyleIndex() <= styleIndex) {
+                // BUG: early return leaks `temp`.
+                if (i == clothingSetIndex)
+                    return uiIndex;
+                uiIndex++;
+            }
+        }
+    }
+    if (temp != 0)
+        delete temp;
+    return 0;
 }
 
 u8 SimBodyPartHair::GetDegradationModelCodeIndex() const

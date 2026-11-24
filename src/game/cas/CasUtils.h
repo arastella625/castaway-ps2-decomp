@@ -4,6 +4,7 @@
 #include "game/simulator/core/Plan.h"
 #include "common/EGlobal.h"
 #include "common/ERQuickdata.h"
+#include "common/EResourceManager.h"
 #include "common/types.h"
 #include "game/cas/CasSimDescription.h"
 #include "game/UIDB.h"
@@ -110,6 +111,15 @@ public:
         return use;
     }
 
+    // Also inlined on PS2.
+    static s16 GetCASNeighborID()
+    {
+        int id = 0;
+        if (_gd.field_0x4c != 0 || _gd.field_0x48 != 0)
+            id = UIDB::UIDBGetInt("CAS_neighborID");
+        return id;
+    }
+
     // Inlined into its callers, and also a function (0x143B90) for ClothingItem's inlines.
     static u8 GetBodyPartIndex(Character::eBodyPart part);
     static u8 GetBodyPartIndexInline(Character::eBodyPart part)
@@ -153,6 +163,31 @@ public:
     // One clothing set of one body part, or null. 0x129D30.
     static Sim::BodyPartGeometryTSC6 *GetClothingSetData(int male, Character::eBodyPart part,
                                                          u8 setIndex);
+
+    // Also inlined on PS2.
+    static u32 GetNoneIconTextureID()
+    {
+        char buffer[128];
+        Snprintf(buffer, 128, "%s%s", "none", "_ICON");
+        return EResourceManager::CalcId(buffer, true);
+    }
+
+    // Also inlined on PS2.
+    static u8 CalculateClothingSetIndexInfoFlags(Character::eBodyPart part, bool male,
+                                                 u8 setIndex, ClothingItem *item)
+    {
+        u8 flags = 0;
+        if (part >= 0x1a) {
+            if (part < 0x1d) {
+                flags |= 1;
+            } else if (part < 0x28 && item != 0) {
+                const Sim::BodyPartGeometryTSC6 *data = GetClothingSetData(male, part, setIndex);
+                if (data != 0 && (data->flags & 0x8000) != 0)
+                    flags |= 1;
+            }
+        }
+        return flags;
+    }
 };
 
 #endif

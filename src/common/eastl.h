@@ -120,8 +120,10 @@ public:
     T *mpCapacity;        // 0x08
     Allocator mAllocator; // 0x0c
 
-    vector() : mpBegin(0), mpEnd(0), mpCapacity(0) {}
-    vector(const Allocator &allocator) : mpBegin(0), mpEnd(0), mpCapacity(0), mAllocator(allocator) {}
+    vector(const Allocator &allocator = Allocator())
+        : mpBegin(0), mpEnd(0), mpCapacity(0), mAllocator(allocator)
+    {
+    }
     // Wii: VectorBase(n, allocator), then uninitialized_copy_ptr.
     vector(const vector &other) : mAllocator(other.mAllocator)
     {

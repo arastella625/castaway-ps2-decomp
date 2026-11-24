@@ -70,6 +70,10 @@ public:
 
     static const struct InventoryTokens *GetTokenFromID(s16 id);
     static InventoryItems *GetTribeInventory();
+    static InventoryItems *GetInitialFamilyInventory();
+    static InventoryItems *GetInventoryByNeighborID(s16 neighborID);
+    void GetChooseableClothingItems(eastl::vector<ClothingItem *, eastl::allocator> &items,
+                                    Character::eBodyPart part, bool male, s16 neighborID);
     int GetTokenItemIndex(s16 id);
     bool HasTokenEverBeenCollected(s16 id) const;
     void MarkTokenAsBeingCollected(s16 id);

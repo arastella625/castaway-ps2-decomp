@@ -8,7 +8,7 @@ A hobby reverse-engineering project for the US PS2 build, `SLUS_216.64`. The goa
 
 - 2,205 of 13,231 functions are named, each with a confidence tier.
 - Structs are recovered for `CasSimDescription`, `SimBodyPart` and its subclasses.
-- 1,028 functions are matched byte for byte (83,412 bytes, 2.24% of the code). 369 are in Create-a-Sim (`CasSimDescription`, `SimBodyPart` and its 15 subclasses, `CasUtils`). 192 are hand-written simulator code: the behaviour tree interpreter (`TreeSim`, `TreeStack`, `Behavior`), the primitives matched so far, the routing state handlers, the family inventory and its four item classes (every slot of their vtables is checked), the user's pick-up, place and delete checks, an object's set-up, footprint, armour, room score and chair facing, and the Sim animator's route speeds. The other 467 are functions of one to four instructions in 95 classes across the game, generated from patterns; for those a match confirms the code but not the name. Nearly everything else is still undecompiled.
+- 1,036 functions are matched byte for byte (89,412 bytes, 2.40% of the code). 377 are in Create-a-Sim (`CasSimDescription`, `SimBodyPart` and its 15 subclasses, `CasUtils`). 192 are hand-written simulator code: the behaviour tree interpreter (`TreeSim`, `TreeStack`, `Behavior`), the primitives matched so far, the routing state handlers, the family inventory and its four item classes (every slot of their vtables is checked), the user's pick-up, place and delete checks, an object's set-up, footprint, armour, room score and chair facing, and the Sim animator's route speeds. The other 467 are functions of one to four instructions in 95 classes across the game, generated from patterns; for those a match confirms the code but not the name. Nearly everything else is still undecompiled.
 - BHAV instructions are decoded: [docs/formats/bhav.md](docs/formats/bhav.md) has the format, the primitive table, the expression operators, all 69 operand scopes, tree constants and the semi-global link, and `tools/bhav.py` tests the format on every tree on the disc.
 - The compiler for the Create-a-Sim code is SN Systems ee-gcc 2.95.3 build 1.36 at `-O2 -G0 -fno-rtti -fno-exceptions`, with SN's own assembler. The exact assembler build isn't available, so one of its behaviours, the padding of very short loops, is reproduced by `tools/asm_filter.py` (see HANDOFF.md).
 - A full rebuild links all of those functions in place of their assembly and reproduces the game's checksum. String literals and jump tables are checked against the game's copies. The data sections are still raw binary.
@@ -23,7 +23,7 @@ A hobby reverse-engineering project for the US PS2 build, `SLUS_216.64`. The goa
 
 `tools/verify.py` builds `src/` with the game's compiler and compares each function with your copy of the game. It needs WSL with Wine, the compiler from decompme/compilers, and the game executable; [docs/STANDARDS.md](docs/STANDARDS.md) has the command.
 
-`tools/verify_vtables.py` checks names: each class's declared virtual functions must sit in the same vtable slots as in the game. It confirms 1,263 slots across 22 classes.
+`tools/verify_vtables.py` checks names: each class's declared virtual functions must sit in the same vtable slots as in the game. It confirms 1,306 slots across 22 classes.
 
 `rebuild/rebuild.py` goes further: it links the C++ into a complete executable and checks its SHA-1. [rebuild/README.md](rebuild/README.md) has the setup.
 

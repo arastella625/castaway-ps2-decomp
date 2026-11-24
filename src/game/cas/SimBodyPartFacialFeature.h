@@ -29,7 +29,7 @@ public:
     virtual void SetIsDamaged(bool damaged);
     virtual s32 GetCurrentHitPoints();
     virtual void SetCurrentHitPoints(int hitPoints);
-    virtual bool GetValidClothingSetIndexes(
+    virtual int GetValidClothingSetIndexes(
          eastl::vector<Sim::ClothingSetIndexInfo, eastl::allocator> &indexes);
     virtual u8 GetClothingSetUIIndex() const;
 };

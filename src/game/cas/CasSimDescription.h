@@ -10,11 +10,6 @@ class InventoryItems;
 // Enumerator values are filled in as code proves them.
 enum PersonalityEnum { PERSONALITY_COUNT = 5 };
 
-namespace Character {
-enum eSpecies { SPECIES_0, SPECIES_1 };
-enum eBodyPart { BODY_PART_FIRST = 0x1a, BODY_PART_COUNT = 15 };
-}
-
 namespace Sim {
 enum eTattooLocation { TATTOO_LOCATION_COUNT = 4 };
 enum eLatticeMorphRegion { LATTICE_MORPH_REGION_COUNT = 4 };

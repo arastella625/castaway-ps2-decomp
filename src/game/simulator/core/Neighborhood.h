@@ -25,6 +25,7 @@ public:
     Family *GetFamily();
     s16 CountRelationshipsOfType(int type, bool a) const;
     s16 *GetPersonDataArray() { return mPersonData; }
+    s16 GetNeighborPersonData(int index) const { return mPersonData[index]; }
     s16 GetID() const { return mID; }
 
     // The game has this as a function (0x250DE8) and also inlines it in InterpValue. An inline

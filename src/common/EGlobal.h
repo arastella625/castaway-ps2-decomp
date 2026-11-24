@@ -34,7 +34,8 @@ public:
     u8 field_0x1fc[4];         // 0x1fc
     int mTransitionType;       // 0x200
     int mPreviousLot;          // 0x204
-    u8 field_0x208[0x20c];     // 0x208
+    u8 field_0x208[0x208];     // 0x208
+    int field_0x410;           // 0x410  unlocks all clothing sets in Create-a-Sim
     int field_0x414;           // 0x414  when set, UserCanDelete allows anything
     u8 field_0x418[0x30];      // 0x418
     int useGameStateTextures;  // 0x448  when set, texture ids are rehashed with "_GAME"
