@@ -66,7 +66,7 @@ public:
     // Wii: Set. Each coordinate is a Wii FInt, the integer above 4 bits of fraction:
     // SetInteger keeps the fraction, then SetFrac clears it.
     // Wii: FInt::SetInteger and FInt::SetFrac, one coordinate at a time.
-    static void SetInteger(int *value, int integer) { *value = (*value & 0xf) | (integer << 4); }
+    static void SetInteger(int *value, int integer) { *value = (integer << 4) | (*value & 0xf); }
     static void SetFrac(int *value, int frac) { *value = (*value & ~0xf) | (frac & 0xf); }
     void Set(int x, int y)
     {
@@ -122,6 +122,47 @@ public:
         }
         return dir;
     }
+};
+
+// Wii: FindGoodLocationParams. The Wii keeps the four flags as bytes at 0x14 to 0x17; PS2
+// reads each as a word, so they are ints here.
+class FindGoodLocationParams {
+public:
+    int mHasStart;          // 0x00
+    FTilePt mStart;         // 0x04
+    int mLevel;             // 0x0c
+    int mDirection;         // 0x10  -1 searches in a spiral
+    int mStayInRoom;        // 0x14
+    int mPreferEmptyTiles;  // 0x18
+    int mEditableTilesOnly; // 0x1c
+    int mPreferUnderRoof;   // 0x20
+
+    int GetStartLocation(FTilePt *tile) const
+    {
+        if (mHasStart) {
+            *tile = mStart;
+            return 1;
+        }
+        return 0;
+    }
+    int GetLevel() const
+    {
+        if (mHasStart)
+            return mLevel;
+        return 1;
+    }
+    int GetDirectionVector(int *direction) const
+    {
+        if (mDirection != -1) {
+            *direction = mDirection;
+            return 1;
+        }
+        return 0;
+    }
+    int GetStayInRoom() const { return mStayInRoom; }
+    int GetPreferEmptyTiles() const { return mPreferEmptyTiles; }
+    int GetEditableTilesOnly() const { return mEditableTilesOnly; }
+    int GetPreferUnderRoof() const { return mPreferUnderRoof; }
 };
 
 enum TFGL_ACTIONS { };
@@ -479,6 +520,8 @@ public:
     s16 GetHeightOutOfLine(); // 0x2456C8
     // Wii: IsDoor, inlined on PS2: a portal of height 2 with the portal tree.
     inline bool IsDoor(); // defined in cXObject.cpp
+    // Wii: IsWindow, inlined on PS2: a portal without the portal tree.
+    inline bool IsWindow(); // defined in cXObject.cpp
     // Wii: GetObstacleAtLocation, the first object on a tile that a Sim cannot pass, or a
     // door it passed on the way when asked for one.
     cXObject *GetObstacleAtLocation(FTilePt &tile, int level, bool doors); // 0x20FFB8
@@ -624,6 +667,8 @@ public:
     long TryTestObjectType(StackElem *, XPrimParam *);
     long TryIsPersonInArea(StackElem *, XPrimParam *);
     long TryFindGoodLocation(StackElem *, XPrimParam *, TFGL_ACTIONS *, FTilePt *, int *, s16 *);
+    // Wii: FindGoodLocation, the first tile out from a start where the object can be placed.
+    int FindGoodLocation(const FindGoodLocationParams &params, FTilePt *out); // 0x2139D8
     long TryRelationship2(StackElem *, XPrimParam *);
     long TrySetBalloon(StackElem *, XPrimParam *);
     long TryCallNamedTree(StackElem *, XPrimParam *);

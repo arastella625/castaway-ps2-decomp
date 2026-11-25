@@ -50,6 +50,14 @@ inline bool cXObject::IsDoor()
     return door;
 }
 
+inline bool cXObject::IsWindow()
+{
+    bool window = false;
+    if (GetTypeOutOfLine() == 8 && (s16)GetTreeID(kObjEntryPortal) == 0)
+        window = true;
+    return window;
+}
+
 inline bool cXObject::IsChair()
 {
     return GetTreeID(kObjEntryChair) != 0;
@@ -825,6 +833,113 @@ int cXObject::TestIntersection(FTilePt &tile, int level)
         return 0;
     }
     return 1;
+}
+
+// 0x2139D8. Wii: FindGoodLocation. Searches out from the start (the cursor when none is
+// given, or the middle of the lot when the cursor is off it), in a spiral or back and forth
+// along one direction. A tile is good when it is on the lot, editable if that is asked for,
+// empty apart from windows, structures and roofs if that is preferred, has no diagonal wall,
+// is in the start's room if asked, and the object can be placed there facing 0. The search
+// gives up after 4 * (x size + y size) tiles off the lot in a row, or 64 tiles out.
+int cXObject::FindGoodLocation(const FindGoodLocationParams &params, FTilePt *out)
+{
+    int dir = 0;
+    if (!params.GetDirectionVector(&dir))
+        dir = -1;
+    cFixedWorld *world = GetFixedWorld();
+    ObjectModule *module = GetObjectModule();
+    int x = 0;
+    int y = 0;
+    int fails = 0;
+    int count = world->GetXSize() * 4 + world->GetYSize() * 4;
+    FTilePt start;
+    int level = params.GetLevel();
+    if (!params.GetStartLocation(&start)) {
+        Globs::pEORGlobals->GetCursorPosAsFtile(start);
+        if (GetFixedWorld()->OutOfBounds(CTilePt(start, 0))) {
+            CTilePt middle(GetFixedWorld()->GetXSize() / 2, GetFixedWorld()->GetYSize() / 2, 1);
+            start = middle.ToFTilePt();
+        }
+    }
+    CTilePt tile(start, level);
+    if (tile.GetX() >= world->GetXSize() - 1)
+        tile.SetX(world->GetXSize() - 2);
+    if (tile.GetX() < 1)
+        tile.SetX(1);
+    if (tile.GetY() >= world->GetYSize() - 1)
+        tile.SetY(world->GetYSize() - 2);
+    if (tile.GetY() < 1)
+        tile.SetY(1);
+    u16 room = world->GetRoom(tile);
+    while (fails < count) {
+        CTilePt where(tile);
+        where += CTilePt(x, y, 0);
+        int ok = 1;
+        if (world->OutOfBounds(where)) {
+            ok = 0;
+            fails++;
+        } else {
+            fails = 0;
+        }
+        if (ok) {
+            if (params.GetEditableTilesOnly() && !world->MayEditTile(where))
+                ok = 0;
+        }
+        if (ok) {
+            if (params.GetPreferEmptyTiles() || params.GetPreferUnderRoof()) {
+                s16 id = module->GetTileObjectID(where);
+                cXObject *object = 0;
+                if (id != 0)
+                    object = module->GetObjectFromID(id);
+                if (ok && params.GetPreferEmptyTiles() && id != 0 && !object->IsWindow() &&
+                    !object->IsStructure() && !object->IsRoof())
+                    ok = 0;
+            }
+        }
+        if (ok) {
+            TileWalls walls = world->GetWall(where);
+            if (walls.HasDiagonal())
+                ok = 0;
+            else if (params.GetStayInRoom() && world->GetRoom(where) != room)
+                ok = 0;
+            else if (CanPlace(where.ToFTilePt(), level, 0, 0) != 1)
+                ok = 0;
+        }
+        if (ok) {
+            *out = where.ToFTilePt();
+            return 1;
+        }
+        if (y < -64 || x < -64)
+            return 0;
+        if (dir == -1) {
+            if (y <= -x && y <= x)
+                x--;
+            else if (y <= x && y > -x)
+                y--;
+            else if (y > x && y >= -x)
+                x++;
+            else if (y > x && y < -x)
+                y++;
+        } else {
+            switch (dir) {
+            case 0:
+            case 4:
+                if (y > 0)
+                    y = -y;
+                else
+                    y = 1 - y;
+                break;
+            case 2:
+            case 6:
+                if (x > 0)
+                    x = -x;
+                else
+                    x = 1 - x;
+                break;
+            }
+        }
+    }
+    return 0;
 }
 
 // 0x214098. Wii: UpdateWallAdjacency. For an object with tree 6: the low six bits of

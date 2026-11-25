@@ -75,6 +75,16 @@ public:
     int SetX(int x) { return mX = x; }
     int SetY(int y) { return mY = y; }
     int GetLevel() const { return mLevel; }
+    // Wii: ToFTilePt, the tile's centre: each coordinate through SetInteger, then SetFrac(8).
+    FTilePt ToFTilePt() const
+    {
+        FTilePt tile;
+        FTilePt::SetInteger(&tile.mX, mX);
+        FTilePt::SetFrac(&tile.mX, 8);
+        FTilePt::SetInteger(&tile.mY, mY);
+        FTilePt::SetFrac(&tile.mY, 8);
+        return tile;
+    }
     // The same, called as functions (0x248DB8, 0x248DC0) where they aren't inlined.
     int GetXOutOfLine() const;
     int GetYOutOfLine() const;
@@ -89,6 +99,8 @@ public:
     TileWalls(const TileWalls &other);                    // 0x1E2AF0
     ~TileWalls();                                         // 0x1E2B20
     int HasWall(int segment) const;                       // 0x1E2B78
+    // Wii: HasDiagonal, bits 0x30 of the first word.
+    int HasDiagonal() const;                              // 0x1E2C70
     void Rotate(int quarterTurns);                        // 0x1C1B50
     // Wii: RotateSegment(TileWallsSegment, int), one segment turned by quarter turns.
     static int RotateSegment(int segment, int quarterTurns); // 0x1E30E0
@@ -137,6 +149,8 @@ public:
     void CommitWallChanges();                            // 0x1E4998
     int GetXSize() const; // 0x1E4378, +0x10
     int GetYSize() const; // 0x1E4380, +0x14
+    // Wii: GetRoom, the room a tile is in.
+    u16 GetRoom(const CTilePt &tile); // 0x1E4540
     int MayEditTile(const CTilePt &tile) const; // 0x1E47C0  Wii's name; PS2 by cXObject::UserCanPickup
     // Wii: GetFlags and SetFlags, inlined in GenericSimCall 0x33.
     s8 GetFlags(const CTilePt &tile) const { return mFlags->Get(tile); }
