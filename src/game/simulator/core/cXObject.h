@@ -38,6 +38,7 @@ enum ObjEntryPoint {
     kObjEntryLoad = 2,           // PostLoad, with the transition type as the parameter
     kObjEntryUserPlacement = 0xb, // UserPlace
     kObjEntryUserPickup = 0xc,   // UserPickup
+    kObjEntryAllowIntersection = 5, // TestIntersection runs it both ways; either may allow it
     kObjEntryWallAdjacency = 6,  // UpdateWallAdjacency: having it opts in, and it runs when
                                  // the walls around the object change
     kObjEntryPlacement = 9,      // TS2's placement entry; UpdateChairFacing runs it on a part
@@ -192,7 +193,22 @@ public:
         mMaxX = maxX;
         mMaxY = maxY;
     }
+
+    // Wii: Sect, whether two footprints overlap; touching edges do not count.
+    int Sect(const FTileRect &other) const
+    {
+        if (mMinY >= other.mMaxY)
+            return 0;
+        if (mMaxY <= other.mMinY)
+            return 0;
+        if (mMinX >= other.mMaxX)
+            return 0;
+        return mMaxX > other.mMinX;
+    }
 };
+
+// Wii: SectWall, whether a footprint crosses a wall on a level.
+int SectWall(FTileRect *rect, int level); // 0x1C3908
 
 class SlotDescriptor;
 // Wii: Slot. PS2 has its vtable at 0x4B8020, after RoutingSlot, SpriteSlot and ObjectSlot.
@@ -578,6 +594,10 @@ public:
     cXObject *GetNextObjectSibling() { return HierGetChild(0); }
     cXObject *GetNextObjectSiblingOutOfLine(); // 0x2535E0
     void UpdateWallAdjacency();         // 0x214098
+    // Wii: GetRequiredSegment, the wall side an object must stand against (2, 8 or 0).
+    int GetRequiredSegment();           // 0x253D00
+    // Wii: TestIntersection, whether the object fits at a tile without overlapping another.
+    int TestIntersection(FTilePt &tile, int level); // 0x211C50
     void UpdateChairFacing();           // 0x211978
     // Wii keeps this as a function; Turn inlines both calls. Defined in cXObject.cpp.
     static inline void UpdateChairFacing(ObjectModule *module, int x, int y, int level);
@@ -585,8 +605,9 @@ public:
     static void UpdateChairFacingOutOfLine(ObjectModule *module, int x, int y, int level); // 0x2539B0
     void CalcRoomScoreImpact();         // 0x21ADA0
     // Wii: sXDirTable and sYDirTable, a step in each of the eight directions, north first.
-    static int sXDirTable[8]; // 0x4927C8  0, 1, 1, 1, 0, -1, -1, -1
-    static int sYDirTable[8]; // 0x4927F0  -1, -1, 0, 1, 1, 1, 0, -1
+    // A ninth entry of 0, 0 is the tile itself: TestIntersection loops over all nine.
+    static int sXDirTable[9]; // 0x4927C8  0, 1, 1, 1, 0, -1, -1, -1, 0
+    static int sYDirTable[9]; // 0x4927F0  -1, -1, 0, 1, 1, 1, 0, -1, 0
 
     // Reads and writes one operand of an instruction: bhav.md lists the scopes. InterpValue
     // returns 1, or -1 once it has stopped the tree with an error.

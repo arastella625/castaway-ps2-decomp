@@ -90,6 +90,8 @@ public:
     ~TileWalls();                                         // 0x1E2B20
     int HasWall(int segment) const;                       // 0x1E2B78
     void Rotate(int quarterTurns);                        // 0x1C1B50
+    // Wii: RotateSegment(TileWallsSegment, int), one segment turned by quarter turns.
+    static int RotateSegment(int segment, int quarterTurns); // 0x1E30E0
     void AddWall(int segment);                            // 0x1E2EF0
     void SetStyle(int style, int segment);                // 0x1E2EB8
     void SetPattern(int pattern, int segment, int side);  // 0x1E2D60

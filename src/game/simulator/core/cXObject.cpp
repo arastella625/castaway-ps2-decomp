@@ -745,6 +745,88 @@ void cXObject::ReconSlots(ReconBuffer *buffer, int version)
     }
 }
 
+// 0x211C50. Wii: TestIntersection. A ghost fits anywhere. Otherwise each object on the tile
+// and the eight around it is checked: a Sim ignores what Sims can walk through and the object
+// its route ignores; nothing collides with a ghost or, for a Sim, with what Sims walk through.
+// Zero-extent objects meet only on the object's own tile, through variable 0x3F's bits and the
+// wall side they need. Tree 5 on either object allows the overlap; otherwise overlapping
+// footprints fail with error 0xB and the object recorded. Last, the footprint must not cross a
+// wall unless bit 0x400 of variable 0x2A is set (error 7).
+int cXObject::TestIntersection(FTilePt &tile, int level)
+{
+    if (IsPerson() && GetPerson()->IsGhost())
+        return 1;
+    int x = tile.mX >> 4;
+    int y = tile.mY >> 4;
+    cFixedWorld *world = GetFixedWorld();
+    ObjectModule *module = GetObjectModule();
+    FTileRect rect;
+    int zeroExtent = HasZeroExtent();
+    int placeFlags = GetData(0x3f);
+    ComputeRect(tile, &rect);
+    for (int dir = 0; dir < 9; dir++) {
+        CTilePt where(x + sXDirTable[dir], y + sYDirTable[dir], level);
+        if (world->OutOfBounds(where))
+            continue;
+        for (cXObject *object = GetObjectFromID(module->GetTileObjectID(where)); object != 0;
+             object = object->GetNextObjectSibling()) {
+            if (IsPartOfMe(object))
+                continue;
+            if (GetType() == 2) {
+                if (object->CanIntersectPeople())
+                    continue;
+                if (GetPerson()->IgnoringObject() == object)
+                    continue;
+            } else if (object->GetType() == 2) {
+                if (object->GetPerson()->IsGhost())
+                    continue;
+                if (CanIntersectPeople())
+                    continue;
+            } else {
+                int objectZeroExtent = object->HasZeroExtent();
+                if (zeroExtent || objectZeroExtent) {
+                    if (dir != 8)
+                        continue;
+                    int shared = object->GetData(0x3f) & placeFlags;
+                    if (shared & 1) {
+                        gPlacementError = 0xb;
+                        return 0;
+                    }
+                    if (zeroExtent && objectZeroExtent) {
+                        int segment = GetRequiredSegment();
+                        if (segment != object->GetRequiredSegment() || segment == 0)
+                            continue;
+                        if (IsStructure() || !object->IsStructure()) {
+                            gPlacementError = 0x16;
+                            return 0;
+                        }
+                        continue;
+                    }
+                    if (shared & 2) {
+                        gPlacementError = 0xb;
+                        return 0;
+                    }
+                    continue;
+                }
+            }
+            if (RunTree(kObjEntryAllowIntersection, object->GetID(), 0))
+                continue;
+            if (object->RunTree(kObjEntryAllowIntersection, GetID(), 0))
+                continue;
+            if (((FTileRect *)object->mRect)->Sect(rect)) {
+                gPlacementError = 0xb;
+                gPlacementConflict = object;
+                return 0;
+            }
+        }
+    }
+    if (!(GetData(0x2a) & 0x400) && SectWall(&rect, level)) {
+        gPlacementError = 7;
+        return 0;
+    }
+    return 1;
+}
+
 // 0x214098. Wii: UpdateWallAdjacency. For an object with tree 6: the low six bits of
 // variable 5 become which sides of its tile have a wall, turned to the object's facing (bit 0
 // segment 1, bit 2 segment 2, bit 1 segment 4, bit 3 segment 8), and tree 6 runs when that
@@ -1428,3 +1510,28 @@ int cXObject::GetLevelOutOfLine() const
 {
     return mLevel;
 }
+
+// Not matched: 3 of 45 words differ (aligned). The game's switch tests x < 2 between its two
+// cases (GCC's case tree with an unknown lower bound), which ours leaves out, and it loads
+// the facing with lhu and sign-extends it before halving where ours uses lh. Tried: the cases
+// in the other order and an explicit default (both further off). TestIntersection calls the
+// game's copy, so its match does not depend on this.
+#ifdef NON_MATCHING
+// 0x253D00. Wii: GetRequiredSegment. Wall-placement flag 1 (variable 0xD) needs a wall on
+// segment 2 and flag 4 one on segment 8, turned with the object's facing; 0 needs none.
+int cXObject::GetRequiredSegment()
+{
+    int segment = 0;
+    switch (GetData(0xd) & 5) {
+    case 1:
+        segment = 2;
+        break;
+    case 4:
+        segment = 8;
+        break;
+    }
+    if (segment != 0 && GetData(1) != 0)
+        segment = TileWalls::RotateSegment(segment, GetData(1) / 2);
+    return segment;
+}
+#endif

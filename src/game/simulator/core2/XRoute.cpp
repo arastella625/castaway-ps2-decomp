@@ -116,7 +116,7 @@ void XRoute::Construct(cXObject *start, cXObject *dest, const RoutingSlot *slot)
         cXPerson *person = mStart->GetPerson();
         if (person) {
             field_0x9c = person->mPersonData[0x20];
-            person->field_0x5e0 = 0;
+            person->mIgnoredObject = 0;
         }
     }
     field_0xa0 = 0x30;
