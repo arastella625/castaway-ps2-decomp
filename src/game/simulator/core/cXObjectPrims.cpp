@@ -3455,3 +3455,108 @@ long cXObject::TryPreloadObject(StackElem *elem, XPrimParam *primParam)
     }
     return 0;
 }
+
+// 0x255E60. GetShortComboValue as a function.
+void cXObject::GetShortComboValueOutOfLine(u8 code, s16 *scope, s16 *data)
+{
+    GetShortComboValue(code, scope, data);
+}
+
+// The operands of the passive influence primitive.
+class PassiveInfluenceParam {
+public:
+    s16 mObjectData; // 0x00  the object, with mObjectScope
+    s8 mObjectScope; // 0x02  signed: lb
+    u8 field_0x3;    // 0x03
+    u8 mOperation;   // 0x04  5 removes the object from the map
+    u8 mCountCode;   // 0x05  a short combo code (GetShortComboValue)
+    u8 mFlags;       // 0x06
+
+    // Wii: GetTriggerTreeFlag and GetLockoutObjectFlag, bits 5 and 6.
+    bool GetTriggerTreeFlag() const { return (mFlags >> 5) & 1; }
+    bool GetLockoutObjectFlag() const { return (mFlags >> 6) & 1; }
+};
+
+// 0x234160. Wii: TryPassiveInfluence. Removes an object from the passive influence map, or
+// adds it with a count (at most 0x20) and temps 0 and 1 as the trigger tree and lockout
+// object when their flags are set. An unreadable object operand clears the stack object.
+long cXObject::TryPassiveInfluence(StackElem *elem, XPrimParam *primParam)
+{
+    PassiveInfluenceParam *param = (PassiveInfluenceParam *)primParam;
+    s16 id;
+    s16 scope;
+    s16 data;
+    s16 count;
+    if (InterpValue(param->mObjectScope, param->mObjectData, 0, 0, &id, 0) == -1) {
+        elem->mStackObject = 0;
+        return -1;
+    }
+    cXObject *object = GetObjectModule()->GetObjectFromIDInline(id);
+    if (param->mOperation == 5) {
+        GetSimulator()->GetPassiveInfluenceSystem()->RemoveObjectFromMap(object);
+        return 1;
+    }
+    count = 0;
+    GetShortComboValueOutOfLine(param->mCountCode, &scope, &data);
+    if (InterpValue(scope, data, 0, 0, &count, 0) == -1)
+        return -1;
+    if (count > 0x20)
+        count = 0x20;
+    s16 trigger = 0;
+    s16 lockout = 0;
+    if (param->GetTriggerTreeFlag())
+        trigger = mTemps[0];
+    if (param->GetLockoutObjectFlag())
+        lockout = mTemps[1];
+    GetSimulator()->GetPassiveInfluenceSystem()->AddObjectToMap(object, param->field_0x3, param->mOperation,
+                                                                count, param->mFlags, trigger, lockout);
+    return 1;
+}
+
+// The operands of the user-event primitive.
+class UserEventParam {
+public:
+    s16 mTimeout; // 0x00  the timeout operand's data
+    u16 pad_0x2;  // 0x02
+    u8 mFlags;    // 0x04  bit 5 the timeout is a local (scope 0x19), else a literal (7)
+    u8 mString;   // 0x05  a string in set 0x131 of the tree's resource file, 0 for none
+
+    // Wii: GetTimoutUsesLocal.
+    bool GetTimeoutUsesLocal() const { return (mFlags >> 5) & 1; }
+};
+
+// 0x2243D8. Wii: TryUserEvent. A two-pass primitive: the first pass returns 2 (run again),
+// the second reads the timeout and the stack object (error 0x17 if it is gone), loads the
+// string, if any, from set 0x131 of the tree's resource file and parses it as UI text, then
+// returns 2; a later pass returns 1. PS2 drops the Wii's four flag reads after the parse.
+long cXObject::TryUserEvent(StackElem *elem, XPrimParam *primParam)
+{
+    UserEventParam *param = (UserEventParam *)primParam;
+    if (elem->mWaiting == 0) {
+        elem->mWaiting = 1;
+        return 2;
+    }
+    if (elem->mWaiting != 1)
+        return 1;
+    elem->mWaiting = 2;
+    cXObject *object = GetObjectFromID(elem->mStackObject);
+    OBJECT_ERROR_CHECK(object, 0x17);
+    s16 timeout;
+    if (InterpValue(param->GetTimeoutUsesLocal() ? 0x19 : 7, param->mTimeout, 0, 0, &timeout, 0) == -1)
+        return -1;
+    BString2 text;
+    if (param->mString != 0) {
+        AUTOPTR<StringSet> strings;
+        strings.CreateInstance();
+        u32 resFile = elem->mBehavior->GetResFileID(elem->GetTreeID());
+        if (resFile != (u32)-1) {
+            strings->Load(resFile, 0x131);
+            ELocString loc = strings->GetLocString(param->mString);
+            if ((const u16 *)loc)
+                text.assign((const u16 *)loc);
+        }
+    }
+    if (text.length())
+        ParseUIString(text, elem, 0, 0, false);
+    return 2;
+}

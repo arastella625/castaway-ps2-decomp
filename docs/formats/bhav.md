@@ -471,6 +471,7 @@ The stack object is the frame's object ID. A call passes it on to the called tre
 | IdleAnimate | `+2` low byte decrement parameter, high byte sync object; `+5` flags; `+6` behaviour; `+7` literal loop count |
 | KillSounds | **Proven, matched (`0x255CC8`).** `+0` non-zero quiets the stack object's sounds, 0 this object's (sound event 0x17 for the source), when the sound player is ready. Returns true |
 | KillObject | `+2` bit 0 return immediately, bit 1 clear means clean up all |
+| PassiveInfluence | **Proven, matched (`0x234160`).** `+0` data and `+2` (signed) scope give an object ID; unreadable, the stack object is cleared and the tree errors. `+4` 5 removes the object from the passive influence map, true. Otherwise `+5` is a short combo code for a count, capped at 0x20, and the object is added to the map with `+3`, `+4`, the count and `+6`; `+6` bit 5 passes temp 0 as the trigger tree and bit 6 temp 1 as the lockout object (0 otherwise). True |
 | PlaySound | **Proven, read line by line on PS2 (`0x234CF8`), not matched.** `+0` s16 the sound, or temp 0 if `+4` bit 7. Source: me if `+4` is 0xFF, else the stack object if bit 1, else me. Bit 0, looped, isn't read on PS2. The sound's `SoundInfo` is looked up in my tree's namespace, then the global one. Found, with a sound event ID (`+0x4C`) and the player ready, it queues a play of that event from the source at volume -400. **It returns 1 on every path, with no error**, found or not |
 | PreloadObject | **Proven, matched (`0x22B668`).** `+4` (u16) bit 0: free unused object data, true. Otherwise `+0` is a GUID: 0 or unknown is false; else its data is preloaded, true if it is ready and 2 if the load is still under way |
 | PushAction | See its own section |
@@ -481,6 +482,7 @@ The stack object is the frame's object ID. A call passes it on to the called tre
 | Snap | `+4` bit 0 origin only, 1 ask person to move, 2 use footprint |
 | TestObjectType | Read from the PS2 code. `+0` s32 GUID; `+4` s16 data and `+6` u8 scope give the object to test, a missing object being error 0x17; `+7` flags. Bit 2: true if its GUID is the one in temps 1 and 2 (high, low). Else bit 0: true if the GUID's selector has the same semi-global namespace. Else bit 1: store the GUID in temps 1 and 2, true. Else: true if its GUID or its master selector's GUID is the one given. An object with no selector is false |
 | TreeBreak | `+4` bit 0 log only, bit 1 break all |
+| UserEvent | **Proven, matched (`0x2243D8`).** Runs in two passes: the first returns 2 (run again). The second needs the stack object (error 0x17), reads `+0` as a local if `+4` bit 5, else a literal (the timeout, unused on PS2), and if `+5` is non-zero loads that string from set 0x131 of the tree's resource file and parses it as UI text. It returns 2; a third pass returns true |
 
 The full list is `*Param` in the Wii symbols. `tools/bhav.py` doesn't test any of this table.
 

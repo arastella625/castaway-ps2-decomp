@@ -768,6 +768,9 @@ public:
     // in cXObjectPrims.cpp). Wii keeps both as functions; PS2 inlines them.
     inline s16 GetValueFromShortOwnerCombo(u8 code);
     inline void SetValueInShortOwnerCombo(u8 code, s16 value);
+    // The game also keeps GetShortComboValue as a function (TryPassiveInfluence calls it);
+    // the inlined users call the free inline in cXObjectPrims.cpp.
+    void GetShortComboValueOutOfLine(u8 code, s16 *scope, s16 *data); // 0x255E60
     long TryExpression(ExpressionParam *param);
     inline void TryParticleEffect(ParticleEffectParam effect, long &result);
 

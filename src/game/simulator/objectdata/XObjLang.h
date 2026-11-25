@@ -53,7 +53,7 @@ public:
     virtual void Slot26();
     virtual void Slot27();
     virtual void Slot28();
-    virtual void Load(u32 namespaceID, s16 id);
+    virtual int Load(u32 namespaceID, s16 id);
 
     static StringSet *CreateInstance();
     static void DestroyInstance(StringSet *strings);

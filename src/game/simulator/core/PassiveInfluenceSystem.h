@@ -13,6 +13,9 @@ public:
     void ClearInfluenceMotiveDeltas(cXObject *object);
     void SetInfluenceMotiveDelta(cXObject *object, u8 motive, f32 delta, s16 limit, s8 type);
     void RemoveObjectFromMap(cXObject *object); // 0x1A0F08
+    // Wii: AddObjectToMap(cXObject *, sc, sc, sc, sc, s, s).
+    void AddObjectToMap(cXObject *object, s8 a, s8 b, s8 count, s8 flags, s16 trigger,
+                        s16 lockout); // 0x1A09E0
 };
 
 #endif
