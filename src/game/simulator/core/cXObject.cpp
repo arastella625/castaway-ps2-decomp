@@ -1678,14 +1678,14 @@ void cXObject::Initialize()
     ObjectSlot slot;
     mObjectSlots.push_back(slot);
     if (GetDef()[0x14] != 0) {
-        s16 slotCount = GetDef()[0x14];
+        s16 slotsID = GetDef()[0x14];
         u32 loaderNamespace;
-        if (slotCount < 1000)
+        if (slotsID < 1000)
             loaderNamespace = namespaceID;
         else
             loaderNamespace = GetSelector()->GetSemiNamespaceID();
         SlotLoader loader(loaderNamespace);
-        loader.Load(slotCount, &mObjectSlots, &mRoutingSlots, &mSpriteSlots, this);
+        loader.Load(slotsID, &mObjectSlots, &mRoutingSlots, &mSpriteSlots, this);
     }
     mVars.Initialize(this);
     FTilePt tile;

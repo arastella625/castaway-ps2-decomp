@@ -209,19 +209,6 @@ struct ParticleEffectParam {
     u32 field_0x4;
 };
 
-// Wii: SpriteSlot, 0x6c bytes. IsActive reads the word at +0x10.
-class SpriteSlot {
-public:
-    u32 pad_0x0[4];  // 0x00
-    void *mSprite;   // 0x10
-    u32 pad_0x14[0x16]; // 0x14
-
-    bool IsActive() const { return mSprite != 0; }
-
-    void Tick(); // 0x1C0AD8
-};
-STATIC_ASSERT(SpriteSlot_size, sizeof(SpriteSlot) == 0x6c);
-
 // Wii: FTileRect, the footprint ComputeRect fills. SetWhole's four arguments land at 0xc,
 // 0x8, 0x4 and 0x0 in that order.
 class FTileRect {
@@ -282,6 +269,10 @@ public:
     void SetObjectID(s16 id) { mObjectID = id; }
 
     ObjectSlot(); // 0x1E1888
+    // Wii: ObjectSlot(const SlotDescriptor *), inlined by SlotLoader::Load on PS2.
+    inline ObjectSlot(const SlotDescriptor *descriptor); // in SlotLoader.cpp
+    // Wii: SetHeight(StdHeight).
+    void SetHeight(int height); // 0x1E1908
     virtual ~ObjectSlot() {} // 0x1D8C88 is the vtable's copy; Initialize inlines this one
     virtual void WriteSlot(SlotDescriptor *descriptor) const;
 
@@ -294,6 +285,54 @@ public:
     f32 GetYOffset() const { return mYOffset; }
 };
 STATIC_ASSERT(ObjectSlot_size, sizeof(ObjectSlot) == 0x24);
+
+// Wii: SpriteSlot, 0x6c bytes, a sprite shown over the object (a balloon or an overlay).
+// IsActive reads the word at +0x10. Offsets named from the Wii's accessors; PS2 keeps the
+// byte at +0x60 as a word.
+class SpriteSlot : public Slot {
+public:
+    f32 mOffsetX;       // 0x04
+    f32 mOffsetY;       // 0x08
+    f32 mAltOffset;     // 0x0c  Wii: SetAltOffset
+    void *mSprite;      // 0x10
+    int field_0x14;     // 0x14
+    int mSpriteID;      // 0x18  Wii: GetSpriteID
+    int field_0x1c;     // 0x1c
+    int field_0x20;     // 0x20  400 from the constructor
+    int field_0x24;     // 0x24
+    // An anonymous union: the compiler's copy constructor copies it after every named member,
+    // past the loop for field_0x50, as SlotLoader::Load's push_back does. Its members are ours.
+    union {
+        int field_0x28;
+        f32 field_0x28f;
+    };                  // 0x28
+    int field_0x2c;     // 0x2c
+    int field_0x30;     // 0x30
+    int field_0x34;     // 0x34
+    int field_0x38;     // 0x38
+    int mBalloonSprite; // 0x3c  Wii: UseBalloonSprite, -1 for none
+    int mOverlaySprite; // 0x40  Wii: UseOverlaySprite, -1 for none
+    int mPriority;      // 0x44  Wii: GetPriority
+    int mOptions;       // 0x48  Wii: GetOptions
+    f32 field_0x4c;     // 0x4c  the descriptor's third offset
+    f32 field_0x50[2];  // 0x50
+    f32 field_0x58;     // 0x58
+    f32 mPopSize;       // 0x5c  Wii: SetPopSize
+    int mShowOverInactivePeople; // 0x60  a byte on Wii
+    cXObject *mObject;  // 0x64
+    int field_0x68;     // 0x68
+
+    // Wii: SpriteSlot(SlotDescriptor *, cXObject *), inlined by SlotLoader::Load on PS2.
+    inline SpriteSlot(const SlotDescriptor *descriptor, cXObject *object); // in SlotLoader.cpp
+    virtual ~SpriteSlot() {}
+    virtual void WriteSlot(SlotDescriptor *descriptor) const;
+
+    bool IsActive() const { return mSprite != 0; }
+
+    void Reset(); // 0x1E1C00
+    void Tick(); // 0x1C0AD8
+};
+STATIC_ASSERT(SpriteSlot_size, sizeof(SpriteSlot) == 0x6c);
 
 // Wii: PlacementSpec, what TestPlace and Place take: the tile an object goes to and the slot
 // of the object it goes into. Wii's first field is a byte; PS2 stores a word.
@@ -341,7 +380,9 @@ class SlotDescriptor {
 public:
     s16 mType;         // 0x00  3 for a routing slot
     f32 mOffset[3];    // 0x04
-    u32 pad_0x10[3];   // 0x10
+    int field_0x10;    // 0x10  an object slot's +0xc
+    int field_0x14;    // 0x14  an object slot's flags
+    int mHeight;       // 0x18  an object slot's height, through SetHeight
     int mMultiplier[3]; // 0x1c
     int mFlags;        // 0x28
     int mSnapTarget;   // 0x2c
@@ -374,6 +415,8 @@ public:
     static const f32 kCornerOffset[];
 
     RoutingSlot();
+    // Wii: RoutingSlot(const SlotDescriptor *), inlined by SlotLoader::Load on PS2.
+    inline RoutingSlot(const SlotDescriptor *descriptor); // in SlotLoader.cpp
     virtual ~RoutingSlot() {}
     int GetAllowFailureTrees() const { return (mFlags >> 14) & 1; }
     void SetAllowFailureTrees(bool allow)
