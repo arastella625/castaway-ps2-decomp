@@ -463,12 +463,16 @@ The stack object is the frame's object ID. A call passes it on to the called tre
 | CallNamedTree | See its own section |
 | CreateObject | See its own section |
 | Dialog | `+0`, `+3`, `+4` button strings, `+2` message, `+6` title; `+1` icon index; `+5` bits 0-3 the type; `+7` bits 1-3 icon type, bits 4-6 result temp, bit 7 semi-global strings. See its own section |
+| Drop | **Proven, matched (`0x2389E8`).** No operands. The object held in slot 0 goes to the tile ahead of the holder (one tile in its facing, variable 1, from its own position) on the holder's level, if `CanPlace` allows it; then true. Nothing held, or no room: false |
 | DirectionTo, DistanceTo | A flag byte (`+4`, `+2`), bit 0 set: the "from" value is the scope in the next byte and the data after it. Clear: scope 3, data 0xB. DistanceTo bit 1 returns sixteenths of a tile |
 | FindGoodLocation | `+2` flags: bit 0 start at relative object, 1 not prefer empty tiles, 2 editable tiles only (tile flag 0x20 clear, as `MayEditTile` in world.md), 3 orientation in temp 0, 4 prefer under roof |
 | Grab | `+0` bit 0 parenting prop bone |
+| HUDManage | **Proven, matched (`0x23A0A0`).** `+0` data and `+2` scope give the HUD instance, `+4` data and `+6` scope the player, and `+3` is the operation, all passed to `HUDTarget::ManageHUD`; its result, as true or false, is returned. With no HUD, or an operand that can't be read, false |
 | IdleAnimate | `+2` low byte decrement parameter, high byte sync object; `+5` flags; `+6` behaviour; `+7` literal loop count |
+| KillSounds | **Proven, matched (`0x255CC8`).** `+0` non-zero quiets the stack object's sounds, 0 this object's (sound event 0x17 for the source), when the sound player is ready. Returns true |
 | KillObject | `+2` bit 0 return immediately, bit 1 clear means clean up all |
 | PlaySound | **Proven, read line by line on PS2 (`0x234CF8`), not matched.** `+0` s16 the sound, or temp 0 if `+4` bit 7. Source: me if `+4` is 0xFF, else the stack object if bit 1, else me. Bit 0, looped, isn't read on PS2. The sound's `SoundInfo` is looked up in my tree's namespace, then the global one. Found, with a sound event ID (`+0x4C`) and the player ready, it queues a play of that event from the source at volume -400. **It returns 1 on every path, with no error**, found or not |
+| PreloadObject | **Proven, matched (`0x22B668`).** `+4` (u16) bit 0: free unused object data, true. Otherwise `+0` is a GUID: 0 or unknown is false; else its data is preloaded, true if it is ready and 2 if the load is still under way |
 | PushAction | See its own section |
 | Relationship | Flag byte `+4`: bit 0 clear means create, bit 1 use neighbours |
 | SetBalloon | `+0` bit 0 over stack object; `+2` index, group; `+6` type, then flags |

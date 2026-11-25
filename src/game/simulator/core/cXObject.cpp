@@ -1855,3 +1855,49 @@ int cXObject::GetRequiredSegment()
     return segment;
 }
 #endif
+
+// 0x253C98. Wii: SetWasPlacedByPlayer, bit 0x4000 of variable 8.
+void cXObject::SetWasPlacedByPlayer(bool placed)
+{
+    s16 flags = GetData(8);
+    if (placed)
+        flags |= 0x4000;
+    else
+        flags &= ~0x4000;
+    mVars.WriteVar(8, flags);
+}
+
+// 0x253DC0. Wii: UpdateSimFlags. Variable 0x3C (Wii: SimIndependent) and whether the object
+// can choose autonomously go to the module's Sim flags 2 and 8.
+void cXObject::UpdateSimFlags()
+{
+    mModule->SetSimFlag(mID, ObjectModule::kSimFlagIndependent, GetData(0x3c) != 0);
+    mModule->SetSimFlag(mID, ObjectModule::kSimFlagAutonomous, CanChooseAutonomously());
+}
+
+// 0x254488. Wii: HandleError. After a tree error (misc flag 0x100) the flag is cleared; with
+// an error code still set, the people are cleaned up and the object cleans up.
+void cXObject::HandleError()
+{
+    if (mMiscFlags & 0x100) {
+        if (GetError() == 0) {
+            mMiscFlags &= ~0x100;
+        } else {
+            mMiscFlags &= ~0x100;
+            mModule->CleanupPeople(this);
+            Cleanup(0);
+        }
+    }
+}
+
+// 0x255CC8. Wii: TryKillSounds. Quiets the sounds of this object, or of the stack object.
+long cXObject::TryKillSounds(StackElem *elem, KillSoundsParam *param)
+{
+    s16 id;
+    if (param->mStackObject != 0)
+        id = elem->mStackObject;
+    else
+        id = mID;
+    GetSoundPlayer()->QuietBySourceID(id);
+    return 1;
+}

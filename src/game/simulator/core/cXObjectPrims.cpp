@@ -1885,33 +1885,6 @@ EVec3 IsoFracsToWorld(const f32 &x, const f32 &y, const f32 &z);
 EVec3 IsoToWorld(const FTilePt &tile, const f32 &z);
 FTilePt WorldToIso(const EVec3 &world);
 
-// Wii: OffsetCoordsInDirection.
-inline void OffsetCoordsInDirection(int direction, int &x, int &y)
-{
-    switch (direction & 7) {
-    case 1:
-        x += 1;
-    case 0:
-        y -= 1;
-        break;
-    case 3:
-        y += 1;
-    case 2:
-        x += 1;
-        break;
-    case 5:
-        x -= 1;
-    case 4:
-        y += 1;
-        break;
-    case 7:
-        y -= 1;
-    case 6:
-        x -= 1;
-        break;
-    }
-}
-
 // Wii: FTilePt::FTilePt(int), one tile in a direction.
 class DirectionTile : public FTilePt {
 public:
@@ -3406,3 +3379,79 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
     return result;
 }
 #endif
+
+// 0x2389E8. Wii: TryDrop. The object held in slot 0 goes down on the tile ahead, if it fits.
+long cXObject::TryDrop()
+{
+    cXObject *held = GetContainedObject(0);
+    if (held == 0)
+        return 0;
+    FTilePt tile;
+    int level = mLevel;
+    tile = GetLocationRef();
+    tile += FTilePt(GetData(1));
+    if (held != 0 && held->CanPlace(tile, level, 0, 0)) {
+        held->Place(tile, level, 0, 0);
+        return 1;
+    }
+    return 0;
+}
+
+// The operands of the HUD-manage primitive: two operands and an operation.
+class HUDManageParam {
+public:
+    s16 mInstanceData; // 0x00
+    u8 mInstanceOwner; // 0x02  the scope of the instance operand
+    u8 mOperation;     // 0x03
+    s16 mPlayerData;   // 0x04
+    u8 mPlayerOwner;   // 0x06  the scope of the player operand
+};
+
+// 0x23A0A0. Wii: TryHUDManage. Reads the HUD instance and player operands and passes them to
+// the HUD with the operation; false without a HUD or when an operand cannot be read.
+long cXObject::TryHUDManage(StackElem *elem, XPrimParam *primParam)
+{
+    HUDManageParam *param = (HUDManageParam *)primParam;
+    s16 values[2];
+    if (_gd.mHudTarget == 0)
+        return 0;
+    if (InterpValue(param->mInstanceOwner, param->mInstanceData, 0, 0, &values[0], 0) == -1)
+        return 0;
+    if (InterpValue(param->mPlayerOwner, param->mPlayerData, 0, 0, &values[1], 0) == -1)
+        return 0;
+    // As early returns: != 0 or a bool gives sltu, the game sets 1 and clears it with movz.
+    if (_gd.mHudTarget->ManageHUD(values[0], param->mOperation, values[1]))
+        return 1;
+    return 0;
+}
+
+// The operands of the preload primitive: an object GUID, and bit 0 to unload instead.
+class PreloadObjectParam {
+public:
+    int mGUID;   // 0x00
+    u16 mFlags;  // 0x04  read with lhu
+
+    bool GetUnload() const { return mFlags & 1; }
+};
+
+// 0x22B668. Wii: TryPreloadObject. Unloads unused object data, or preloads the data of the
+// object with the GUID: true when it is loaded, 2 when the preload is under way, false for
+// no GUID or an unknown one.
+long cXObject::TryPreloadObject(StackElem *elem, XPrimParam *primParam)
+{
+    PreloadObjectParam *param = (PreloadObjectParam *)primParam;
+    ObjectFolder *folder = GetObjectFolder();
+    if (param->GetUnload()) {
+        folder->FreeUnusedData();
+        return 1;
+    }
+    if (param->mGUID != 0) {
+        ObjSelector *selector = folder->GetSelectorByGUIDInline(param->mGUID);
+        if (selector != 0) {
+            if (folder->ForceDataPreload(selector, false))
+                return 1;
+            return 2;
+        }
+    }
+    return 0;
+}

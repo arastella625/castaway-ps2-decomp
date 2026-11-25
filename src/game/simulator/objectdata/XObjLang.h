@@ -129,6 +129,9 @@ public:
 
     NamespaceSelector *GetNamespaceSelector(u32 namespaceID); // 0x21FD00
     ObjSelector *GetPlaceholder(); // 0x254AF8  Wii's name; PS2 by cXObject::PostLoad
+    // Wii: FreeUnusedData and ForceDataPreload, the preload primitive's two operations.
+    void FreeUnusedData();                                   // 0x21EC60
+    int ForceDataPreload(ObjSelector *selector, bool a);     // 0x21E218
 };
 
 extern ObjectFolder *gObjectFolder;

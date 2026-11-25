@@ -52,6 +52,33 @@ enum ObjEntryPoint {
     kObjEntryApplyDamage = 0x20  // ApplyDamage, with the damage as the parameter
 };
 
+// Wii: OffsetCoordsInDirection, one step in a direction 0 to 7 (0 is -y, 2 is +x).
+inline void OffsetCoordsInDirection(int direction, int &x, int &y)
+{
+    switch (direction & 7) {
+    case 1:
+        x += 1;
+    case 0:
+        y -= 1;
+        break;
+    case 3:
+        y += 1;
+    case 2:
+        x += 1;
+        break;
+    case 5:
+        x -= 1;
+    case 4:
+        y += 1;
+        break;
+    case 7:
+        y -= 1;
+    case 6:
+        x -= 1;
+        break;
+    }
+}
+
 // Wii: FTilePt, a tile position: x and y, two FInts with four bits of fraction.
 class FTilePt {
 public:
@@ -59,6 +86,21 @@ public:
     int mY; // 0x04
 
     FTilePt() {}
+    // Wii: FTilePt(int), one whole tile in a direction.
+    FTilePt(int direction)
+    {
+        mX = 0;
+        mY = 0;
+        OffsetCoordsInDirection(direction, mX, mY);
+        mX <<= 4;
+        mY <<= 4;
+    }
+    FTilePt &operator+=(const FTilePt &other)
+    {
+        mX += other.mX;
+        mY += other.mY;
+        return *this;
+    }
 
     // Wii: FInt::Frac on each coordinate, the four fraction bits. 8 is the tile's centre.
     int FracX() const { return mX & 0xf; }
@@ -182,6 +224,12 @@ struct ExpressionParam {
 };
 
 // Primitive 0xa, Tutorial.
+// The operands of the kill-sounds primitive: non-zero quiets the stack object's sounds.
+class KillSoundsParam {
+public:
+    s16 mStackObject; // 0x00
+};
+
 struct TutorialParam {
     u8 mMode; // 0x00  0 claim, 1 release
 };
@@ -486,7 +534,8 @@ public:
     f32 field_0xcc;            // 0xcc
     u8 mRect[0x10];            // 0xd0  an FTileRect
     int mLevel;                // 0xe0
-    u32 mMiscFlags;            // 0xe4  Wii: SetMiscFlag; Error sets 0x100
+    int mMiscFlags;            // 0xe4  Wii: SetMiscFlag; Error sets 0x100. Signed: HandleError's
+                               //       mask is addiu -0x101
     s16 *mDef;                 // 0xe8  a word of it is scope 0x15; word 9 is the object's type
     ObjSelector *mSelector;    // 0xec
     eastl::vector<ObjectSlot, eastl::allocator> mObjectSlots; // 0xf0
@@ -660,6 +709,8 @@ public:
     // Wii: SimObjectPlaced, for a single-tile object once Place is done.
     static void SimObjectPlaced(IBaseSimInstance *instance); // 0x21A750
     void UpdateSimFlags();                               // 0x253DC0
+    // Wii: CanChooseAutonomously.
+    bool CanChooseAutonomously();                        // 0x2149C0
     void SetWasPlacedByPlayer(bool placed);               // 0x253C98
     bool GetWasPlacedByPlayer() const;                    // 0x253C68
     // Wii: HierSever, out of whatever holds it; HierSetSite puts it at a site.

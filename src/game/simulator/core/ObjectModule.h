@@ -39,7 +39,8 @@ public:
     s16 GetTileObjectID(const CTilePt &tile); // 0x255790
     void SetTileObjectID(const CTilePt &tile, s16 id); // 0x2557D8
     // Wii: SimFlag. Only the value cXObject::Error passes is known; the name is ours.
-    enum SimFlag { kSimFlagError = 4 };
+    // 2 and 8 from UpdateSimFlags: variable 0x3C (Wii: SimIndependent) and CanChooseAutonomously.
+    enum SimFlag { kSimFlagIndependent = 2, kSimFlagError = 4, kSimFlagAutonomous = 8 };
     void SetSimFlag(int id, SimFlag flag, bool set); // 0x255688
     void CleanupPeople(cXObject *object);            // 0x255290  Wii's name; PS2 by PostLoad
     s16 MakeNewOutOfWorldObject(class ObjSelector *selector, s16 *a); // 0x2215D0

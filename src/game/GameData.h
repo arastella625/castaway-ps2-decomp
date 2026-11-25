@@ -49,6 +49,8 @@ public:
 
     int GetHudTransitionTarget() const { return mHudTransitionTarget; }
     void GotoMainMenu(); // 0x2E1D88
+    // Wii: ManageHUD(s16 instance, s16 operation, s16 player), the HUD-manage primitive's work.
+    int ManageHUD(s16 instance, s16 operation, s16 player); // 0x2C6990
 };
 
 struct LoadInfo {
