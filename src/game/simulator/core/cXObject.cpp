@@ -45,9 +45,17 @@ inline bool cXObject::RequiresWallAdjacency() const
 inline bool cXObject::IsDoor()
 {
     bool door = false;
-    if (GetTypeOutOfLine() == 8 && GetHeightOutOfLine() == 2)
-        door = (s16)GetTreeID(kObjEntryPortal) != 0;
+    if (GetTypeOutOfLine() == 8 && GetHeightOutOfLine() == 2 && (s16)GetTreeID(kObjEntryPortal) != 0)
+        door = true;
     return door;
+}
+
+inline bool cXObject::IsGate()
+{
+    bool gate = false;
+    if (GetTypeOutOfLine() == 8 && GetHeightOutOfLine() == 1 && (s16)GetTreeID(kObjEntryPortal) != 0)
+        gate = true;
+    return gate;
 }
 
 inline bool cXObject::IsWindow()
@@ -752,6 +760,203 @@ void cXObject::ReconSlots(ReconBuffer *buffer, int version)
         mObjectSlots[i].SetObjectID(id);
     }
 }
+
+#ifdef NON_MATCHING
+// 0x2104C8. Wii: TestPlace, the checks behind CanPlace and UserCanPlace. Each failure sets
+// gPlacementError; the order of the checks is the order of the codes below.
+// Parked 2 of 891 words off: the entry test of the third loop (the one that sets found)
+// loads the iterator into v1 where the game uses v0; the bottom test and everything else
+// match. Tried: for, while, a guarded do-while, *it != 0, copy-initialisation, found as
+// bool, int or a pointer, declared after the iterator or at the top, the test split or
+// written as continue, object declared outside, and the condition inverted. The roof and
+// part loops, built through a copy, get v0 with the same for.
+int cXObject::TestPlace(PlacementSpec *spec)
+{
+    cFixedWorld *world = GetFixedWorld();
+    if (world->OutOfBounds(CTilePt(spec, 0))) {
+        gPlacementError = 1;
+        return 0;
+    }
+    cXPerson *person = GetPerson();
+    CTilePt here(this, 0);
+    int flags = GetFixedWorld()->GetFlags(CTilePt(spec, 1));
+    int isPerson = GetType() == 2;
+    if (isPerson) {
+        if ((flags & 0x10) && !person->IsGhost() && !field_0x120) {
+            if (world->OutOfBounds(here)) {
+                gPlacementError = 1;
+                return 0;
+            }
+            if (!(world->GetFlags(here) & 0x10)) {
+                if (person->IsChimp() || person->IsBoar()) {
+                    gPlacementError = 1;
+                    return 0;
+                }
+                if (_globals.mPlayerPerson != person) {
+                    gPlacementError = 1;
+                    return 0;
+                }
+                if (!CollisionMap::IsLocationGood(spec->mTile.ToWorldSpace2(), person->IsGhost(), true)) {
+                    gPlacementError = 1;
+                    return 0;
+                }
+            }
+        } else if ((flags & 0x80) && (person->IsChimp() || person->IsBoar()) && !world->OutOfBounds(here) &&
+                   !(world->GetFlags(here) & 0x80)) {
+            gPlacementError = 1;
+            return 0;
+        }
+    } else if ((flags & 0x20) && (flags & 0x10) && GetGUID() != 0x437) {
+        gPlacementError = 1;
+        return 0;
+    }
+    if (spec->mLevel < 1 || spec->mLevel > 3) {
+        gPlacementError = 2;
+        return 0;
+    }
+    if (GetData(0x17) == 4)
+        GetData(1);
+    CTilePt where(spec, spec->mLevel);
+    if (IsRoof()) {
+        if (GetFixedWorld()->HasRoof(CTilePt(spec, 1))) {
+            gPlacementError = 0xb;
+            return 0;
+        }
+        ObjectIterator roofs(CTilePt(spec, 0), ObjectIterator::kAll);
+        for (ObjectIterator it(roofs); !it.finished(); ++it) {
+            if ((*it)->IsRoof()) {
+                gPlacementError = 0xb;
+                return 0;
+            }
+        }
+    } else if (IsStructure() || IsDoor() || IsGate() || IsWindow()) {
+        ObjectIterator parts(CTilePt(spec, 0), ObjectIterator::kAll);
+        for (ObjectIterator it(parts); !it.finished(); ++it) {
+            if ((*it)->IsMultiTile() && (IsStructure() || IsDoor() || IsGate() || IsWindow())) {
+                cXObject *other = *it;
+                if (((cXMTObject *)this)->IsLeadObject()) {
+                    if (((cXMTObject *)other)->IsLeadObject()) {
+                        if (GetData(1) == other->GetData(1)) {
+                            gPlacementError = 0xb;
+                            return 0;
+                        }
+                    } else if (GetData(1) == (s16)((other->GetData(1) + 4) % 8)) {
+                        gPlacementError = 0xb;
+                        return 0;
+                    }
+                }
+            }
+        }
+    }
+    if (PlacementSpec::sLookingForRoof && !GetFixedWorld()->HasRoof(CTilePt(spec, 1))) {
+        gPlacementError = 0xa;
+        return 0;
+    }
+    if (!mSelector->GetIsPerson() && GetGUID() != 0x437) {
+        if (Globs::pEORGlobals->CheckForZeroExtentOverride(where, this)) {
+            gPlacementError = 0xb;
+            return 0;
+        }
+    } else if ((u16)mDef[0x5b] & 6) {
+        bool found = false;
+        for (ObjectIterator it(where, ObjectIterator::kAll); !it.finished(); ++it) {
+            cXObject *object = *it;
+            if (object != this && !object->IsWindow() && object->GetGUID() != 0x437) {
+                found = true;
+                break;
+            }
+        }
+        if (found) {
+            gPlacementError = 0xb;
+            return 0;
+        }
+    }
+    s16 placeFlags = GetData(0x2a);
+    s16 wallFlags = GetData(0xd);
+    if (!isPerson) {
+        if (!CheckWallFlags(spec->mTile, spec->mLevel, GetData(1), wallFlags))
+            return 0;
+        if (spec->mObject == 0) {
+            if (flags & 0x80) {
+                if (!(placeFlags & 0x1884)) {
+                    gPlacementError = 0x1b;
+                    return 0;
+                }
+            } else if (placeFlags & 0x1000) {
+                gPlacementError = 0x1c;
+                return 0;
+            }
+        }
+    }
+    if (!(placeFlags & 1) && !world->IsGrassAt(where)) {
+        gPlacementError = 0x13;
+        return 0;
+    }
+    if (!(placeFlags & 2) && spec->mLevel == 1 && world->IsGrassAt(where)) {
+        gPlacementError = 0x14;
+        return 0;
+    }
+    s16 outside = GetData(0x1e);
+    if (outside != 0) {
+        int isOutside = world->IsOutside(CTilePt(spec, spec->mLevel));
+        if (outside == 1 && !isOutside) {
+            gPlacementError = 9;
+            return 0;
+        }
+        if (outside == 2 && isOutside) {
+            gPlacementError = 0xa;
+            return 0;
+        }
+    }
+    s16 heights = GetData(4);
+    int height;
+    if (spec->mObject == 0) {
+        if (!TestIntersection(spec->mTile, spec->mLevel))
+            return 0;
+        height = 1;
+    } else {
+        ObjectSlot *slot = spec->mObject->GetObjectSlot(spec->mSlot);
+        if (slot == 0) {
+            gPlacementError = 0xd;
+            return 0;
+        }
+        if (slot->mObjectID != 0 && slot->mObjectID != mID) {
+            gPlacementError = 0xb;
+            return 0;
+        }
+        height = slot->GetHeight();
+        for (int i = spec->mObject->CountObjectSlots() - 1; i >= 0; i--) {
+            ObjectSlot *other = spec->mObject->GetObjectSlot(i);
+            if (other->GetHeight() == height && other->mObjectID != 0 && other->mObjectID != mID) {
+                if ((other->GetXOffset() == 0.0f && other->GetYOffset() == 0.0f) ||
+                    (slot->GetXOffset() == 0.0f && slot->GetYOffset() == 0.0f)) {
+                    gPlacementError = 0xb;
+                    return 0;
+                }
+            }
+        }
+        if (spec->mObject->mVars[0x1c] < mVars[0x1b]) {
+            gPlacementError = 0xe;
+            return 0;
+        }
+        for (cXObject *object = spec->mObject; object != 0; object = object->GetContainerInline()) {
+            if (object == this) {
+                gPlacementError = 0xb;
+                return 0;
+            }
+        }
+    }
+    if (height == 0 || heights == 0) {
+        gPlacementError = 0x18;
+        return 0;
+    }
+    if (!(heights & ObjectSlot::GetHeightMask(height))) {
+        gPlacementError = 0x18;
+        return 0;
+    }
+    return 1;
+}
+#endif
 
 // 0x211C50. Wii: TestIntersection. A ghost fits anywhere. Otherwise each object on the tile
 // and the eight around it is checked: a Sim ignores what Sims can walk through and the object

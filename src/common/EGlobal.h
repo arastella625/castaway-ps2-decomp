@@ -58,6 +58,8 @@ public:
     class cXPerson *GetSelectedPerson() const; // 0x34ABB0, returns mPlayerPerson
     // Wii: GetCursorPosAsFtile, the player's cursor as a tile position.
     void GetCursorPosAsFtile(FTilePt &tile); // 0x32B438
+    // Wii: CheckForZeroExtentOverride, whether something on the tile stops the object.
+    int CheckForZeroExtentOverride(const class CTilePt &tile, const class cXObject *object) const; // 0x34B188
 };
 extern EGlobal _globals;
 

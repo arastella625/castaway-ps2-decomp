@@ -277,6 +277,9 @@ public:
     // Wii: IsGhost, inlined on PS2: person data 0xC, and bit 2 of the neighbour's word 0x2A.
     // Wii: IgnoringObject, the object a route lets this Sim pass through.
     cXObject *IgnoringObject() { return mIgnoredObject; }
+    // Wii: IsChimp and IsBoar, by the Sim's kind.
+    bool IsChimp(); // 0x1DD520
+    bool IsBoar();  // 0x1DD478
     bool IsGhost() { return mPersonData[0xc] ? ((u16)mNeighbor->mPersonData[0x2a] >> 2) & 1 : 0; }
     // Wii: GetPersonData. ComputeRect reads 0x21, the Sim's footprint offsets.
     s16 GetPersonData(int index) const { return mPersonData[index]; }

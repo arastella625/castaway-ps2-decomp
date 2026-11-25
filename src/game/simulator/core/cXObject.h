@@ -6,6 +6,7 @@
 
 #include "common/eastl.h"
 #include "common/types.h"
+#include "common/EVec2.h"
 #include "game/simulator/core/EdithVariableSet.h"
 #include "game/simulator/core/Neighborhood.h"
 #include "game/simulator/core/ObjectModule.h"
@@ -75,6 +76,9 @@ public:
         SetInteger(&mY, y);
         SetFrac(&mY, 0);
     }
+
+    // Wii: ToWorldSpace2, the position in tiles as floats. The Wii builds EVec2(y, x).
+    EVec2 ToWorldSpace2() const { return EVec2(mY * 0.0625f, mX * 0.0625f); }
 
     int SquareDist(const FTilePt &other) const
     {
@@ -283,6 +287,9 @@ public:
 
     bool IsTS2ObjectSlot() const { return (mFlags >> 17) & 1; }
     int GetHeight() const { return mHeight; }
+    // Wii: GetHeightMask(StdHeight), the bit for a height in variable 4's mask. As a call
+    // the shift stays a left shift; written in place, combine turns the test into srav.
+    static int GetHeightMask(int height) { return 1 << (height - 1); }
     f32 GetXOffset() const { return mXOffset; }
     f32 GetYOffset() const { return mYOffset; }
 };
@@ -298,6 +305,9 @@ public:
     cXObject *mObject; // 0x0c  the object placed into, or 0
     int mSlot;         // 0x10  the slot in it, -1 without an object
     int mLevel;        // 0x14
+
+    // Wii: sLookingForRoof. Set while a roof is placed: TestPlace then needs a roof tile.
+    static int sLookingForRoof; // 0x4928A4
 
     PlacementSpec(const FTilePt &tile, int level, cXObject *object, int slot); // 0x255978
     PlacementSpec(cXObject *object);                                           // 0x255938  where it is now
@@ -439,7 +449,7 @@ public:
     eastl::vector<ObjectSlot, eastl::allocator> mObjectSlots; // 0xf0
     eastl::vector<RoutingSlot, eastl::allocator> mRoutingSlots; // 0x100
     eastl::vector<SpriteSlot, eastl::allocator> mSpriteSlots; // 0x110
-    u8 field_0x120;            // 0x120
+    int field_0x120;           // 0x120  a byte at 0x11c on Wii; TestPlace reads a word
     int field_0x124;           // 0x124  Initialize clears these three
     f32 field_0x128;           // 0x128
     int field_0x12c;           // 0x12c  a byte on Wii, a word on PS2 (Initialize stores sw)
@@ -522,6 +532,10 @@ public:
     inline bool IsDoor(); // defined in cXObject.cpp
     // Wii: IsWindow, inlined on PS2: a portal without the portal tree.
     inline bool IsWindow(); // defined in cXObject.cpp
+    // Wii: IsGate, inlined on PS2: a portal of height 1 with the portal tree.
+    inline bool IsGate(); // defined in cXObject.cpp
+    // Wii: GetDef()->guid, the object definition's GUID (words 0xE and 0xF).
+    int GetGUID() const { return *(int *)&mDef[0xe]; }
     // Wii: GetObstacleAtLocation, the first object on a tile that a Sim cannot pass, or a
     // door it passed on the way when asked for one.
     cXObject *GetObstacleAtLocation(FTilePt &tile, int level, bool doors); // 0x20FFB8

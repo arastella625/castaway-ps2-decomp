@@ -35,6 +35,15 @@ public:
         mY = object->mTileY >> 4;
         mLevel = level;
     }
+    // The same from a PlacementSpec's tile. Through the spec pointer, GCC folds the tile's
+    // offset into each load (TestPlace); bound to spec->mTile, the reference becomes a
+    // register that GCSE keeps for the whole function.
+    CTilePt(const PlacementSpec *spec, int level)
+    {
+        mX = spec->mTile.mX >> 4;
+        mY = spec->mTile.mY >> 4;
+        mLevel = level;
+    }
     CTilePt(const FTilePt &tile, int level)
     {
         mX = tile.mX >> 4;
@@ -118,12 +127,12 @@ public:
 // The tile flag grid: row pointers by x, a byte for each y.
 struct TileFlagGrid {
     u8 pad_0x0[0xc];
-    s8 **mRows; // 0x0c
+    u8 **mRows; // 0x0c
 
     // The byte for a tile. A member of the grid, not the world: CalcArmorAgainstDamage's
     // inlined copy loads the grid pointer before the two index calls and keeps it across
     // them, the inline's copy of this.
-    s8 Get(const CTilePt &tile) const { return mRows[tile.GetXOutOfLine()][tile.GetYOutOfLine()]; }
+    u8 Get(const CTilePt &tile) const { return mRows[tile.GetXOutOfLine()][tile.GetYOutOfLine()]; }
 };
 
 class cFixedWorld {
@@ -151,14 +160,20 @@ public:
     int GetYSize() const; // 0x1E4380, +0x14
     // Wii: GetRoom, the room a tile is in.
     u16 GetRoom(const CTilePt &tile); // 0x1E4540
+    // Wii: IsGrassAt and IsOutside.
+    int IsGrassAt(const CTilePt &tile); // 0x1C9560
+    int IsOutside(const CTilePt &tile); // 0x1E4680
     int MayEditTile(const CTilePt &tile) const; // 0x1E47C0  Wii's name; PS2 by cXObject::UserCanPickup
     // Wii: GetFlags and SetFlags, inlined in GenericSimCall 0x33.
-    s8 GetFlags(const CTilePt &tile) const { return mFlags->Get(tile); }
+    // Unsigned: TestPlace tests the bits after an lbu.
+    u8 GetFlags(const CTilePt &tile) const { return mFlags->Get(tile); }
     // Wii: HasRoof, bit 3 of the tile's flags. Inlined into CalcArmorAgainstDamage.
     int HasRoof(const CTilePt &tile) const { return ((u8)GetFlags(tile) >> 3) & 1; }
     void SetFlags(const CTilePt &tile, s8 flags) { mFlags->mRows[tile.GetXOutOfLine()][tile.GetYOutOfLine()] = flags; }
 };
 extern cFixedWorld *gFixedWorld;
+// Wii: CheckWallFlags, whether the walls at a tile suit an object's facing and wall flags.
+int CheckWallFlags(const FTilePt &tile, int level, int facing, int flags); // 0x1C3CC8
 // Wii: GetFixedWorld, a function. On PS2 the inline's return-value copy is what orders the
 // loads of UserCanPlace's second CTilePt (x in v1, y in v0); reading gFixedWorld directly
 // swaps them. UserCanPickup matched either way.

@@ -64,6 +64,8 @@ public:
     ObjectFolder *mFolder; // 0x80
 
     u32 GetNamespaceID() const { return mNamespaceID; }
+    // Wii: GetIsPerson, whether the definition is a Sim's.
+    int GetIsPerson(); // 0x1DA268
     u32 GetSemiNamespaceID() const { return mSemiNamespaceID; }
     s16 *GetDefinition() const { return mDefinition; }
 
