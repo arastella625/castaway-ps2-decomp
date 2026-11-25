@@ -23,6 +23,36 @@ public:
     virtual void Slot3();
     virtual void Slot4();
     virtual IBaseSimInstance *GetISimInstance();
+    virtual void Slot6();
+    virtual void Slot7();
+    virtual void Slot8();
+    virtual void Slot9();
+    virtual void Slot10();
+    virtual void Slot11();
+    virtual void Slot12();
+    virtual void Slot13();
+    virtual void Slot14();
+    virtual void Slot15();
+    virtual void Slot16();
+    virtual void Slot17();
+    virtual void Slot18();
+    virtual void Slot19();
+    virtual void Slot20();
+    virtual void Slot21();
+    virtual void Slot22();
+    virtual void Slot23();
+    virtual void Slot24();
+    virtual void Slot25();
+    virtual void Slot26();
+    virtual void Slot27();
+    virtual void Slot28();
+    virtual void Slot29();
+    virtual void Slot30();
+    virtual void Slot31();
+    virtual void Slot32();
+    virtual void Slot33();
+    // At +0x110 on PS2; cXObject::ReconStream passes it the colour index. The name is ours.
+    virtual void SetColorIndex(u8 index);
 };
 
 // Set when a tree stops on an error. A word on PS2 (sw), a byte on Wii.

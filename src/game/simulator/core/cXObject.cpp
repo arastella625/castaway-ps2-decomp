@@ -1,6 +1,8 @@
 #include "game/simulator/core/cXObject.h"
 
 #include "common/EGlobal.h"
+#include "common/ReconBuffer.h"
+#include "game/simulator/core/RelMatrix.h"
 #include "game/GameData.h"
 #include "game/simulator/core/Neighborhood.h"
 #include "game/simulator/core/ObjectModule.h"
@@ -11,6 +13,8 @@
 #include "game/simulator/core2/SlotLoader.h"
 #include "game/simulator/core/ObjectIterator.h"
 #include "game/simulator/core/ObjSelector.h"
+#include "game/simulator/core/SoundPlayer.h"
+#include "game/simulator/core/PassiveInfluenceSystem.h"
 #include "game/simulator/objectdata/XObjLang.h"
 
 // UserCanPlace's placement check is inside a do { } while (0), so the original had a macro
@@ -26,6 +30,40 @@
 inline int cXObject::GetTreeID(ObjEntryPoint entry)
 {
     return mSelector->GetFnTable()->HasFunction(entry);
+}
+
+inline Behavior *cXObject::GetBehavior()
+{
+    return mSelector->mBehavior;
+}
+
+inline bool cXObject::RequiresWallAdjacency() const
+{
+    return GetFnTableOutOfLine()->HasFunction(kObjEntryWallAdjacency) != 0;
+}
+
+inline bool cXObject::IsDoor()
+{
+    bool door = false;
+    if (GetTypeOutOfLine() == 8 && GetHeightOutOfLine() == 2 && (s16)GetTreeID(kObjEntryPortal) != 0)
+        door = true;
+    return door;
+}
+
+inline bool cXObject::IsGate()
+{
+    bool gate = false;
+    if (GetTypeOutOfLine() == 8 && GetHeightOutOfLine() == 1 && (s16)GetTreeID(kObjEntryPortal) != 0)
+        gate = true;
+    return gate;
+}
+
+inline bool cXObject::IsWindow()
+{
+    bool window = false;
+    if (GetTypeOutOfLine() == 8 && (s16)GetTreeID(kObjEntryPortal) == 0)
+        window = true;
+    return window;
 }
 
 inline bool cXObject::IsChair()
@@ -397,6 +435,12 @@ int cXObject::UserCanPickup()
     return 1;
 }
 
+// 0x255968. Nothing but an invalid spec; Pickup tests it anyway.
+PlacementSpec::PlacementSpec(bool)
+{
+    mValid = 0;
+}
+
 // The tile is the one given unless the object goes into a slot of another object that is not
 // a TS2 slot, when it is that object's own location.
 PlacementSpec::PlacementSpec(const FTilePt &tile, int level, cXObject *object, int slot)
@@ -524,6 +568,949 @@ void cXObject::UpdateChairFacing()
                 part->RunTree(kObjEntryPlacement, 0, 0);
         }
     }
+}
+
+// Not matched: 9 of 133 words differ (aligned), all in ApproxSqrt's float block. Four are the
+// two nops the game has before each div.s (HANDOFF: "float division"; this is the first
+// function with one), the rest that the game keeps the root in f0 throughout where ours uses
+// f1 and f2. Tried: the root assigned to the end and returned, and returned as an expression.
+// The logic is complete, and bhav.md describes it.
+#ifdef NON_MATCHING
+// Wii: ApproxSqrt, inlined on PS2: two Newton steps from x / 20 + 1, and 0 for x <= 0.
+static inline f32 ApproxSqrt(f32 x)
+{
+    if (x <= 0.0f)
+        return 0.0f;
+    f32 root = x * 0.05f + 1.0f;
+    root = (root + x / root) * 0.5f;
+    root = (root + x / root) * 0.5f;
+    return root;
+}
+
+// 0x212C08. Wii: CalcShortDistanceIn16thsOfTiles. Each end is the object's position, moved to
+// the centre of its tile unless the object, or the container it is in, is a Sim.
+f32 cXObject::CalcShortDistanceIn16thsOfTiles(cXObject *object)
+{
+    FTilePt from = GetLocationRef();
+    cXObject *container = GetContainerInline();
+    if (container != 0) {
+        if (container->GetType() != 2) {
+            from.mX += 8;
+            from.mY += 8;
+        }
+    } else if (GetType() != 2) {
+        from.mX += 8;
+        from.mY += 8;
+    }
+    FTilePt to = object->GetLocationRef();
+    container = object->GetContainerInline();
+    if (container != 0) {
+        if (container->GetType() != 2) {
+            to.mX += 8;
+            to.mY += 8;
+        }
+    } else if (object->GetType() != 2) {
+        to.mX += 8;
+        to.mY += 8;
+    }
+    return ApproxSqrt(to.SquareDist(from));
+}
+#endif
+
+inline void cXObject::ReconHeader(ReconBuffer *buffer, int version)
+{
+    buffer->Recon32(&((FTileRect *)mRect)->mMinY, 1);
+    buffer->Recon32(&((FTileRect *)mRect)->mMinX, 1);
+    buffer->Recon32(&((FTileRect *)mRect)->mMaxY, 1);
+    buffer->Recon32(&((FTileRect *)mRect)->mMaxX, 1);
+    buffer->Recon32(&mTileX, 1);
+    buffer->Recon32(&mTileY, 1);
+    if (version >= 0x19)
+        buffer->ReconInt(&mLevel, 1);
+    if (version < 0x2f)
+        buffer->Recon16(&mID, 1);
+    s16 one = 1;
+    buffer->Recon16(&one, 1);
+    if (version == 0x37)
+        buffer->ReconInt((int *)&mMiscFlags, 1);
+}
+
+// 0x213158. Wii: ReconStream. Saves or loads an object. A rebuild (loading a new object)
+// reallocates any array the stream has more entries for; otherwise the extra entries are read
+// and dropped. The semi-global attributes are in from version 0x63, the static ones from 0x76.
+void cXObject::ReconStream(ReconBuffer *buffer, int version, bool rebuild)
+{
+    ReconHeader(buffer, version);
+    if (version <= 0) {
+        buffer->Recon16(mAttrs, 8);
+        buffer->Recon16(mTemps, 0x20);
+    }
+    s16 count = mNumAttrs;
+    buffer->Recon16(&count, 1);
+    if (mNumAttrs < count) {
+        if (rebuild) {
+            delete[] mAttrs;
+            mNumAttrs = count;
+            mAttrs = new s16[count];
+            buffer->Recon16(mAttrs, count);
+        } else {
+            s16 *saved = new s16[count];
+            buffer->Recon16(saved, count);
+            for (int i = 0; i < mNumAttrs; i++)
+                mAttrs[i] = saved[i];
+            delete[] saved;
+        }
+    } else {
+        buffer->Recon16(mAttrs, count);
+    }
+    if (version > 0x62) {
+        s16 semiCount = mNumSemiAttrs;
+        buffer->Recon16(&semiCount, 1);
+        if (mNumSemiAttrs < semiCount) {
+            if (rebuild) {
+                delete[] mSemiAttrs;
+                mSemiAttrs = 0;
+                mNumSemiAttrs = semiCount;
+                if (semiCount > 0) {
+                    mSemiAttrs = new s16[semiCount];
+                    buffer->Recon16(mSemiAttrs, semiCount);
+                }
+            } else if (semiCount > 0) {
+                s16 *saved = new s16[semiCount];
+                buffer->Recon16(saved, semiCount);
+                for (int i = 0; i < mNumSemiAttrs; i++)
+                    mSemiAttrs[i] = saved[i];
+                delete[] saved;
+            } else {
+                delete[] mSemiAttrs;
+                mSemiAttrs = 0;
+            }
+        } else if (semiCount > 0) {
+            buffer->Recon16(mSemiAttrs, semiCount);
+        }
+    }
+    if (version > 0x75) {
+        s16 staticCount = mNumStaticAttrs;
+        buffer->Recon16(&staticCount, 1);
+        if (mNumStaticAttrs < staticCount) {
+            if (rebuild) {
+                delete[] mStaticAttrs;
+                mStaticAttrs = 0;
+                mNumStaticAttrs = staticCount;
+                if (staticCount > 0) {
+                    mStaticAttrs = new s16[staticCount];
+                    buffer->Recon16(mStaticAttrs, staticCount);
+                }
+            } else if (staticCount > 0) {
+                s16 *saved = new s16[staticCount];
+                buffer->Recon16(saved, staticCount);
+                for (int i = 0; i < mNumStaticAttrs; i++)
+                    mStaticAttrs[i] = saved[i];
+                delete[] saved;
+            } else {
+                delete[] mStaticAttrs;
+                mStaticAttrs = 0;
+            }
+        } else if (staticCount > 0) {
+            buffer->Recon16(mStaticAttrs, staticCount);
+        }
+    }
+    buffer->Recon16(mTemps, 8);
+    mVars.ReconStream(buffer, version);
+    if (version < 0x6a) {
+        s16 unused = 0;
+        buffer->Recon16(&unused, 1);
+    }
+    mStack.ReconStream(buffer, version, mSelector->mFolder);
+    mRelMatrix->ReconStream(buffer, version);
+    ReconSlots(buffer, version);
+    s16 indexedCount = mNumIndexedData;
+    buffer->Recon16(&indexedCount, 1);
+    if (indexedCount > mNumIndexedData && rebuild) {
+        delete[] mIndexedData;
+        mNumIndexedData = indexedCount;
+        mIndexedData = new s16[indexedCount];
+    }
+    buffer->Recon16(mIndexedData, indexedCount);
+    if (rebuild)
+        SetData(1, 0);
+    if (GetISimInstance() != 0 && GetColorIndex() != 0)
+        GetISimInstance()->SetColorIndex(GetColorIndex());
+}
+
+// 0x2137D8. Wii: ReconSlots. The slot count, then for each slot a short that is always 0
+// and the ID of the object in it. The slot list grows to the count, reading or writing.
+void cXObject::ReconSlots(ReconBuffer *buffer, int version)
+{
+    if (version < 5)
+        return;
+    s16 count = mObjectSlots.size();
+    buffer->Recon16(&count, 1);
+    for (int i = 0; i < count; i++) {
+        s16 unused = 0;
+        s16 id = 0;
+        while (i >= (int)mObjectSlots.size()) {
+            ObjectSlot slot;
+            mObjectSlots.push_back(slot);
+        }
+        unused = 0;
+        id = mObjectSlots[i].mObjectID;
+        buffer->Recon16(&unused, 1);
+        buffer->Recon16(&id, 1);
+        mObjectSlots[i].SetObjectID(id);
+    }
+}
+
+#ifdef NON_MATCHING
+// 0x2104C8. Wii: TestPlace, the checks behind CanPlace and UserCanPlace. Each failure sets
+// gPlacementError; the order of the checks is the order of the codes below.
+// Parked 2 of 891 words off: the entry test of the third loop (the one that sets found)
+// loads the iterator into v1 where the game uses v0; the bottom test and everything else
+// match. Tried: for, while, a guarded do-while, *it != 0, copy-initialisation, found as
+// bool, int or a pointer, declared after the iterator or at the top, the test split or
+// written as continue, object declared outside, and the condition inverted. The roof and
+// part loops, built through a copy, get v0 with the same for.
+int cXObject::TestPlace(PlacementSpec *spec)
+{
+    cFixedWorld *world = GetFixedWorld();
+    if (world->OutOfBounds(CTilePt(spec, 0))) {
+        gPlacementError = 1;
+        return 0;
+    }
+    cXPerson *person = GetPerson();
+    CTilePt here(this, 0);
+    int flags = GetFixedWorld()->GetFlags(CTilePt(spec, 1));
+    int isPerson = GetType() == 2;
+    if (isPerson) {
+        if ((flags & 0x10) && !person->IsGhost() && !field_0x120) {
+            if (world->OutOfBounds(here)) {
+                gPlacementError = 1;
+                return 0;
+            }
+            if (!(world->GetFlags(here) & 0x10)) {
+                if (person->IsChimp() || person->IsBoar()) {
+                    gPlacementError = 1;
+                    return 0;
+                }
+                if (_globals.mPlayerPerson != person) {
+                    gPlacementError = 1;
+                    return 0;
+                }
+                if (!CollisionMap::IsLocationGood(spec->mTile.ToWorldSpace2(), person->IsGhost(), true)) {
+                    gPlacementError = 1;
+                    return 0;
+                }
+            }
+        } else if ((flags & 0x80) && (person->IsChimp() || person->IsBoar()) && !world->OutOfBounds(here) &&
+                   !(world->GetFlags(here) & 0x80)) {
+            gPlacementError = 1;
+            return 0;
+        }
+    } else if ((flags & 0x20) && (flags & 0x10) && GetGUID() != 0x437) {
+        gPlacementError = 1;
+        return 0;
+    }
+    if (spec->mLevel < 1 || spec->mLevel > 3) {
+        gPlacementError = 2;
+        return 0;
+    }
+    if (GetData(0x17) == 4)
+        GetData(1);
+    CTilePt where(spec, spec->mLevel);
+    if (IsRoof()) {
+        if (GetFixedWorld()->HasRoof(CTilePt(spec, 1))) {
+            gPlacementError = 0xb;
+            return 0;
+        }
+        ObjectIterator roofs(CTilePt(spec, 0), ObjectIterator::kAll);
+        for (ObjectIterator it(roofs); !it.finished(); ++it) {
+            if ((*it)->IsRoof()) {
+                gPlacementError = 0xb;
+                return 0;
+            }
+        }
+    } else if (IsStructure() || IsDoor() || IsGate() || IsWindow()) {
+        ObjectIterator parts(CTilePt(spec, 0), ObjectIterator::kAll);
+        for (ObjectIterator it(parts); !it.finished(); ++it) {
+            if ((*it)->IsMultiTile() && (IsStructure() || IsDoor() || IsGate() || IsWindow())) {
+                cXObject *other = *it;
+                if (((cXMTObject *)this)->IsLeadObject()) {
+                    if (((cXMTObject *)other)->IsLeadObject()) {
+                        if (GetData(1) == other->GetData(1)) {
+                            gPlacementError = 0xb;
+                            return 0;
+                        }
+                    } else if (GetData(1) == (s16)((other->GetData(1) + 4) % 8)) {
+                        gPlacementError = 0xb;
+                        return 0;
+                    }
+                }
+            }
+        }
+    }
+    if (PlacementSpec::sLookingForRoof && !GetFixedWorld()->HasRoof(CTilePt(spec, 1))) {
+        gPlacementError = 0xa;
+        return 0;
+    }
+    if (!mSelector->GetIsPerson() && GetGUID() != 0x437) {
+        if (Globs::pEORGlobals->CheckForZeroExtentOverride(where, this)) {
+            gPlacementError = 0xb;
+            return 0;
+        }
+    } else if ((u16)mDef[0x5b] & 6) {
+        bool found = false;
+        for (ObjectIterator it(where, ObjectIterator::kAll); !it.finished(); ++it) {
+            cXObject *object = *it;
+            if (object != this && !object->IsWindow() && object->GetGUID() != 0x437) {
+                found = true;
+                break;
+            }
+        }
+        if (found) {
+            gPlacementError = 0xb;
+            return 0;
+        }
+    }
+    s16 placeFlags = GetData(0x2a);
+    s16 wallFlags = GetData(0xd);
+    if (!isPerson) {
+        if (!CheckWallFlags(spec->mTile, spec->mLevel, GetData(1), wallFlags))
+            return 0;
+        if (spec->mObject == 0) {
+            if (flags & 0x80) {
+                if (!(placeFlags & 0x1884)) {
+                    gPlacementError = 0x1b;
+                    return 0;
+                }
+            } else if (placeFlags & 0x1000) {
+                gPlacementError = 0x1c;
+                return 0;
+            }
+        }
+    }
+    if (!(placeFlags & 1) && !world->IsGrassAt(where)) {
+        gPlacementError = 0x13;
+        return 0;
+    }
+    if (!(placeFlags & 2) && spec->mLevel == 1 && world->IsGrassAt(where)) {
+        gPlacementError = 0x14;
+        return 0;
+    }
+    s16 outside = GetData(0x1e);
+    if (outside != 0) {
+        int isOutside = world->IsOutside(CTilePt(spec, spec->mLevel));
+        if (outside == 1 && !isOutside) {
+            gPlacementError = 9;
+            return 0;
+        }
+        if (outside == 2 && isOutside) {
+            gPlacementError = 0xa;
+            return 0;
+        }
+    }
+    s16 heights = GetData(4);
+    int height;
+    if (spec->mObject == 0) {
+        if (!TestIntersection(spec->mTile, spec->mLevel))
+            return 0;
+        height = 1;
+    } else {
+        ObjectSlot *slot = spec->mObject->GetObjectSlot(spec->mSlot);
+        if (slot == 0) {
+            gPlacementError = 0xd;
+            return 0;
+        }
+        if (slot->mObjectID != 0 && slot->mObjectID != mID) {
+            gPlacementError = 0xb;
+            return 0;
+        }
+        height = slot->GetHeight();
+        for (int i = spec->mObject->CountObjectSlots() - 1; i >= 0; i--) {
+            ObjectSlot *other = spec->mObject->GetObjectSlot(i);
+            if (other->GetHeight() == height && other->mObjectID != 0 && other->mObjectID != mID) {
+                if ((other->GetXOffset() == 0.0f && other->GetYOffset() == 0.0f) ||
+                    (slot->GetXOffset() == 0.0f && slot->GetYOffset() == 0.0f)) {
+                    gPlacementError = 0xb;
+                    return 0;
+                }
+            }
+        }
+        if (spec->mObject->mVars[0x1c] < mVars[0x1b]) {
+            gPlacementError = 0xe;
+            return 0;
+        }
+        for (cXObject *object = spec->mObject; object != 0; object = object->GetContainerInline()) {
+            if (object == this) {
+                gPlacementError = 0xb;
+                return 0;
+            }
+        }
+    }
+    if (height == 0 || heights == 0) {
+        gPlacementError = 0x18;
+        return 0;
+    }
+    if (!(heights & ObjectSlot::GetHeightMask(height))) {
+        gPlacementError = 0x18;
+        return 0;
+    }
+    return 1;
+}
+#endif
+
+// 0x211C50. Wii: TestIntersection. A ghost fits anywhere. Otherwise each object on the tile
+// and the eight around it is checked: a Sim ignores what Sims can walk through and the object
+// its route ignores; nothing collides with a ghost or, for a Sim, with what Sims walk through.
+// Zero-extent objects meet only on the object's own tile, through variable 0x3F's bits and the
+// wall side they need. Tree 5 on either object allows the overlap; otherwise overlapping
+// footprints fail with error 0xB and the object recorded. Last, the footprint must not cross a
+// wall unless bit 0x400 of variable 0x2A is set (error 7).
+int cXObject::TestIntersection(FTilePt &tile, int level)
+{
+    if (IsPerson() && GetPerson()->IsGhost())
+        return 1;
+    int x = tile.mX >> 4;
+    int y = tile.mY >> 4;
+    cFixedWorld *world = GetFixedWorld();
+    ObjectModule *module = GetObjectModule();
+    FTileRect rect;
+    int zeroExtent = HasZeroExtent();
+    int placeFlags = GetData(0x3f);
+    ComputeRect(tile, &rect);
+    for (int dir = 0; dir < 9; dir++) {
+        CTilePt where(x + sXDirTable[dir], y + sYDirTable[dir], level);
+        if (world->OutOfBounds(where))
+            continue;
+        for (cXObject *object = GetObjectFromID(module->GetTileObjectID(where)); object != 0;
+             object = object->GetNextObjectSibling()) {
+            if (IsPartOfMe(object))
+                continue;
+            if (GetType() == 2) {
+                if (object->CanIntersectPeople())
+                    continue;
+                if (GetPerson()->IgnoringObject() == object)
+                    continue;
+            } else if (object->GetType() == 2) {
+                if (object->GetPerson()->IsGhost())
+                    continue;
+                if (CanIntersectPeople())
+                    continue;
+            } else {
+                int objectZeroExtent = object->HasZeroExtent();
+                if (zeroExtent || objectZeroExtent) {
+                    if (dir != 8)
+                        continue;
+                    int shared = object->GetData(0x3f) & placeFlags;
+                    if (shared & 1) {
+                        gPlacementError = 0xb;
+                        return 0;
+                    }
+                    if (zeroExtent && objectZeroExtent) {
+                        int segment = GetRequiredSegment();
+                        if (segment != object->GetRequiredSegment() || segment == 0)
+                            continue;
+                        if (IsStructure() || !object->IsStructure()) {
+                            gPlacementError = 0x16;
+                            return 0;
+                        }
+                        continue;
+                    }
+                    if (shared & 2) {
+                        gPlacementError = 0xb;
+                        return 0;
+                    }
+                    continue;
+                }
+            }
+            if (RunTree(kObjEntryAllowIntersection, object->GetID(), 0))
+                continue;
+            if (object->RunTree(kObjEntryAllowIntersection, GetID(), 0))
+                continue;
+            if (((FTileRect *)object->mRect)->Sect(rect)) {
+                gPlacementError = 0xb;
+                gPlacementConflict = object;
+                return 0;
+            }
+        }
+    }
+    if (!(GetData(0x2a) & 0x400) && SectWall(&rect, level)) {
+        gPlacementError = 7;
+        return 0;
+    }
+    return 1;
+}
+
+// 0x2139D8. Wii: FindGoodLocation. Searches out from the start (the cursor when none is
+// given, or the middle of the lot when the cursor is off it), in a spiral or back and forth
+// along one direction. A tile is good when it is on the lot, editable if that is asked for,
+// empty apart from windows, structures and roofs if that is preferred, has no diagonal wall,
+// is in the start's room if asked, and the object can be placed there facing 0. The search
+// gives up after 4 * (x size + y size) tiles off the lot in a row, or 64 tiles out.
+int cXObject::FindGoodLocation(const FindGoodLocationParams &params, FTilePt *out)
+{
+    int dir = 0;
+    if (!params.GetDirectionVector(&dir))
+        dir = -1;
+    cFixedWorld *world = GetFixedWorld();
+    ObjectModule *module = GetObjectModule();
+    int x = 0;
+    int y = 0;
+    int fails = 0;
+    int count = world->GetXSize() * 4 + world->GetYSize() * 4;
+    FTilePt start;
+    int level = params.GetLevel();
+    if (!params.GetStartLocation(&start)) {
+        Globs::pEORGlobals->GetCursorPosAsFtile(start);
+        if (GetFixedWorld()->OutOfBounds(CTilePt(start, 0))) {
+            CTilePt middle(GetFixedWorld()->GetXSize() / 2, GetFixedWorld()->GetYSize() / 2, 1);
+            start = middle.ToFTilePt();
+        }
+    }
+    CTilePt tile(start, level);
+    if (tile.GetX() >= world->GetXSize() - 1)
+        tile.SetX(world->GetXSize() - 2);
+    if (tile.GetX() < 1)
+        tile.SetX(1);
+    if (tile.GetY() >= world->GetYSize() - 1)
+        tile.SetY(world->GetYSize() - 2);
+    if (tile.GetY() < 1)
+        tile.SetY(1);
+    u16 room = world->GetRoom(tile);
+    while (fails < count) {
+        CTilePt where(tile);
+        where += CTilePt(x, y, 0);
+        int ok = 1;
+        if (world->OutOfBounds(where)) {
+            ok = 0;
+            fails++;
+        } else {
+            fails = 0;
+        }
+        if (ok) {
+            if (params.GetEditableTilesOnly() && !world->MayEditTile(where))
+                ok = 0;
+        }
+        if (ok) {
+            if (params.GetPreferEmptyTiles() || params.GetPreferUnderRoof()) {
+                s16 id = module->GetTileObjectID(where);
+                cXObject *object = 0;
+                if (id != 0)
+                    object = module->GetObjectFromID(id);
+                if (ok && params.GetPreferEmptyTiles() && id != 0 && !object->IsWindow() &&
+                    !object->IsStructure() && !object->IsRoof())
+                    ok = 0;
+            }
+        }
+        if (ok) {
+            TileWalls walls = world->GetWall(where);
+            if (walls.HasDiagonal())
+                ok = 0;
+            else if (params.GetStayInRoom() && world->GetRoom(where) != room)
+                ok = 0;
+            else if (CanPlace(where.ToFTilePt(), level, 0, 0) != 1)
+                ok = 0;
+        }
+        if (ok) {
+            *out = where.ToFTilePt();
+            return 1;
+        }
+        if (y < -64 || x < -64)
+            return 0;
+        if (dir == -1) {
+            if (y <= -x && y <= x)
+                x--;
+            else if (y <= x && y > -x)
+                y--;
+            else if (y > x && y >= -x)
+                x++;
+            else if (y > x && y < -x)
+                y++;
+        } else {
+            switch (dir) {
+            case 0:
+            case 4:
+                if (y > 0)
+                    y = -y;
+                else
+                    y = 1 - y;
+                break;
+            case 2:
+            case 6:
+                if (x > 0)
+                    x = -x;
+                else
+                    x = 1 - x;
+                break;
+            }
+        }
+    }
+    return 0;
+}
+
+// 0x214098. Wii: UpdateWallAdjacency. For an object with tree 6: the low six bits of
+// variable 5 become which sides of its tile have a wall, turned to the object's facing (bit 0
+// segment 1, bit 2 segment 2, bit 1 segment 4, bit 3 segment 8), and tree 6 runs when that
+// changes. Above GetCTilePt's second body, so that it calls 0x253ED0 as the game does.
+void cXObject::UpdateWallAdjacency()
+{
+    if (!RequiresWallAdjacency())
+        return;
+    cFixedWorld *world = GetFixedWorld();
+    s16 adjacency = GetData(5);
+    adjacency &= ~0x3f;
+    CTilePt tile = GetCTilePt();
+    if (!world->OutOfBounds(tile)) {
+        int rotation = (-GetData(1) / 2) & 3;
+        TileWalls walls = world->GetWall(tile);
+        walls.Rotate(rotation);
+        if (walls.HasWall(1))
+            adjacency |= 1;
+        if (walls.HasWall(2))
+            adjacency |= 4;
+        if (walls.HasWall(4))
+            adjacency |= 2;
+        if (walls.HasWall(8))
+            adjacency |= 8;
+    }
+    if (adjacency != GetData(5)) {
+        SetData(5, adjacency);
+        RunTree(kObjEntryWallAdjacency, 0, 0);
+    }
+}
+
+// With no spec (always, from Pickup and the first call in Place, since PlacementSpec(true) is
+// invalid on PS2) the object leaves the hierarchy and the object in its slot 0 takes its site;
+// otherwise whatever is at the spec's site swaps places with it.
+inline void cXObject::Place(PlacementSpec *spec)
+{
+    if (!spec->mValid) {
+        HierarchySite site(this);
+        HierSever();
+        cXObject *child = mModule->GetObjectFromID(mObjectSlots[0].mObjectID);
+        if (child != 0) {
+            child->HierSever();
+            child->HierSetSite(&site);
+        }
+    } else {
+        HierarchySite site(spec);
+        cXObject *occupant = HierGetObject(&site);
+        if (occupant != this) {
+            if (occupant != 0)
+                occupant->HierSever();
+            HierSetSite(&site);
+            if (occupant != 0) {
+                HierarchySite mine(this, site.mTile, 0);
+                occupant->HierSetSite(&mine);
+            }
+        }
+    }
+}
+
+// 0x211580. Wii: Place. Into an object's slot the level is that object's. The object first
+// leaves where it was (and a chair updates whatever it faced there), then goes to the site:
+// variables 2 and 3 name the holder and slot, it moves to the tile, the chairs around and in
+// front of it update, its wall adjacency is recomputed, and tree 9 runs on a single-tile object
+// and on the holder.
+void cXObject::Place(const FTilePt &tile, int level, cXObject *object, int slot)
+{
+    int placeLevel = level;
+    if (object != 0)
+        placeLevel = object->GetLevelOutOfLine();
+    int x = mTileX >> 4;
+    int y = mTileY >> 4;
+    s16 direction = GetData(1);
+    PlacementSpec none(true);
+    Place(&none);
+    if (IsChair())
+        UpdateChairFacingOutOfLine(mModule, x + sXDirTable[direction], y + sYDirTable[direction], mLevel);
+    PlacementSpec spec(tile, placeLevel, object, slot);
+    Place(&spec);
+    if (spec.mObject != 0)
+        SetData(2, spec.mObject->GetID());
+    else
+        SetData(2, 0);
+    SetData(3, spec.mSlot);
+    SetLocation(spec.mTile, spec.mLevel);
+    x = mTileX >> 4;
+    y = mTileY >> 4;
+    UpdateChairFacingOutOfLine(mModule, x, y, mLevel);
+    if (IsChair())
+        UpdateChairFacingOutOfLine(mModule, x + sXDirTable[GetData(1)], y + sYDirTable[GetData(1)], mLevel);
+    UpdateWallAdjacency();
+    if (!IsMultiTile())
+        RunTree(kObjEntryPlacement, 0, 0);
+    if (object != 0)
+        object->RunTree(kObjEntryPlacement, 0, 0);
+    if (!IsMultiTile())
+        SimObjectPlaced(GetISimInstance());
+}
+
+// 0x2112B8. Wii: Pickup. A single-tile object runs tree 10, then it leaves the hierarchy
+// through Place with an invalid spec. Variables 2 and 3 are cleared to no holder and slot -1,
+// it moves off the grid on level 1, bit 8 of variable 8 is cleared, a chair updates the facing
+// of whatever is in front of where it stood, and the container it was in runs tree 9.
+void cXObject::Pickup()
+{
+    if (!IsMultiTile())
+        RunTree(kObjEntryPickup, 0, 0);
+    int x = mTileX >> 4;
+    int y = mTileY >> 4;
+    s16 direction = GetData(1);
+    PlacementSpec spec(true);
+    cXObject *container = GetContainerInline();
+    Place(&spec);
+    SetData(2, 0);
+    SetData(3, -1);
+    FTilePt tile;
+    tile.Set(-1, -1);
+    SetLocation(tile, 1);
+    SetData(8, GetData(8) & ~0x100);
+    if (IsChair())
+        UpdateChairFacingOutOfLine(mModule, x + sXDirTable[direction], y + sYDirTable[direction], mLevel);
+    if (container != 0)
+        container->RunTree(kObjEntryPlacement, 0, 0);
+}
+
+// 0x20F478. Wii: Reset. Back to how it was created, where it is: it leaves the hierarchy,
+// the variables are reset but nine are kept (bhav.md lists them), variable 0xb is the ID
+// again and 0x3a the definition's, the attribute arrays and temps are cleared, the stack
+// restarts on the main tree, and it goes back to its site with variables 2 and 3 naming the
+// holder and slot. Then it ages, goes idle and leaves the influence map and the listeners;
+// a single-tile object runs tree 0, and when asked outside author mode it simulates once.
+void cXObject::Reset(bool simulate)
+{
+    field_0x124 = 0;
+    field_0x128 = 0;
+    field_0x12c = 0;
+    mCreationFrame = _framecount;
+    HierarchySite site(this);
+    HierSever();
+    bool placed = GetWasPlacedByPlayer();
+    EdithVariableSet saved(mVars);
+    mVars.Reset();
+    SetData(0x1d, saved[0x1d]);
+    SetData(1, saved[1]);
+    SetData(0x29, saved[0x29]);
+    SetData(0x2d, saved[0x2d]);
+    SetData(0x2e, saved[0x2e]);
+    SetData(0x2f, saved[0x2f]);
+    SetData(0x18, saved[0x18]);
+    SetData(0x15, saved[0x15]);
+    SetData(0x43, saved[0x43]);
+    SetData(0xb, GetID());
+    SetData(0x3a, GetDef()[0x31]);
+    CalcRoomScoreImpact();
+    SetWasPlacedByPlayer(placed);
+    int i;
+    for (i = 0; i < mNumAttrs; i++)
+        mAttrs[i] = 0;
+    for (i = 0; i < mNumSemiAttrs; i++)
+        mSemiAttrs[i] = 0;
+    for (i = 7; i >= 0; i--)
+        mTemps[i] = 0;
+    s16 tree = GetTreeID(kObjEntryMain);
+    SetNoMainTreeSim(tree == 0);
+    TreeSim::Reset(GetBehavior(), tree);
+    HierSetSite(&site);
+    PlacementSpec spec(this);
+    if (spec.mObject != 0)
+        SetData(2, spec.mObject->GetID());
+    else
+        SetData(2, 0);
+    SetData(3, spec.mSlot);
+    UpdateAge();
+    SetIdleStatus(-1);
+    GetSimulator()->GetPassiveInfluenceSystem()->RemoveObjectFromMap(this);
+    GetSimulator()->RemoveAllForListener(GetID());
+    if (!IsMultiTile()) {
+        RunTree(kObjEntryInit, 0, 0);
+        if (simulate && !_gd.IsAuthorMode() && HasMainTreeSim())
+            Simulate(0);
+        UpdateSimFlags();
+    }
+}
+
+// 0x20F840. Wii: JustBorn. The simulator's date becomes the object's birth date: year,
+// month and day in variables 0x2D, 0x2E and 0x2F, and globals 0 and 5 in 0x18 and 0x15.
+void cXObject::JustBorn()
+{
+    cSimulator *sim = GetSimulator();
+    SetData(0x2d, sim->GetGlobal(8));
+    SetData(0x2e, sim->GetGlobal(7));
+    SetData(0x2f, sim->GetGlobal(1));
+    SetData(0x18, sim->GetGlobal(0));
+    SetData(0x15, sim->GetGlobal(5));
+}
+
+// 0x20F8C0. Wii: Cleanup. Only with no object given. An object with tree 3 runs it, clears
+// variable 0x3e and bit 5 of variable 8 (occupied) and restarts on its main tree; a multi-tile
+// object does that for each part that has the tree, with the lead's tree set. Without tree 3
+// it is picked up, reset, and put back where it was unless misc flag 0x40 is set. Then the
+// object goes idle, its sounds stop and it lets go of the tutorial.
+void cXObject::Cleanup(cXObject *object)
+{
+    if (object != 0)
+        return;
+    if ((s16)GetTreeID(kObjEntryCleanup) != 0) {
+        if (IsMultiTile()) {
+            cXMTObject *lead = GetMTObject();
+            if (lead == 0)
+                return;
+            for (cXMTObject *part = lead->GetFirstMultiTileObject(); part != 0;
+                 part = part->GetNextMultiTileObject()) {
+                if ((s16)part->GetTreeID(kObjEntryCleanup) != 0) {
+                    part->RunTree(kObjEntryCleanup, 0, 0);
+                    part->SetData(0x3e, 0);
+                    part->SetData(8, part->GetData(8) & ~0x20);
+                    part->TreeSim::Reset(GetBehavior(), GetTreeID(kObjEntryMain));
+                }
+            }
+        } else {
+            RunTree(kObjEntryCleanup, 0, 0);
+            SetData(0x3e, 0);
+            SetData(8, GetData(8) & ~0x20);
+            TreeSim::Reset(GetBehavior(), GetTreeID(kObjEntryMain));
+        }
+    } else {
+        FTilePt tile;
+        int level;
+        cXObject *container;
+        s16 slot;
+        int placed;
+        GetPlacementInfo(&tile, &level, &container, &slot, &placed);
+        Pickup();
+        if (!(mMiscFlags & 0x40)) {
+            Reset(true);
+            if (placed)
+                Place(tile, level, container, slot);
+        }
+    }
+    SetIdleStatus(-1);
+    cSoundPlayer *player = GetSoundPlayer();
+    if (player != 0)
+        player->QuietBySourceID(GetID());
+    if (mModule->GetTutorialObject() == this)
+        mModule->SetTutorialObjectOutOfLine(0);
+}
+
+// 0x20FEB0. Wii: UpdateAge. Whole years since the birth date go in variable 0x12 and whole
+// months in 0x30: a month not yet complete by the day counts one fewer, and a negative
+// month count borrows a year.
+void cXObject::UpdateAge()
+{
+    cSimulator *sim = GetSimulator();
+    s16 years = sim->GetGlobal(8) - (u16)mVars[0x2d];
+    s16 months = sim->GetGlobal(7) - (u16)mVars[0x2e];
+    s16 days = sim->GetGlobal(1) - (u16)mVars[0x2f];
+    if (days < 0)
+        months--;
+    if (months < 0) {
+        months += 12;
+        years--;
+    }
+    SetData(0x12, years);
+    SetData(0x30, years * 12 + months);
+}
+
+// 0x20FFB8. Wii: GetObstacleAtLocation. Climbs the stack on a tile from its root object
+// past everything a Sim can walk through.
+cXObject *cXObject::GetObstacleAtLocation(FTilePt &tile, int level, bool doors)
+{
+    cXObject *object = GetRootObject(tile, level);
+    cXObject *door = 0;
+    if (object != 0) {
+        do {
+            if (!object->CanIntersectPeople())
+                break;
+            if (doors && object->IsDoor())
+                door = object;
+            object = object->GetNextObjectSiblingOutOfLine();
+        } while (object != 0);
+    }
+    if (object == 0 && door != 0)
+        return door;
+    return object;
+}
+
+// 0x2100E0. Wii: GetPlacementSpec. A slot of 0 in variable 0xE means none, so the first
+// object's variable 0xE is set back to -1 when it is found there.
+void cXObject::GetPlacementSpec(PlacementSpec *spec)
+{
+    CTilePt tile(GetLocationRef(), 0);
+    if (GetFixedWorld()->OutOfBounds(tile)) {
+        spec->mValid = 0;
+        spec->mTile.Set(-1, -1);
+    } else {
+        spec->mValid = 1;
+        spec->mTile = GetLocationRef();
+    }
+    spec->mLevel = mLevel;
+    cXObject *first = this;
+    while (first->GetPrevObjectSiblingOutOfLine() != 0)
+        first = first->GetPrevObjectSiblingOutOfLine();
+    spec->mObject = GetObjectFromID(first->mVars[0x1a]);
+    spec->mSlot = first->GetData(0xe);
+    if (spec->mSlot != -1) {
+        spec->mSlot--;
+        if (spec->mSlot == -1)
+            first->SetData(0xe, -1);
+    }
+}
+
+// 0x210240. Wii: HierSetSite. Into a holder's slot: the slot records this object, variable
+// 0xE is the slot and 0x1A the holder. On a tile: the tile records it, 0xE is -1 and 0x1A 0.
+// Either way the level is the site's. An invalid site only severs it.
+void cXObject::HierSetSite(const HierarchySite *site)
+{
+    if (!site->mValid)
+        HierSever();
+    CTilePt tile(site->mTile, site->mLevel);
+    if (site->mObject == 0) {
+        if (site->mValid) {
+            GetObjectModule()->GetTileObjectID(tile);
+            GetObjectModule()->SetTileObjectID(tile, mID);
+            SetData(0xe, -1);
+            SetData(0x1a, 0);
+            SetLevel(site->mLevel);
+        }
+    } else {
+        int slot = site->mSlot;
+        site->mObject->mObjectSlots[slot].SetObjectID(GetID());
+        SetData(0xe, slot);
+        SetData(0x1a, site->mObject->GetID());
+        SetLevel(site->mLevel);
+    }
+}
+
+// 0x210368. Wii: HierSever. Clears whatever records this object, its holder's slot or its
+// tile, and sets variable 0x1A to no holder and 0xE to no slot.
+void cXObject::HierSever()
+{
+    HierarchySite site(this);
+    if (site.mObject != 0) {
+        site.mObject->mObjectSlots[site.mSlot].mObjectID = 0;
+    } else if (site.mValid) {
+        CTilePt tile(site.mTile, site.mLevel);
+        GetObjectModule()->SetTileObjectID(tile, 0);
+    }
+    SetData(0x1a, 0);
+    SetData(0xe, -1);
+}
+
+// 0x210418. Wii: HierGetObject. What a site holds: the object in the holder's slot, or the
+// object on the tile for levels 1 to 3; 0 for an invalid site.
+cXObject *cXObject::HierGetObject(const HierarchySite *site)
+{
+    if (site->mValid) {
+        cXObject *holder = site->mObject;
+        if (holder != 0)
+            return holder->GetObjectFromID(holder->mObjectSlots[site->mSlot].mObjectID);
+        if ((unsigned int)(site->mLevel - 1) < 3) {
+            CTilePt tile(site->mTile, site->mLevel);
+            return GetObjectFromID(GetObjectModule()->GetTileObjectID(tile));
+        }
+    }
+    return 0;
 }
 
 // GetCTilePt's body again (cXObjectPrims.cpp has the first), here so that
@@ -691,14 +1678,14 @@ void cXObject::Initialize()
     ObjectSlot slot;
     mObjectSlots.push_back(slot);
     if (GetDef()[0x14] != 0) {
-        s16 slotCount = GetDef()[0x14];
+        s16 slotsID = GetDef()[0x14];
         u32 loaderNamespace;
-        if (slotCount < 1000)
+        if (slotsID < 1000)
             loaderNamespace = namespaceID;
         else
             loaderNamespace = GetSelector()->GetSemiNamespaceID();
         SlotLoader loader(loaderNamespace);
-        loader.Load(slotCount, &mObjectSlots, &mRoutingSlots, &mSpriteSlots, this);
+        loader.Load(slotsID, &mObjectSlots, &mRoutingSlots, &mSpriteSlots, this);
     }
     mVars.Initialize(this);
     FTilePt tile;
@@ -736,4 +1723,181 @@ int cXObject::GetTileWidth()
     if (mDef[0x43] != 0)
         width = mDef[0x43];
     return width;
+}
+
+// 0x2455F8. Wii: GetFnTable.
+ObjectFunctionTable *cXObject::GetFnTableOutOfLine() const
+{
+    return mSelector->GetFnTable();
+}
+
+// 0x253520. Wii: GetPlacementInfo.
+void cXObject::GetPlacementInfo(FTilePt *tile, int *level, cXObject **object, s16 *slot, int *valid)
+{
+    PlacementSpec spec(this);
+    *tile = spec.mTile;
+    *level = spec.mLevel;
+    *slot = spec.mSlot;
+    *object = spec.mObject;
+    *valid = spec.mValid;
+}
+
+// 0x255478. Wii: SetTutorialObject, out of line.
+bool ObjectModule::SetTutorialObjectOutOfLine(cXObject *object)
+{
+    if (mTutorialObject && object)
+        return false;
+    if (mTutorialObject == object)
+        return true;
+    mTutorialObject = object;
+    return true;
+}
+
+// 0x2539B0. UpdateChairFacing(module, x, y, level) as a function.
+void cXObject::UpdateChairFacingOutOfLine(ObjectModule *module, int x, int y, int level)
+{
+    UpdateChairFacing(module, x, y, level);
+}
+
+// 0x2534B8. Wii: GetRootObject.
+cXObject *cXObject::GetRootObject(FTilePt &tile, int level)
+{
+    CTilePt where(tile, level);
+    s16 id = GetObjectModule()->GetTileObjectID(where);
+    if (id == 0)
+        return 0;
+    return GetObjectFromID(id);
+}
+
+// 0x253600. GetPrevObjectSibling as a function.
+cXObject *cXObject::GetPrevObjectSiblingOutOfLine()
+{
+    return mVars[0xe] == 0 ? HierGetParent() : 0;
+}
+
+// 0x2456C8. Wii: GetHeight.
+s16 cXObject::GetHeightOutOfLine()
+{
+    return GetDefOutOfLine()[0x1c];
+}
+
+// 0x2535E0. GetNextObjectSibling as a function.
+cXObject *cXObject::GetNextObjectSiblingOutOfLine()
+{
+    return HierGetChild(0);
+}
+
+// 0x2536B0. Wii: IsContained.
+bool cXObject::IsContained()
+{
+    PlacementSpec spec(this);
+    return spec.mObject != 0;
+}
+
+// 0x2536D8. Wii: GetContainerID, 0 when not in anything.
+s16 cXObject::GetContainerID()
+{
+    PlacementSpec spec(this);
+    if (spec.mObject == 0)
+        return 0;
+    return spec.mObject->GetID();
+}
+
+// 0x253708. Wii: GetContainedSlotNum.
+s16 cXObject::GetContainedSlotNum()
+{
+    PlacementSpec spec(this);
+    return spec.mSlot;
+}
+
+// 0x253818. Wii: ExtractContainedSims. A Sim in a slot is cleaned up, which takes it out;
+// anything else is searched in turn.
+void cXObject::ExtractContainedSims()
+{
+    for (int i = 0; i < CountObjectSlots(); i++) {
+        cXObject *object = GetContainedObject(i);
+        if (object != 0) {
+            if (object->IsPerson())
+                object->GetPerson()->Cleanup(0);
+            else
+                object->ExtractContainedSims();
+        }
+    }
+}
+
+// 0x253EC0. Wii: GetLevel.
+int cXObject::GetLevelOutOfLine() const
+{
+    return mLevel;
+}
+
+// Not matched: 3 of 45 words differ (aligned). The game's switch tests x < 2 between its two
+// cases (GCC's case tree with an unknown lower bound), which ours leaves out, and it loads
+// the facing with lhu and sign-extends it before halving where ours uses lh. Tried: the cases
+// in the other order and an explicit default (both further off). TestIntersection calls the
+// game's copy, so its match does not depend on this.
+#ifdef NON_MATCHING
+// 0x253D00. Wii: GetRequiredSegment. Wall-placement flag 1 (variable 0xD) needs a wall on
+// segment 2 and flag 4 one on segment 8, turned with the object's facing; 0 needs none.
+int cXObject::GetRequiredSegment()
+{
+    int segment = 0;
+    switch (GetData(0xd) & 5) {
+    case 1:
+        segment = 2;
+        break;
+    case 4:
+        segment = 8;
+        break;
+    }
+    if (segment != 0 && GetData(1) != 0)
+        segment = TileWalls::RotateSegment(segment, GetData(1) / 2);
+    return segment;
+}
+#endif
+
+// 0x253C98. Wii: SetWasPlacedByPlayer, bit 0x4000 of variable 8.
+void cXObject::SetWasPlacedByPlayer(bool placed)
+{
+    s16 flags = GetData(8);
+    if (placed)
+        flags |= 0x4000;
+    else
+        flags &= ~0x4000;
+    mVars.WriteVar(8, flags);
+}
+
+// 0x253DC0. Wii: UpdateSimFlags. Variable 0x3C (Wii: SimIndependent) and whether the object
+// can choose autonomously go to the module's Sim flags 2 and 8.
+void cXObject::UpdateSimFlags()
+{
+    mModule->SetSimFlag(mID, ObjectModule::kSimFlagIndependent, GetData(0x3c) != 0);
+    mModule->SetSimFlag(mID, ObjectModule::kSimFlagAutonomous, CanChooseAutonomously());
+}
+
+// 0x254488. Wii: HandleError. After a tree error (misc flag 0x100) the flag is cleared; with
+// an error code still set, the people are cleaned up and the object cleans up.
+void cXObject::HandleError()
+{
+    if (mMiscFlags & 0x100) {
+        if (GetError() == 0) {
+            mMiscFlags &= ~0x100;
+        } else {
+            mMiscFlags &= ~0x100;
+            mModule->CleanupPeople(this);
+            Cleanup(0);
+        }
+    }
+}
+
+// 0x255CC8. Wii: TryKillSounds. Quiets the sounds of this object, or of the stack object.
+long cXObject::TryKillSounds(StackElem *elem, KillSoundsParam *param)
+{
+    s16 id;
+    if (param->mStackObject != 0)
+        id = elem->mStackObject;
+    else
+        id = mID;
+    GetSoundPlayer()->QuietBySourceID(id);
+    return 1;
 }

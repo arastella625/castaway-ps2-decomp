@@ -4,6 +4,7 @@
 #include "common/types.h"
 
 class ERQuickdata;
+class FTilePt;
 
 // Wii: ELocString, a localised string, with __opPCUs__10ELocStringCFv to read it. On PS2
 // it is one pointer, returned in a register, and reading it checks that pointer for null.
@@ -55,6 +56,12 @@ public:
     void SetSelectedPerson(class cXPerson *person);
     ELocString GetNewUIString(const char *name, const char *a);
     class cXPerson *GetSelectedPerson() const; // 0x34ABB0, returns mPlayerPerson
+    // Wii: GetCursorPosAsFtile, the player's cursor as a tile position.
+    void GetCursorPosAsFtile(FTilePt &tile); // 0x32B438
+    // Wii: AllocSpriteRenderer, called for each sprite slot an object gets.
+    void AllocSpriteRenderer(class cXObject *object); // 0x34AD90
+    // Wii: CheckForZeroExtentOverride, whether something on the tile stops the object.
+    int CheckForZeroExtentOverride(const class CTilePt &tile, const class cXObject *object) const; // 0x34B188
 };
 extern EGlobal _globals;
 

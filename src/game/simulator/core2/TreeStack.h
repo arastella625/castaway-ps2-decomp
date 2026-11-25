@@ -6,6 +6,8 @@
 #include "game/simulator/core2/StackElem.h"
 
 class TreeSim;
+class ReconBuffer;
+class ObjectFolder;
 
 class EAHeap {
 public:
@@ -39,6 +41,9 @@ public:
     StackElem *GetNthFrame(int index);
     int GetStackSize();
     StackElem *GetNewFrame();
+    // Wii: ReconStream(ReconBuffer *, int, BehaviorFinder *). The finder is the object's
+    // folder, passed as it is: ObjectFolder::GetBehaviorFinder inlines to the same pointer.
+    void ReconStream(ReconBuffer *buffer, int version, ObjectFolder *finder); // 0x1C30B0
     u32 GetMemUsed();
     u32 GetMemReserved();
     void AssignFrames(int count);

@@ -932,7 +932,7 @@ long cXPerson::GotoRoutingSlot(cXObject *object, const RoutingSlot *slot, int &s
         }
     } while (!done);
     if (code != 2)
-        field_0x5e0 = 0;
+        mIgnoredObject = 0;
     return code;
 }
 

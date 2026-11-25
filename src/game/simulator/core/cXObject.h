@@ -6,6 +6,7 @@
 
 #include "common/eastl.h"
 #include "common/types.h"
+#include "common/EVec2.h"
 #include "game/simulator/core/EdithVariableSet.h"
 #include "game/simulator/core/Neighborhood.h"
 #include "game/simulator/core/ObjectModule.h"
@@ -18,6 +19,7 @@ class CompleteGoalParam;
 class KillSoundsParam;
 class PlaySoundParam;
 class ObjSelector;
+class ObjectFunctionTable;
 class ReconBuffer;
 class RelMatrix;
 
@@ -31,17 +33,51 @@ extern u32 _framecount; // 0x49FDB8
 // are The Sims 2's function-table order; the names are ours, from the callers.
 enum ObjEntryPoint {
     kObjEntryInit = 0,           // PostLoad, when the selector needs a reset
+    kObjEntryMain = 1,           // the tree Cleanup and Reset restart the object's stack on
+    kObjEntryCleanup = 3,        // Cleanup: having it replaces the pickup-and-reset
+    kObjEntryPickup = 0xa,       // Pickup
     kObjEntryLoad = 2,           // PostLoad, with the transition type as the parameter
     kObjEntryUserPlacement = 0xb, // UserPlace
     kObjEntryUserPickup = 0xc,   // UserPickup
+    kObjEntryAllowIntersection = 5, // TestIntersection runs it both ways; either may allow it
+    kObjEntryWallAdjacency = 6,  // UpdateWallAdjacency: having it opts in, and it runs when
+                                 // the walls around the object change
     kObjEntryPlacement = 9,      // TS2's placement entry; UpdateChairFacing runs it on a part
                                  // whose chair bit changed, if the part has tree 0x19
     kObjEntryChairFacing = 0x19, // UpdateChairFacing: only a part with this tree reruns 9
     kObjEntryChair = 0x1a,       // IsChair: an object with this tree counts as a chair
+    kObjEntryPortal = 0xf,       // TS2's portal entry; IsDoor needs it
     kObjEntryOnAdd = 0x1e,       // the inventory
     kObjEntryOnRemove = 0x1f,
     kObjEntryApplyDamage = 0x20  // ApplyDamage, with the damage as the parameter
 };
+
+// Wii: OffsetCoordsInDirection, one step in a direction 0 to 7 (0 is -y, 2 is +x).
+inline void OffsetCoordsInDirection(int direction, int &x, int &y)
+{
+    switch (direction & 7) {
+    case 1:
+        x += 1;
+    case 0:
+        y -= 1;
+        break;
+    case 3:
+        y += 1;
+    case 2:
+        x += 1;
+        break;
+    case 5:
+        x -= 1;
+    case 4:
+        y += 1;
+        break;
+    case 7:
+        y -= 1;
+    case 6:
+        x -= 1;
+        break;
+    }
+}
 
 // Wii: FTilePt, a tile position: x and y, two FInts with four bits of fraction.
 class FTilePt {
@@ -50,6 +86,21 @@ public:
     int mY; // 0x04
 
     FTilePt() {}
+    // Wii: FTilePt(int), one whole tile in a direction.
+    FTilePt(int direction)
+    {
+        mX = 0;
+        mY = 0;
+        OffsetCoordsInDirection(direction, mX, mY);
+        mX <<= 4;
+        mY <<= 4;
+    }
+    FTilePt &operator+=(const FTilePt &other)
+    {
+        mX += other.mX;
+        mY += other.mY;
+        return *this;
+    }
 
     // Wii: FInt::Frac on each coordinate, the four fraction bits. 8 is the tile's centre.
     int FracX() const { return mX & 0xf; }
@@ -57,13 +108,19 @@ public:
 
     // Wii: Set. Each coordinate is a Wii FInt, the integer above 4 bits of fraction:
     // SetInteger keeps the fraction, then SetFrac clears it.
+    // Wii: FInt::SetInteger and FInt::SetFrac, one coordinate at a time.
+    static void SetInteger(int *value, int integer) { *value = (integer << 4) | (*value & 0xf); }
+    static void SetFrac(int *value, int frac) { *value = (*value & ~0xf) | (frac & 0xf); }
     void Set(int x, int y)
     {
-        mX = (mX & 0xf) | (x << 4);
-        mX = (mX & ~0xf) | (0 & 0xf);
-        mY = (mY & 0xf) | (y << 4);
-        mY = (mY & ~0xf) | (0 & 0xf);
+        SetInteger(&mX, x);
+        SetFrac(&mX, 0);
+        SetInteger(&mY, y);
+        SetFrac(&mY, 0);
     }
+
+    // Wii: ToWorldSpace2, the position in tiles as floats. The Wii builds EVec2(y, x).
+    EVec2 ToWorldSpace2() const { return EVec2(mY * 0.0625f, mX * 0.0625f); }
 
     int SquareDist(const FTilePt &other) const
     {
@@ -113,6 +170,47 @@ public:
     }
 };
 
+// Wii: FindGoodLocationParams. The Wii keeps the four flags as bytes at 0x14 to 0x17; PS2
+// reads each as a word, so they are ints here.
+class FindGoodLocationParams {
+public:
+    int mHasStart;          // 0x00
+    FTilePt mStart;         // 0x04
+    int mLevel;             // 0x0c
+    int mDirection;         // 0x10  -1 searches in a spiral
+    int mStayInRoom;        // 0x14
+    int mPreferEmptyTiles;  // 0x18
+    int mEditableTilesOnly; // 0x1c
+    int mPreferUnderRoof;   // 0x20
+
+    int GetStartLocation(FTilePt *tile) const
+    {
+        if (mHasStart) {
+            *tile = mStart;
+            return 1;
+        }
+        return 0;
+    }
+    int GetLevel() const
+    {
+        if (mHasStart)
+            return mLevel;
+        return 1;
+    }
+    int GetDirectionVector(int *direction) const
+    {
+        if (mDirection != -1) {
+            *direction = mDirection;
+            return 1;
+        }
+        return 0;
+    }
+    int GetStayInRoom() const { return mStayInRoom; }
+    int GetPreferEmptyTiles() const { return mPreferEmptyTiles; }
+    int GetEditableTilesOnly() const { return mEditableTilesOnly; }
+    int GetPreferUnderRoof() const { return mPreferUnderRoof; }
+};
+
 enum TFGL_ACTIONS { };
 
 // The operands of primitive 2, Expression.
@@ -126,6 +224,12 @@ struct ExpressionParam {
 };
 
 // Primitive 0xa, Tutorial.
+// The operands of the kill-sounds primitive: non-zero quiets the stack object's sounds.
+class KillSoundsParam {
+public:
+    s16 mStackObject; // 0x00
+};
+
 struct TutorialParam {
     u8 mMode; // 0x00  0 claim, 1 release
 };
@@ -153,19 +257,6 @@ struct ParticleEffectParam {
     u32 field_0x4;
 };
 
-// Wii: SpriteSlot, 0x6c bytes. IsActive reads the word at +0x10.
-class SpriteSlot {
-public:
-    u32 pad_0x0[4];  // 0x00
-    void *mSprite;   // 0x10
-    u32 pad_0x14[0x16]; // 0x14
-
-    bool IsActive() const { return mSprite != 0; }
-
-    void Tick(); // 0x1C0AD8
-};
-STATIC_ASSERT(SpriteSlot_size, sizeof(SpriteSlot) == 0x6c);
-
 // Wii: FTileRect, the footprint ComputeRect fills. SetWhole's four arguments land at 0xc,
 // 0x8, 0x4 and 0x0 in that order.
 class FTileRect {
@@ -182,7 +273,22 @@ public:
         mMaxX = maxX;
         mMaxY = maxY;
     }
+
+    // Wii: Sect, whether two footprints overlap; touching edges do not count.
+    int Sect(const FTileRect &other) const
+    {
+        if (mMinY >= other.mMaxY)
+            return 0;
+        if (mMaxY <= other.mMinY)
+            return 0;
+        if (mMinX >= other.mMaxX)
+            return 0;
+        return mMaxX > other.mMinX;
+    }
 };
+
+// Wii: SectWall, whether a footprint crosses a wall on a level.
+int SectWall(FTileRect *rect, int level); // 0x1C3908
 
 class SlotDescriptor;
 // Wii: Slot. PS2 has its vtable at 0x4B8020, after RoutingSlot, SpriteSlot and ObjectSlot.
@@ -207,16 +313,74 @@ public:
     f32 mYOffset;        // 0x1c
     f32 field_0x20;      // 0x20
 
+    // Wii: SetObjectID. Through an s16 parameter the ID is loaded with lh (HierSetSite).
+    void SetObjectID(s16 id) { mObjectID = id; }
+
     ObjectSlot(); // 0x1E1888
+    // Wii: ObjectSlot(const SlotDescriptor *), inlined by SlotLoader::Load on PS2.
+    inline ObjectSlot(const SlotDescriptor *descriptor); // in SlotLoader.cpp
+    // Wii: SetHeight(StdHeight).
+    void SetHeight(int height); // 0x1E1908
     virtual ~ObjectSlot() {} // 0x1D8C88 is the vtable's copy; Initialize inlines this one
     virtual void WriteSlot(SlotDescriptor *descriptor) const;
 
     bool IsTS2ObjectSlot() const { return (mFlags >> 17) & 1; }
     int GetHeight() const { return mHeight; }
+    // Wii: GetHeightMask(StdHeight), the bit for a height in variable 4's mask. As a call
+    // the shift stays a left shift; written in place, combine turns the test into srav.
+    static int GetHeightMask(int height) { return 1 << (height - 1); }
     f32 GetXOffset() const { return mXOffset; }
     f32 GetYOffset() const { return mYOffset; }
 };
 STATIC_ASSERT(ObjectSlot_size, sizeof(ObjectSlot) == 0x24);
+
+// Wii: SpriteSlot, 0x6c bytes, a sprite shown over the object (a balloon or an overlay).
+// IsActive reads the word at +0x10. Offsets named from the Wii's accessors; PS2 keeps the
+// byte at +0x60 as a word.
+class SpriteSlot : public Slot {
+public:
+    f32 mOffsetX;       // 0x04
+    f32 mOffsetY;       // 0x08
+    f32 mAltOffset;     // 0x0c  Wii: SetAltOffset
+    void *mSprite;      // 0x10
+    int field_0x14;     // 0x14
+    int mSpriteID;      // 0x18  Wii: GetSpriteID
+    int field_0x1c;     // 0x1c
+    int field_0x20;     // 0x20  400 from the constructor
+    int field_0x24;     // 0x24
+    // An anonymous union: the compiler's copy constructor copies it after every named member,
+    // past the loop for field_0x50, as SlotLoader::Load's push_back does. Its members are ours.
+    union {
+        int field_0x28;
+        f32 field_0x28f;
+    };                  // 0x28
+    int field_0x2c;     // 0x2c
+    int field_0x30;     // 0x30
+    int field_0x34;     // 0x34
+    int field_0x38;     // 0x38
+    int mBalloonSprite; // 0x3c  Wii: UseBalloonSprite, -1 for none
+    int mOverlaySprite; // 0x40  Wii: UseOverlaySprite, -1 for none
+    int mPriority;      // 0x44  Wii: GetPriority
+    int mOptions;       // 0x48  Wii: GetOptions
+    f32 field_0x4c;     // 0x4c  the descriptor's third offset
+    f32 field_0x50[2];  // 0x50
+    f32 field_0x58;     // 0x58
+    f32 mPopSize;       // 0x5c  Wii: SetPopSize
+    int mShowOverInactivePeople; // 0x60  a byte on Wii
+    cXObject *mObject;  // 0x64
+    int field_0x68;     // 0x68
+
+    // Wii: SpriteSlot(SlotDescriptor *, cXObject *), inlined by SlotLoader::Load on PS2.
+    inline SpriteSlot(const SlotDescriptor *descriptor, cXObject *object); // in SlotLoader.cpp
+    virtual ~SpriteSlot() {}
+    virtual void WriteSlot(SlotDescriptor *descriptor) const;
+
+    bool IsActive() const { return mSprite != 0; }
+
+    void Reset(); // 0x1E1C00
+    void Tick(); // 0x1C0AD8
+};
+STATIC_ASSERT(SpriteSlot_size, sizeof(SpriteSlot) == 0x6c);
 
 // Wii: PlacementSpec, what TestPlace and Place take: the tile an object goes to and the slot
 // of the object it goes into. Wii's first field is a byte; PS2 stores a word.
@@ -229,7 +393,13 @@ public:
     int mSlot;         // 0x10  the slot in it, -1 without an object
     int mLevel;        // 0x14
 
+    // Wii: sLookingForRoof. Set while a roof is placed: TestPlace then needs a roof tile.
+    static int sLookingForRoof; // 0x4928A4
+
     PlacementSpec(const FTilePt &tile, int level, cXObject *object, int slot); // 0x255978
+    PlacementSpec(cXObject *object);                                           // 0x255938  where it is now
+    // Wii: PlacementSpec(bool). PS2 ignores the argument and only clears mValid.
+    PlacementSpec(bool a);                                                     // 0x255968
 };
 STATIC_ASSERT(PlacementSpec_size, sizeof(PlacementSpec) == 0x18);
 
@@ -244,6 +414,7 @@ public:
     int mSlot;         // 0x10
     int mLevel;        // 0x14  the holder's, from the three-argument constructor
 
+    HierarchySite(cXObject *object);                                // 0x223D10  where it is now
     HierarchySite(const PlacementSpec *spec);                       // 0x255A28
     HierarchySite(cXObject *object, const FTilePt &tile, int slot); // 0x255A78
 };
@@ -257,7 +428,9 @@ class SlotDescriptor {
 public:
     s16 mType;         // 0x00  3 for a routing slot
     f32 mOffset[3];    // 0x04
-    u32 pad_0x10[3];   // 0x10
+    int field_0x10;    // 0x10  an object slot's +0xc
+    int field_0x14;    // 0x14  an object slot's flags
+    int mHeight;       // 0x18  an object slot's height, through SetHeight
     int mMultiplier[3]; // 0x1c
     int mFlags;        // 0x28
     int mSnapTarget;   // 0x2c
@@ -290,6 +463,8 @@ public:
     static const f32 kCornerOffset[];
 
     RoutingSlot();
+    // Wii: RoutingSlot(const SlotDescriptor *), inlined by SlotLoader::Load on PS2.
+    inline RoutingSlot(const SlotDescriptor *descriptor); // in SlotLoader.cpp
     virtual ~RoutingSlot() {}
     int GetAllowFailureTrees() const { return (mFlags >> 14) & 1; }
     void SetAllowFailureTrees(bool allow)
@@ -359,13 +534,14 @@ public:
     f32 field_0xcc;            // 0xcc
     u8 mRect[0x10];            // 0xd0  an FTileRect
     int mLevel;                // 0xe0
-    u32 mMiscFlags;            // 0xe4  Wii: SetMiscFlag; Error sets 0x100
+    int mMiscFlags;            // 0xe4  Wii: SetMiscFlag; Error sets 0x100. Signed: HandleError's
+                               //       mask is addiu -0x101
     s16 *mDef;                 // 0xe8  a word of it is scope 0x15; word 9 is the object's type
     ObjSelector *mSelector;    // 0xec
     eastl::vector<ObjectSlot, eastl::allocator> mObjectSlots; // 0xf0
     eastl::vector<RoutingSlot, eastl::allocator> mRoutingSlots; // 0x100
     eastl::vector<SpriteSlot, eastl::allocator> mSpriteSlots; // 0x110
-    u8 field_0x120;            // 0x120
+    int field_0x120;           // 0x120  a byte at 0x11c on Wii; TestPlace reads a word
     int field_0x124;           // 0x124  Initialize clears these three
     f32 field_0x128;           // 0x128
     int field_0x12c;           // 0x12c  a byte on Wii, a word on PS2 (Initialize stores sw)
@@ -414,6 +590,10 @@ public:
     virtual void TagGraphicsField();
     virtual void ReconStream(ReconBuffer *buffer, int a, bool b);
     virtual u32 ReconType();
+    // Wii: ReconSlots, the object IDs in the slots, from save version 5.
+    void ReconSlots(ReconBuffer *buffer, int version); // 0x2137D8
+    // Wii: ReconHeader, inlined on PS2: the rectangle, tile, level, ID and flags.
+    inline void ReconHeader(ReconBuffer *buffer, int version); // defined in cXObject.cpp
 
     void HandleError();
     int GetIdleStatus() { return mModule->GetIdleStatus(mID); }
@@ -438,12 +618,29 @@ public:
     bool IsStructure() { return GetTypeOutOfLine() == 5; }
     // Wii: IsVehicle, type 12. A function on both; the body is the evidence for the name.
     bool IsVehicle(); // 0x254078
+    // Wii: GetHeight, definition word 0x1C, as a function on PS2 too.
+    s16 GetHeightOutOfLine(); // 0x2456C8
+    // Wii: IsDoor, inlined on PS2: a portal of height 2 with the portal tree.
+    inline bool IsDoor(); // defined in cXObject.cpp
+    // Wii: IsWindow, inlined on PS2: a portal without the portal tree.
+    inline bool IsWindow(); // defined in cXObject.cpp
+    // Wii: IsGate, inlined on PS2: a portal of height 1 with the portal tree.
+    inline bool IsGate(); // defined in cXObject.cpp
+    // Wii: GetDef()->guid, the object definition's GUID (words 0xE and 0xF).
+    int GetGUID() const { return *(int *)&mDef[0xe]; }
+    // Wii: GetObstacleAtLocation, the first object on a tile that a Sim cannot pass, or a
+    // door it passed on the way when asked for one.
+    cXObject *GetObstacleAtLocation(FTilePt &tile, int level, bool doors); // 0x20FFB8
     // Wii: IsChair, whether the object has the tree at entry point 0x1a. Defined in
     // cXObject.cpp after GetTreeID, which it calls.
     inline bool IsChair();
     // Wii: GetDef as a function (0x245700 here too, called by GetStyle in
     // CalcRoomScoreImpact), GetStyle and SetData.
     s16 *GetDefOutOfLine(); // 0x245700
+    // Wii: GetFnTable, out of line on PS2 as well: UpdateWallAdjacency calls it.
+    ObjectFunctionTable *GetFnTableOutOfLine() const; // 0x2455F8
+    // Wii: RequiresWallAdjacency, inlined on PS2.
+    inline bool RequiresWallAdjacency() const; // defined in cXObject.cpp
     s16 GetStyle() { return GetDefOutOfLine()[0x15]; }
     void SetData(int index, s16 value) { mVars.WriteVar(index, value); }
     // Wii: GetData, a variable by index through the out-of-line operator[].
@@ -493,6 +690,10 @@ public:
     inline cXObject *GetObjectFromID(s16 id);
     s16 *GetDef() { return mDef; }
     ObjSelector *GetSelector() { return mSelector; }
+    // Wii: GetBehavior, the selector's tree set.
+    inline Behavior *GetBehavior(); // defined in cXObject.cpp
+    // Wii: GetPlacementInfo, PlacementSpec(this)'s fields one by one; the last is a bool on Wii.
+    void GetPlacementInfo(FTilePt *tile, int *level, cXObject **object, s16 *slot, int *valid); // 0x253520
     int RunTree(ObjEntryPoint entry, s16 a, s16 *param); // 0x253FD8
     // Wii: GetTreeID. The tree at an entry point, or 0. Defined in cXObject.cpp.
     inline int GetTreeID(ObjEntryPoint entry);
@@ -501,8 +702,25 @@ public:
     inline int RunTreeInline(ObjEntryPoint entry, s16 a, s16 *param);
     void SetLevel(int level);                            // 0x253EC8
     void SetLocation(const FTilePt &tile, int level);    // 0x212400
+    int GetLevelOutOfLine() const;                       // 0x253EC0  Wii: GetLevel
+    // Wii: Place(PlacementSpec *), a function on Wii that PS2 inlines into Pickup and Place:
+    // into the hierarchy at the spec's site, or out of it for an invalid spec.
+    inline void Place(PlacementSpec *spec); // defined in cXObject.cpp
+    // Wii: SimObjectPlaced, for a single-tile object once Place is done.
+    static void SimObjectPlaced(IBaseSimInstance *instance); // 0x21A750
     void UpdateSimFlags();                               // 0x253DC0
+    // Wii: CanChooseAutonomously.
+    bool CanChooseAutonomously();                        // 0x2149C0
     void SetWasPlacedByPlayer(bool placed);               // 0x253C98
+    bool GetWasPlacedByPlayer() const;                    // 0x253C68
+    // Wii: HierSever, out of whatever holds it; HierSetSite puts it at a site.
+    void HierSever();                                     // 0x210368
+    void HierSetSite(const HierarchySite *site);          // 0x210240
+    // Wii: HierGetObject, whatever is at a site already.
+    cXObject *HierGetObject(const HierarchySite *site);  // 0x210418
+    void UpdateAge();                                     // 0x20FEB0
+    // Wii: JustBorn, the creation date in variables 0x2D, 0x2E, 0x2F, 0x18 and 0x15.
+    void JustBorn();                                      // 0x20F840
     int CanPlaceSingleTile(const FTilePt &tile, int level, cXObject *object, int slot); // 0x253958
     // CanPlaceSingleTile's body: UserCanPlace has it inlined while CanPlace calls the
     // function. Defined in cXObject.cpp.
@@ -515,17 +733,32 @@ public:
     int GetPersonWidth() const { return gPersonWidth; }
     // Wii: HasZeroExtent, bit 2 of the flags variable; UpdateChairFacing skips such objects.
     int HasZeroExtent() const { return ((u16)mVars[8] >> 2) & 1; }
+    // Wii: CanIntersectPeople, inlined on PS2. Below HasZeroExtent, so that
+    // it inlines that too. A zero-extent object unless bit 1 of variable 8
+    // is set; anything else when bit 4 is.
+    int CanIntersectPeople() const
+    {
+        return (HasZeroExtent() ? ((u16)mVars[8] >> 1) ^ 1 : (u16)mVars[8] >> 4) & 1;
+    }
     // Wii: HierGetChild, the object in slot `slot`. GetNextObjectSibling is slot 0.
     cXObject *HierGetChild(int slot); // 0x253678
     cXObject *GetNextObjectSibling() { return HierGetChild(0); }
+    cXObject *GetNextObjectSiblingOutOfLine(); // 0x2535E0
     void UpdateWallAdjacency();         // 0x214098
+    // Wii: GetRequiredSegment, the wall side an object must stand against (2, 8 or 0).
+    int GetRequiredSegment();           // 0x253D00
+    // Wii: TestIntersection, whether the object fits at a tile without overlapping another.
+    int TestIntersection(FTilePt &tile, int level); // 0x211C50
     void UpdateChairFacing();           // 0x211978
     // Wii keeps this as a function; Turn inlines both calls. Defined in cXObject.cpp.
     static inline void UpdateChairFacing(ObjectModule *module, int x, int y, int level);
+    // The same as a function, which Pickup calls.
+    static void UpdateChairFacingOutOfLine(ObjectModule *module, int x, int y, int level); // 0x2539B0
     void CalcRoomScoreImpact();         // 0x21ADA0
     // Wii: sXDirTable and sYDirTable, a step in each of the eight directions, north first.
-    static int sXDirTable[8]; // 0x4927C8  0, 1, 1, 1, 0, -1, -1, -1
-    static int sYDirTable[8]; // 0x4927F0  -1, -1, 0, 1, 1, 1, 0, -1
+    // A ninth entry of 0, 0 is the tile itself: TestIntersection loops over all nine.
+    static int sXDirTable[9]; // 0x4927C8  0, 1, 1, 1, 0, -1, -1, -1, 0
+    static int sYDirTable[9]; // 0x4927F0  -1, -1, 0, 1, 1, 1, 0, -1, 0
 
     // Reads and writes one operand of an instruction: bhav.md lists the scopes. InterpValue
     // returns 1, or -1 once it has stopped the tree with an error.
@@ -535,6 +768,9 @@ public:
     // in cXObjectPrims.cpp). Wii keeps both as functions; PS2 inlines them.
     inline s16 GetValueFromShortOwnerCombo(u8 code);
     inline void SetValueInShortOwnerCombo(u8 code, s16 value);
+    // The game also keeps GetShortComboValue as a function (TryPassiveInfluence calls it);
+    // the inlined users call the free inline in cXObjectPrims.cpp.
+    void GetShortComboValueOutOfLine(u8 code, s16 *scope, s16 *data); // 0x255E60
     long TryExpression(ExpressionParam *param);
     inline void TryParticleEffect(ParticleEffectParam effect, long &result);
 
@@ -542,12 +778,16 @@ public:
     long TryTestObjectType(StackElem *, XPrimParam *);
     long TryIsPersonInArea(StackElem *, XPrimParam *);
     long TryFindGoodLocation(StackElem *, XPrimParam *, TFGL_ACTIONS *, FTilePt *, int *, s16 *);
+    // Wii: FindGoodLocation, the first tile out from a start where the object can be placed.
+    int FindGoodLocation(const FindGoodLocationParams &params, FTilePt *out); // 0x2139D8
     long TryRelationship2(StackElem *, XPrimParam *);
     long TrySetBalloon(StackElem *, XPrimParam *);
     long TryCallNamedTree(StackElem *, XPrimParam *);
     long TryMakeActionString(StackElem *, XPrimParam *);
     long TryGenericSimCall(StackElem *, XPrimParam *);
     f32 CalcShortDistance(cXObject *object) const;
+    // Wii: CalcShortDistanceIn16thsOfTiles, from tile centres for anything but a Sim.
+    f32 CalcShortDistanceIn16thsOfTiles(cXObject *object); // 0x212C08
     // The object in variable 0x1a, the one this is in. Wii: HierGetParent.
     cXObject *HierGetParent(); // 0x253640
     // Wii keeps this as a function; PS2 inlines it: none when variable 0xe is set.
@@ -562,6 +802,19 @@ public:
     // so that its GetObjectFromID is the inlined one.
     inline cXObject *GetContainerInline();
     cXObject *GetContainer();
+    // Wii: IsContained, GetContainerID and GetContainedSlotNum, each from PlacementSpec(this).
+    bool IsContained();                                  // 0x2536B0
+    s16 GetContainerID();                                // 0x2536D8
+    s16 GetContainedSlotNum();                           // 0x253708
+    // Wii: ExtractContainedSims. Every Sim held anywhere inside this object is cleaned up.
+    void ExtractContainedSims();                         // 0x253818
+    // The same as a function, which GetPlacementSpec calls.
+    cXObject *GetPrevObjectSiblingOutOfLine();           // 0x253600
+    // Wii: GetPlacementSpec, where the object is now: its tile when on the grid, its level,
+    // and the holder and slot of the first object in its chain of previous siblings.
+    void GetPlacementSpec(PlacementSpec *spec);          // 0x2100E0
+    // Wii: GetRootObject, the object that has a tile, or 0.
+    cXObject *GetRootObject(FTilePt &tile, int level);   // 0x2534B8
     long ShowAllObjectDialogs(StackElem *elem, XPrimParam *param);
     static void ChangeSelectedSimL();
     long TryDialog(StackElem *, XPrimParam *, bool);

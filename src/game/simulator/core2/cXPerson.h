@@ -219,7 +219,7 @@ public:
     eastl::vector<FTilePt, eastl::allocator> mPath; // 0x59c  8-byte tile points
     u32 pad_0x5ac[9];         // 0x5ac
     eastl::vector<XRoute, eastl::allocator> mRoutes; // 0x5d0  the last is current
-    int field_0x5e0;          // 0x5e0  XRoute::Construct clears it
+    cXObject *mIgnoredObject; // 0x5e0  Wii: IgnoringObject; XRoute::Construct clears it
     u32 pad_0x5e4;            // 0x5e4
     int mInRoutingQueue;      // 0x5e8  Wii: a byte at +0x5DA
     u32 pad_0x5ec;            // 0x5ec
@@ -275,6 +275,11 @@ public:
     RoutingState Routing_FoundGoals(bool &done, TreeReturnCode &code);
     RoutingState Routing_Initial(bool &done, TreeReturnCode &code);
     // Wii: IsGhost, inlined on PS2: person data 0xC, and bit 2 of the neighbour's word 0x2A.
+    // Wii: IgnoringObject, the object a route lets this Sim pass through.
+    cXObject *IgnoringObject() { return mIgnoredObject; }
+    // Wii: IsChimp and IsBoar, by the Sim's kind.
+    bool IsChimp(); // 0x1DD520
+    bool IsBoar();  // 0x1DD478
     bool IsGhost() { return mPersonData[0xc] ? ((u16)mNeighbor->mPersonData[0x2a] >> 2) & 1 : 0; }
     // Wii: GetPersonData. ComputeRect reads 0x21, the Sim's footprint offsets.
     s16 GetPersonData(int index) const { return mPersonData[index]; }

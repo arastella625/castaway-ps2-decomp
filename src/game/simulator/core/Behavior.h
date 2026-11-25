@@ -114,6 +114,8 @@ public:
     virtual void Slot2();
     virtual void Slot3();
     virtual int GetData(u32 kind, const ObjectDataID &id, void *result);
+    // The fifth entry: the same, by resource file alone (SlotLoader::Load). The name is ours.
+    virtual int GetDataByResFile(u32 kind, u32 resFile, void *result);
 };
 ISmartDataFactory *GetSmartDataFactory();
 

@@ -61,6 +61,9 @@ public:
 
     int GetPlayerCheatsValue();
     void SetFunds(int funds); // 0x1E0E98
+    PassiveInfluenceSystem *GetPassiveInfluenceSystem() { return mPassiveInfluence; }
+    // Wii: RemoveAllForListener, the pending events an object was listening for.
+    void RemoveAllForListener(u16 listenerID); // 0x1BF890
     void AddFunds(int amount) { SetFunds(mFunds + amount); }
 
     bool GetGlobalRef(s16 index, const s16 **ref)

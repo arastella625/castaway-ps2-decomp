@@ -2,6 +2,7 @@
 
 #include "game/GameData.h"
 #include "game/UIDB.h"
+#include "game/simulator/core/PassiveInfluenceSystem.h"
 
 #include "common/EGlobal.h"
 #include "common/EVec3.h"
@@ -63,13 +64,6 @@ public:
 };
 }
 
-class AnimRef;
-class PassiveInfluenceSystem {
-public:
-    void SetSkillNameID(cXObject *object, const AnimRef *anim);
-    void ClearInfluenceMotiveDeltas(cXObject *object);
-    void SetInfluenceMotiveDelta(cXObject *object, u8 motive, f32 delta, s16 limit, s8 type);
-};
 
 inline u32 Behavior::GetNamespaceIDInline()
 {
@@ -1891,33 +1885,6 @@ EVec3 IsoFracsToWorld(const f32 &x, const f32 &y, const f32 &z);
 EVec3 IsoToWorld(const FTilePt &tile, const f32 &z);
 FTilePt WorldToIso(const EVec3 &world);
 
-// Wii: OffsetCoordsInDirection.
-inline void OffsetCoordsInDirection(int direction, int &x, int &y)
-{
-    switch (direction & 7) {
-    case 1:
-        x += 1;
-    case 0:
-        y -= 1;
-        break;
-    case 3:
-        y += 1;
-    case 2:
-        x += 1;
-        break;
-    case 5:
-        x -= 1;
-    case 4:
-        y += 1;
-        break;
-    case 7:
-        y -= 1;
-    case 6:
-        x -= 1;
-        break;
-    }
-}
-
 // Wii: FTilePt::FTilePt(int), one tile in a direction.
 class DirectionTile : public FTilePt {
 public:
@@ -3412,3 +3379,184 @@ long cXObject::TryGenericSimCall(StackElem *elem, XPrimParam *primParam)
     return result;
 }
 #endif
+
+// 0x2389E8. Wii: TryDrop. The object held in slot 0 goes down on the tile ahead, if it fits.
+long cXObject::TryDrop()
+{
+    cXObject *held = GetContainedObject(0);
+    if (held == 0)
+        return 0;
+    FTilePt tile;
+    int level = mLevel;
+    tile = GetLocationRef();
+    tile += FTilePt(GetData(1));
+    if (held != 0 && held->CanPlace(tile, level, 0, 0)) {
+        held->Place(tile, level, 0, 0);
+        return 1;
+    }
+    return 0;
+}
+
+// The operands of the HUD-manage primitive: two operands and an operation.
+class HUDManageParam {
+public:
+    s16 mInstanceData; // 0x00
+    u8 mInstanceOwner; // 0x02  the scope of the instance operand
+    u8 mOperation;     // 0x03
+    s16 mPlayerData;   // 0x04
+    u8 mPlayerOwner;   // 0x06  the scope of the player operand
+};
+
+// 0x23A0A0. Wii: TryHUDManage. Reads the HUD instance and player operands and passes them to
+// the HUD with the operation; false without a HUD or when an operand cannot be read.
+long cXObject::TryHUDManage(StackElem *elem, XPrimParam *primParam)
+{
+    HUDManageParam *param = (HUDManageParam *)primParam;
+    s16 values[2];
+    if (_gd.mHudTarget == 0)
+        return 0;
+    if (InterpValue(param->mInstanceOwner, param->mInstanceData, 0, 0, &values[0], 0) == -1)
+        return 0;
+    if (InterpValue(param->mPlayerOwner, param->mPlayerData, 0, 0, &values[1], 0) == -1)
+        return 0;
+    // As early returns: != 0 or a bool gives sltu, the game sets 1 and clears it with movz.
+    if (_gd.mHudTarget->ManageHUD(values[0], param->mOperation, values[1]))
+        return 1;
+    return 0;
+}
+
+// The operands of the preload primitive: an object GUID, and bit 0 to unload instead.
+class PreloadObjectParam {
+public:
+    int mGUID;   // 0x00
+    u16 mFlags;  // 0x04  read with lhu
+
+    bool GetUnload() const { return mFlags & 1; }
+};
+
+// 0x22B668. Wii: TryPreloadObject. Unloads unused object data, or preloads the data of the
+// object with the GUID: true when it is loaded, 2 when the preload is under way, false for
+// no GUID or an unknown one.
+long cXObject::TryPreloadObject(StackElem *elem, XPrimParam *primParam)
+{
+    PreloadObjectParam *param = (PreloadObjectParam *)primParam;
+    ObjectFolder *folder = GetObjectFolder();
+    if (param->GetUnload()) {
+        folder->FreeUnusedData();
+        return 1;
+    }
+    if (param->mGUID != 0) {
+        ObjSelector *selector = folder->GetSelectorByGUIDInline(param->mGUID);
+        if (selector != 0) {
+            if (folder->ForceDataPreload(selector, false))
+                return 1;
+            return 2;
+        }
+    }
+    return 0;
+}
+
+// 0x255E60. GetShortComboValue as a function.
+void cXObject::GetShortComboValueOutOfLine(u8 code, s16 *scope, s16 *data)
+{
+    GetShortComboValue(code, scope, data);
+}
+
+// The operands of the passive influence primitive.
+class PassiveInfluenceParam {
+public:
+    s16 mObjectData; // 0x00  the object, with mObjectScope
+    s8 mObjectScope; // 0x02  signed: lb
+    u8 field_0x3;    // 0x03
+    u8 mOperation;   // 0x04  5 removes the object from the map
+    u8 mCountCode;   // 0x05  a short combo code (GetShortComboValue)
+    u8 mFlags;       // 0x06
+
+    // Wii: GetTriggerTreeFlag and GetLockoutObjectFlag, bits 5 and 6.
+    bool GetTriggerTreeFlag() const { return (mFlags >> 5) & 1; }
+    bool GetLockoutObjectFlag() const { return (mFlags >> 6) & 1; }
+};
+
+// 0x234160. Wii: TryPassiveInfluence. Removes an object from the passive influence map, or
+// adds it with a count (at most 0x20) and temps 0 and 1 as the trigger tree and lockout
+// object when their flags are set. An unreadable object operand clears the stack object.
+long cXObject::TryPassiveInfluence(StackElem *elem, XPrimParam *primParam)
+{
+    PassiveInfluenceParam *param = (PassiveInfluenceParam *)primParam;
+    s16 id;
+    s16 scope;
+    s16 data;
+    s16 count;
+    if (InterpValue(param->mObjectScope, param->mObjectData, 0, 0, &id, 0) == -1) {
+        elem->mStackObject = 0;
+        return -1;
+    }
+    cXObject *object = GetObjectModule()->GetObjectFromIDInline(id);
+    if (param->mOperation == 5) {
+        GetSimulator()->GetPassiveInfluenceSystem()->RemoveObjectFromMap(object);
+        return 1;
+    }
+    count = 0;
+    GetShortComboValueOutOfLine(param->mCountCode, &scope, &data);
+    if (InterpValue(scope, data, 0, 0, &count, 0) == -1)
+        return -1;
+    if (count > 0x20)
+        count = 0x20;
+    s16 trigger = 0;
+    s16 lockout = 0;
+    if (param->GetTriggerTreeFlag())
+        trigger = mTemps[0];
+    if (param->GetLockoutObjectFlag())
+        lockout = mTemps[1];
+    GetSimulator()->GetPassiveInfluenceSystem()->AddObjectToMap(object, param->field_0x3, param->mOperation,
+                                                                count, param->mFlags, trigger, lockout);
+    return 1;
+}
+
+// The operands of the user-event primitive.
+class UserEventParam {
+public:
+    s16 mTimeout; // 0x00  the timeout operand's data
+    u16 pad_0x2;  // 0x02
+    u8 mFlags;    // 0x04  bit 5 the timeout is a local (scope 0x19), else a literal (7)
+    u8 mString;   // 0x05  a string in set 0x131 of the tree's resource file, 0 for none
+
+    // Wii: GetTimoutUsesLocal.
+    bool GetTimeoutUsesLocal() const { return (mFlags >> 5) & 1; }
+};
+
+// 0x2243D8. Wii: TryUserEvent. A two-pass primitive: the first pass returns 2 (run again),
+// the second reads the timeout and the stack object (error 0x17 if it is gone), loads the
+// string, if any, from set 0x131 of the tree's resource file and parses it as UI text, then
+// returns 2; a later pass returns 1. PS2 drops the Wii's four flag reads after the parse.
+long cXObject::TryUserEvent(StackElem *elem, XPrimParam *primParam)
+{
+    UserEventParam *param = (UserEventParam *)primParam;
+    if (elem->mWaiting == 0) {
+        elem->mWaiting = 1;
+        return 2;
+    }
+    if (elem->mWaiting != 1)
+        return 1;
+    elem->mWaiting = 2;
+    cXObject *object = GetObjectFromID(elem->mStackObject);
+    OBJECT_ERROR_CHECK(object, 0x17);
+    s16 timeout;
+    if (InterpValue(param->GetTimeoutUsesLocal() ? 0x19 : 7, param->mTimeout, 0, 0, &timeout, 0) == -1)
+        return -1;
+    BString2 text;
+    if (param->mString != 0) {
+        AUTOPTR<StringSet> strings;
+        strings.CreateInstance();
+        u32 resFile = elem->mBehavior->GetResFileID(elem->GetTreeID());
+        if (resFile != (u32)-1) {
+            strings->Load(resFile, 0x131);
+            ELocString loc = strings->GetLocString(param->mString);
+            if ((const u16 *)loc)
+                text.assign((const u16 *)loc);
+        }
+    }
+    if (text.length())
+        ParseUIString(text, elem, 0, 0, false);
+    return 2;
+}
